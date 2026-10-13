@@ -1,0 +1,24 @@
+node_modules/
+dist/
+.env
+*.local
+data/
+certs/
+.expo/
+apps/mobile/node_modules/
+!.env.example
+visionline-probe-report/
+local-test/
+*.dump
+backups/
+*.log
+.DS_Store
+Thumbs.db
+
+# ASSA ABLOY SDK and app builds: licensed, never committed (docs/MOBILE-ACCESS-SDK.md)
+vendor-sdk/
+*.aar
+*.xcframework/
+*.ipa
+*.apk
+*.xapk
