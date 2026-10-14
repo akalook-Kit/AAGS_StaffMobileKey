@@ -1,0 +1,54 @@
+# Render Blueprint: the Staff Mobile Key platform (API + admin portal in one web service) and its database.
+# The hotel connector is NOT hosted here: it runs on the Visionline PC and connects out to this service.
+# Guide: docs/DEPLOY-RENDER.md
+#
+# Free plans are for a quick look only: Render puts free web services to sleep after 15 minutes without
+# traffic and deletes free databases 30 days after creation. Use paid plans for a pilot.
+services:
+  - type: web
+    name: staff-mobile-key
+    runtime: docker
+    region: frankfurt          # cannot be changed later; frankfurt is the closest Render region to Cameroon and Kenya
+    plan: 0.5c-512mb           # "free" works for a demo (see above)
+    dockerfilePath: ./Dockerfile
+    dockerContext: ./
+    # Migrations + K Hotel Bana settings + first administrator (only while no operator exists), then the API.
+    dockerCommand: sh -c "cd apps/backend && npx tsx src/provision.ts && exec npx tsx src/main.ts"
+    healthCheckPath: /healthz
+    numInstances: 1            # the platform keeps some state in memory (sign-in throttling, callback status): one instance
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: staff-mobile-key-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CALLBACK_SECRET
+        generateValue: true
+      - key: PORTAL_DIST
+        value: /app/apps/portal/dist
+      - key: HOTEL_TIMEZONE
+        value: Africa/Douala
+      - key: CS_BASE_URL
+        value: https://hospitality.credential-services.api.assaabloy.com
+      # Asked for once when the Blueprint is created. Leave the Credential Services ones empty until the hotel
+      # is ready: with them set, the platform registers its callbacks with ASSA ABLOY Credential Services.
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: SECRET_CS_TENANT_USER
+        sync: false
+      - key: SECRET_CS_TENANT_PASSWORD
+        sync: false
+
+databases:
+  - name: staff-mobile-key-db
+    region: frankfurt
+    plan: 0.1c-256mb           # "free" expires after 30 days
+    postgresMajorVersion: "16"
+    databaseName: smk
+    user: smk
+    ipAllowList: []            # reachable only from services in this Render account, never from the internet

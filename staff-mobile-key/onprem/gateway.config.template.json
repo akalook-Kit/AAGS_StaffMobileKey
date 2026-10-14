@@ -1,0 +1,16 @@
+{
+  "_comment": "Written by install-onprem.ps1 to C:\\ProgramData\\StaffMobileKey\\Platform\\gateway.config.json. Edit there, then Restart-Service StaffMobileKeyGateway.",
+  "upstream": "http://127.0.0.1:4000",
+  "secretPath": "/k-<generated, at least 20 random characters>",
+  "cookieKeyEnv": "GATEWAY_COOKIE_KEY",
+  "passHours": 12,
+  "banAfter": 20,
+  "banMinutes": 30,
+  "logFile": "C:\\ProgramData\\StaffMobileKey\\Platform\\logs\\gateway-access.log",
+  "listeners": [
+    { "name": "lan", "host": "0.0.0.0", "port": 8443, "tls": { "pfx": "C:\\ProgramData\\StaffMobileKey\\Platform\\tls\\gateway.pfx", "passphraseEnv": "GATEWAY_PFX_PASSPHRASE" },
+      "allow": ["private"], "requireSecretPath": false },
+    { "name": "external", "host": "0.0.0.0", "port": 9443, "tls": { "pfx": "C:\\ProgramData\\StaffMobileKey\\Platform\\tls\\gateway.pfx", "passphraseEnv": "GATEWAY_PFX_PASSPHRASE" },
+      "allow": ["41.202.219.10/32"], "requireSecretPath": true }
+  ]
+}

@@ -1,0 +1,124 @@
+# Local test environment, isolated from other apps on the same PC.
+# All names, ports and limits come from .env (copy .env.example to .env, or run scripts\windows\start.ps1).
+#
+#   Portal + API      http://localhost:${SMK_PORTAL_PORT}   (default 14080)
+#   Lock simulator    http://localhost:${SMK_SIM_PORT}      (default 14444)
+#   Connector admin   http://localhost:${SMK_CONNECTOR_PORT} (default 14090, user "admin", password local-admin)
+#
+# Isolation: own project name (prefixes every container, volume and network), own network,
+# database NOT published to the host, ports bound to 127.0.0.1 unless SMK_BIND=0.0.0.0 (phone testing),
+# memory/CPU limits, and no automatic restart unless SMK_RESTART=unless-stopped.
+name: ${COMPOSE_PROJECT_NAME:-khb-staffkey}
+
+x-app: &app
+  build: .
+  image: ${COMPOSE_PROJECT_NAME:-khb-staffkey}:dev
+  restart: ${SMK_RESTART:-no}
+  networks: [smk]
+  environment: &env
+    HOTEL_TIMEZONE: ${HOTEL_TIMEZONE:-Africa/Douala}
+
+services:
+  db:
+    image: postgres:16
+    restart: ${SMK_RESTART:-no}
+    networks: [smk]
+    environment:
+      POSTGRES_USER: smk
+      POSTGRES_PASSWORD: smk
+      POSTGRES_DB: smk
+    volumes: [pgdata:/var/lib/postgresql/data]
+    # No "ports": the database is reachable only by the other containers, so it never clashes with a
+    # PostgreSQL you may already run on 5432.
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smk"]
+      interval: 3s
+      retries: 30
+
+  # Stand-in for the hotel's Visionline server and ASSA ABLOY Credential Services. Not used with a real hotel.
+  simulator:
+    <<: *app
+    working_dir: /app/apps/simulator
+    command: ["npx", "tsx", "src/main.ts"]
+    environment:
+      <<: *env
+      CERT_DIR: /certs
+      VL_HOSTNAMES: simulator,localhost
+      SIM_DELIVERY_DELAY_MS: "1500"
+    volumes: [certs:/certs]
+    # Lock simulator page / phone SDK port, and the simulated Visionline Web API for a connector installed on
+    # this PC as a Windows service (docs/CONNECTOR-LOCAL-TEST.md). The Visionline port is always this-PC-only.
+    ports: ["${SMK_BIND:-127.0.0.1}:${SMK_SIM_PORT:-14444}:8444", "127.0.0.1:${SMK_VL_PORT:-14443}:8443"]
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8444/sim/state').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      retries: 40
+
+  backend:
+    <<: *app
+    working_dir: /app/apps/backend
+    # Seed is idempotent and only for local testing.
+    command: ["sh", "-c", "npx tsx src/seed.ts && npx tsx src/main.ts"]
+    depends_on:
+      db: { condition: service_healthy }
+      simulator: { condition: service_healthy }
+    environment:
+      <<: *env
+      DATABASE_URL: postgres://smk:smk@db:5432/smk
+      JWT_SECRET: ${JWT_SECRET:-dev-only-jwt-secret-change-me-0123456789}
+      CALLBACK_SECRET: ${CALLBACK_SECRET:-dev-callback-secret}
+      PUBLIC_URL: ${PUBLIC_URL:-http://backend:4000}
+      PORTAL_DIST: /app/apps/portal/dist
+      CORS_ORIGINS: http://localhost:${SMK_EXPO_PORT:-14081}
+      CS_BASE_URL: http://simulator:8444/cs
+      # Credential Services user/password. Defaults are the simulator's; a pilot sets real ones in .env (never committed).
+      SECRET_CS_TENANT_USER: ${SECRET_CS_TENANT_USER:-khb-tenant}
+      SECRET_CS_TENANT_PASSWORD: ${SECRET_CS_TENANT_PASSWORD:-dev-tenant-password}
+      LOG_LEVEL: info
+    ports: ["${SMK_BIND:-127.0.0.1}:${SMK_PORTAL_PORT:-14080}:4000"]
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      retries: 60
+
+  # In production this runs as a Windows service ON the Visionline PC (docs/CONNECTOR-WINDOWS-SERVICE.md).
+  connector:
+    <<: *app
+    working_dir: /app/apps/connector
+    command: ["npx", "tsx", "src/main.ts"]
+    depends_on:
+      backend: { condition: service_healthy }
+      simulator: { condition: service_healthy }
+    environment:
+      <<: *env
+      PLATFORM_URL: http://backend:4000
+      CONNECTOR_DATA_DIR: /data
+      VL_BASE_URL: https://simulator:8443/api/v1
+      VL_CA_FILE: /certs/ca.crt
+      LOCAL_ADMIN_HOST: 0.0.0.0
+      # Development only: imported once into the encrypted secret store. On a real Visionline PC, enter them on the setup page.
+      PLATFORM_TOKEN: smkc_dev_khb_connector_token_change_me
+      VL_USERNAME: smk-operator
+      VL_PASSWORD: dev-operator-password
+      VL_ACCESS_ID: khb-connector
+      CONNECTOR_ADMIN_PASSWORD: local-admin
+    volumes: [certs:/certs:ro, connector-data:/data]
+    # Always local-only: this page holds Visionline credentials.
+    ports: ["127.0.0.1:${SMK_CONNECTOR_PORT:-14090}:8090"]
+    mem_limit: 256m
+    cpus: 0.5
+
+networks:
+  smk:
+    name: ${COMPOSE_PROJECT_NAME:-khb-staffkey}-net
+
+volumes:
+  pgdata:
+  certs:
+  connector-data:
