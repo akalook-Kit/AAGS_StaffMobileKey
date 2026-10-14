@@ -1,0 +1,12 @@
+{
+  "name": "@smk/connector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "K Hotel Bana hotel connector: runs on the Visionline PC, talks to the local Visionline Web API and makes outbound HTTPS calls to the platform.",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": { "@smk/shared": "0.1.0", "zod": "^4.6.6" }
+}

@@ -1,0 +1,17 @@
+{
+  "$comment": "Build-time identity for one branded edition (spec \u00a713.5). Runtime colours, wording and logo come from the portal.",
+  "tenant": "k-hotel-bana",
+  "displayName": "K Hotel Staff Key",
+  "slug": "khb-staff-key",
+  "iosBundleId": "com.khotelbana.staffkey",
+  "androidPackage": "com.khotelbana.staffkey",
+  "primaryColor": "#050505",
+  "splashBackground": "#050505",
+  "icon": "./tenants/k-hotel-bana/icon.png",
+  "adaptiveIcon": "./tenants/k-hotel-bana/adaptive-icon.png",
+  "splash": "./tenants/k-hotel-bana/splash.png",
+  "hotelCode": "k-hotel-bana",
+  "version": "0.1.0",
+  "buildNumber": 1,
+  "$assets": "Interim icon and splash made from the 257x90 logo. Replace icon.png (1024x1024), adaptive-icon.png and splash.png with versions from the full-resolution logo before any store release."
+}
