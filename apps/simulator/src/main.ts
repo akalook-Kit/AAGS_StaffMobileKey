@@ -4,6 +4,7 @@ import { ensureDevCerts } from './certs.ts';
 import { registerVisionline } from './visionline.ts';
 import { registerCredentialServices, lifecycle } from './credential-services.ts';
 import { simPage } from './ui.ts';
+import { registerOutbox } from './outbox.ts';
 
 const env = (k: string, d: string) => process.env[k] ?? d;
 
@@ -46,6 +47,11 @@ registerCredentialServices(cs, st, {
   send, log, systemId, timeZone: env('HOTEL_TIMEZONE', 'Africa/Douala'), onRevoke: lc.onCardRevoked,
 });
 cs.get('/', async (_req, reply) => reply.type('text/html').send(simPage()));
+// Alert e-mail and SMS test sinks (2.7 monitoring): SMTP on SIM_SMTP_PORT, SMS gateways on this HTTP server.
+if (!cs.hasContentTypeParser('application/x-www-form-urlencoded')) {
+  cs.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) => done(null, Object.fromEntries(new URLSearchParams(String(body)))));
+}
+registerOutbox(cs, log, Number(env('SIM_SMTP_PORT', '2525')), env('SIM_SMS_USER', 'sms'), env('SIM_SMS_PASSWORD', 'sms-dev-password'));
 
 const host = env('HOST', '0.0.0.0');
 await vl.listen({ port: Number(env('VL_PORT', '8443')), host });

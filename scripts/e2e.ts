@@ -546,6 +546,93 @@ async function main() {
   const def = await call('GET', `${API}/mobile/v1/config?hotel=default`);
   ok(def.status === 200 && def.json.hotel.slug, `sign-in page and app find this installation's hotel without a built-in hotel code (${def.json.hotel?.slug})`);
 
+  // ---- 2.7: monitoring, e-mail/SMS alerts, doors offline, VIP doors, disk and database ---------------------
+  console.log('\n2.7: monitoring - doors offline, watched (VIP) doors, disk and database, e-mail and SMS');
+  const maint27 = await login('maint@khb.test');
+  ok((await call('GET', `${H}/monitoring`, tech)).status === 403, 'a technician cannot open Monitoring');
+  ok((await call('GET', `${H}/monitoring`, maint27)).status === 200 && (await call('GET', `${H}/monitoring/contacts`, maint27)).status === 403, 'the maintenance manager sees Monitoring but cannot change who is told');
+  // Start from a quiet state (the test machine itself may be low on disk space).
+  const pol27 = (await call('GET', `${H}/config/policy`, admin)).json.data;
+  await call('PUT', `${H}/config/policy`, admin, { ...pol27, monitoring: { ...(pol27.monitoring ?? {}), diskMinFreeGb: 1 } });
+  await call('POST', `${H}/monitoring/check`, admin, {});
+  await call('DELETE', `${SIM}/sim/outbox`);
+  const outbox27 = async () => (await call('GET', `${SIM}/sim/outbox`)).json as any[];
+  const contacts27 = (await call('GET', `${H}/monitoring/contacts`, admin)).json;
+  ok(contacts27.contacts.some((c: any) => c.name === 'Duty manager (test)' && c.byEmail && c.bySms), 'test contact told by e-mail and SMS');
+  ok((await call('POST', `${H}/monitoring/contacts`, admin, { name: 'Bad number', phone: '0712 345', bySms: true, byEmail: false, categories: ['system'] })).status === 400, 'phone numbers must be in international form');
+  ok((await call('POST', `${H}/monitoring/contacts`, admin, { name: 'Nobody', byEmail: true, categories: [] })).status === 400, 'a contact needs at least one kind of alert');
+  const testRes = await call('POST', `${H}/monitoring/test`, admin, {});
+  ok(testRes.status === 200 && testRes.json.sent >= 2 && testRes.json.failed === 0, `test message sent (${testRes.json.sent} messages)`, testRes.json);
+  const tb27 = await until('test messages', outbox27, (o) => o.filter((m: any) => /Test message/.test(m.subject ?? m.text)).length >= 2, 20_000);
+  ok(tb27.some((m: any) => m.via === 'email' && m.to.includes('duty@khb.test')) && tb27.some((m: any) => m.via.startsWith('sms') && m.to.includes('+237600000001')), 'e-mail through SMTP and SMS through the Android gateway arrive');
+
+  const tight27 = { ...pol27, monitoring: { ...(pol27.monitoring ?? {}), dbMaxMb: 1, diskMinFreeGb: 100_000, notify: { cooldownMinutes: 0, sendResolved: true }, doorOffline: { ...(pol27.monitoring?.doorOffline ?? {}), enabled: true, offlineEventCodes: [9001], onlineEventCodes: [9002] } } };
+  ok((await call('PUT', `${H}/config/policy`, admin, tight27)).status === 200, 'thresholds: database 1 MB, free disk 100,000 GB, lock offline/online codes 9001/9002');
+  await call('POST', `${H}/monitoring/check`, admin, {});
+  let mon27 = (await call('GET', `${H}/monitoring`, gm)).json;
+  const diskAlert = mon27.alerts.find((a: any) => a.kind === 'disk_low');
+  ok(diskAlert?.severity === 'critical' && mon27.system.disks[0].low === true, `low disk space raises a critical (red) alert: ${diskAlert?.title}`);
+  ok(mon27.alerts.some((a: any) => a.kind === 'db_large' && a.severity === 'warning'), `database above its limit raises a warning (${Math.round(mon27.system.database.bytes / 1048576)} MB, largest table ${mon27.system.database.tables[0]?.name})`);
+  ok((await call('GET', `${H}/monitoring/banner`, gm)).json.some((a: any) => a.kind === 'disk_low'), 'a red band about the disk shows on every portal page');
+  await until('disk e-mail', outbox27, (o) => o.some((m: any) => /Disk space low/.test(m.subject ?? '')), 20_000);
+  ok((await outbox27()).some((m: any) => m.via.startsWith('sms') && /Disk space low/.test(m.text)), 'the IT contact gets the disk alert by e-mail and SMS');
+  ok((await call('POST', `${H}/monitoring/alerts/${diskAlert.id}/acknowledge`, gm, {})).status === 403 && (await call('POST', `${H}/monitoring/alerts/${diskAlert.id}/acknowledge`, security, {})).status === 200, 'security can mark an alert as seen (management cannot)');
+  await call('POST', `${H}/monitoring/check`, admin, {});
+  ok((await call('GET', `${H}/monitoring/banner`, gm)).json.some((a: any) => a.kind === 'disk_low'), 'a seen disk alert stays red until the disk is fixed');
+  const before27 = (await outbox27()).length;
+  await call('POST', `${H}/monitoring/check`, admin, {});
+  ok((await outbox27()).length === before27, 'an open alert is not sent again every minute');
+
+  // A lock reports "offline" (hotel-defined code); the connector starts listening for it after the policy change.
+  const offEv27 = await until('lock offline event recorded', async () => {
+    await call('POST', `${SIM}/sim/doors/102/event`, undefined, { code: 9001 });
+    await sleep(3000);
+    return call('GET', `${H}/events?from=${new Date(Date.now() - 600_000).toISOString()}&to=${new Date(Date.now() + 60_000).toISOString()}&cls=errors&q=offline`, auditor);
+  }, (r) => r.json.events?.some((e: any) => e.event === 'Lock went offline'), 120_000);
+  ok(offEv27.json.events.some((e: any) => e.event === 'Lock went offline' && e.door === '102'), 'the connector picked up the new offline code; the event log shows "Lock went offline" (error)');
+  await call('POST', `${H}/monitoring/check`, admin, {});
+  mon27 = (await call('GET', `${H}/monitoring`, gm)).json;
+  const doorAlert27 = mon27.alerts.find((a: any) => a.kind === 'door_offline');
+  ok(doorAlert27?.severity === 'critical' && /102/.test(doorAlert27.title) && mon27.doors.offline >= 1, `door offline alert: ${doorAlert27?.title}`);
+  await until('door offline SMS', outbox27, (o) => o.some((m: any) => m.via.startsWith('sms') && /Door offline: 102/.test(m.text)), 20_000);
+  ok(true, 'door offline announced by SMS and e-mail');
+  await until('lock online event recorded', async () => {
+    await call('POST', `${SIM}/sim/doors/102/event`, undefined, { code: 9002 });
+    await sleep(2500);
+    await call('POST', `${H}/monitoring/check`, admin, {});
+    return call('GET', `${H}/monitoring`, gm);
+  }, (r) => !r.json.alerts.some((a: any) => a.kind === 'door_offline'), 60_000);
+  ok(true, 'the lock reports back online: the alert closes');
+  await until('resolved message', outbox27, (o) => o.some((m: any) => /Resolved: Door offline: 102/.test(m.subject ?? m.text)), 20_000);
+  ok(true, 'contacts are told that the door is back');
+
+  // Watched (VIP) door: first entrance of the day is announced once.
+  ok((await call('POST', `${H}/monitoring/watched-doors`, tech, { doorId: 'GM Office', label: 'VIP' })).status === 403, 'a technician cannot set watched doors');
+  ok((await call('POST', `${H}/monitoring/watched-doors`, security, { doorId: 'No such door', label: 'VIP' })).status === 400, 'only doors read from Visionline can be watched');
+  const watchRes = await call('POST', `${H}/monitoring/watched-doors`, security, { doorId: 'GM Office', label: 'VIP - GM Office', mode: 'first_daily' });
+  ok(watchRes.status === 200, 'security sets GM Office as a watched (VIP) door');
+  ok((await tap(briceOb.me.endpoint.endpointId, 'GM Office')).result === 'OPENED', 'Brice opens the GM Office');
+  const vipRes = await until('VIP entrance', () => call('GET', `${H}/monitoring/alerts?kind=vip_entrance`, gm), (r) => r.json.length >= 1, 60_000);
+  ok(/First entrance at VIP - GM Office/.test(vipRes.json[0]?.title) && /Brice/.test(vipRes.json[0]?.detail ?? ''), `VIP alert: ${vipRes.json[0]?.title} - ${vipRes.json[0]?.detail}`);
+  await until('VIP SMS', outbox27, (o) => o.some((m: any) => m.via.startsWith('sms') && /First entrance at VIP - GM Office/.test(m.text)), 20_000);
+  ok(true, 'the first entrance is announced by SMS and e-mail');
+  await tap(briceOb.me.endpoint.endpointId, 'GM Office');
+  await sleep(6000);
+  ok((await call('GET', `${H}/monitoring/alerts?kind=vip_entrance`, gm)).json.length === 1, 'the second entrance the same day is not announced again (first entrance each day)');
+  const evVip27 = await call('GET', `${H}/events?from=${new Date(Date.now() - 600_000).toISOString()}&to=${new Date(Date.now() + 60_000).toISOString()}&cls=entrances`, gm);
+  ok(evVip27.json.events.some((e: any) => e.watched === 'VIP - GM Office'), 'the event log highlights entrances at the watched door');
+  const sumv27 = (await call('GET', `${H}/monitoring/summary`, gm)).json;
+  ok(sumv27.watched[0]?.last_entrance_at && sumv27.alerts.critical >= 1, 'the Overview shows open alerts and the last VIP entrance');
+
+  // Back to normal limits (1 GB here, because the test machine itself may have little free space).
+  await call('PUT', `${H}/config/policy`, admin, { ...pol27, monitoring: { ...(pol27.monitoring ?? {}), diskMinFreeGb: 1 } });
+  await call('POST', `${H}/monitoring/check`, admin, {});
+  mon27 = (await call('GET', `${H}/monitoring`, gm)).json;
+  ok(!mon27.alerts.some((a: any) => a.kind === 'disk_low' || a.kind === 'db_large') && !(await call('GET', `${H}/monitoring/banner`, gm)).json.length, 'back to normal limits: disk and database alerts close and the red band goes away');
+  const msgs27 = (await call('GET', `${H}/monitoring/messages`, gm)).json;
+  ok(msgs27.length > 0 && !msgs27.some((m: any) => m.recipient.includes('duty@khb.test') || m.recipient.includes('+237600000001')), 'the message log keeps addresses and numbers masked');
+  ok((await call('GET', `${H}/monitoring`, lakeAdmin)).status === 403, 'another hotel cannot see K Hotel Bana monitoring');
+
   console.log('\nGate: every request is traceable without exposing secrets');
   const trail = (await call('GET', `${H}/keys/${keyId}`, issuer)).json;
   const kt = await call('GET', `${H}/keys/${keyId}`, auditor);

@@ -30,7 +30,10 @@ async function connectorAuth(req: FastifyRequest) {
 async function watchSettings(hotelId: string) {
   const policy = await getConfig(pool, hotelId, 'policy');
   const el = policy?.eventLog ?? { recordEntrances: true, entranceEventCodes: [64] };
-  return { extraEventCodes: el.recordEntrances ? [...new Set<number>(el.entranceEventCodes ?? [64])].sort((a, b) => a - b) : [] };
+  // 2.7 monitoring: the hotel's "lock offline" / "lock online" codes, if it set any.
+  const mon = policy?.monitoring?.doorOffline;
+  const codes = [...(el.recordEntrances ? el.entranceEventCodes ?? [64] : []), ...(mon?.enabled !== false ? [...(mon?.offlineEventCodes ?? []), ...(mon?.onlineEventCodes ?? [])] : [])];
+  return { extraEventCodes: [...new Set<number>(codes)].sort((a, b) => a - b) };
 }
 
 export function connectorRoutes(app: FastifyInstance) {

@@ -4,7 +4,7 @@ import { api, download } from '../api';
 import { useHotel } from '../App';
 import { Drawer, ErrorNote, fmt, useApi } from '../ui';
 import { PrintFrame } from '../components/PrintFrame';
-import { DataTable, HBars, Kpi, Legend, Lines, SERIES, StatusBar, VizCard, fmtN, type BarRow } from '../components/charts';
+import { DataTable, NoData, HBars, Kpi, Legend, Lines, SERIES, StatusBar, VizCard, fmtN, type BarRow } from '../components/charts';
 
 /**
  * Insights: a Power BI–style report canvas for hotel management. One filter row scopes every visual below it
@@ -140,7 +140,8 @@ const cardSeries = [{ name: 'Mobile keys (this platform)', color: SERIES[0] }, {
 const lockSeries = [{ name: 'Alarms', color: SERIES[0] }, { name: 'Refused entries', color: SERIES[1] }, { name: 'Battery events', color: SERIES[2] }];
 
 function NoSnapshot({ on }: { on: boolean }) {
-  return <div className="viz-empty">{on ? 'Visionline has not been read yet. Use "Read Visionline now", or wait for the scheduled read.' : <>People and keycards come from Visionline once the hotel switches it on: <Link to="/settings?tab=reports">Settings → Reports & sync</Link>.</>}</div>;
+  if (on) return <NoData text="Visionline has not been read yet" hint='Use "Read Visionline now", or wait for the scheduled read. Still looking.' />;
+  return <div className="viz-empty">{<>People and keycards come from Visionline once the hotel switches it on: <Link to="/settings?tab=reports">Settings → Reports & sync</Link>.</>}</div>;
 }
 function GroupTable({ rows }: { rows: any[] }) {
   return <DataTable head={['User group', 'People', 'Valid cards', 'Mobile keys', 'Other cards', 'People without a card', 'Expiring in 7 days']} numeric={[1, 2, 3, 4, 5, 6]}

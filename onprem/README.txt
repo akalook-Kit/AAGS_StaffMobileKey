@@ -45,7 +45,8 @@ DAY-TO-DAY
   Portal (hotel network):  https://<server name>:8443/
   Logs:                    C:\ProgramData\StaffMobileKey\Platform\logs\
   Backups (02:30 daily):   C:\ProgramData\StaffMobileKey\Platform\backups\   (copy them off the server)
-  Change CS password:      .\set-platform-secrets.ps1   (in C:\Program Files\StaffMobileKey\Platform)
+  Change passwords:        .\set-platform-secrets.ps1   (Credential Services, alert e-mail SMTP, SMS gateway)
+  Database size / copy:    .\database-tools.ps1 -Action Size | Copy -Destination E:\ | Verify | Optimize | Restore
   Change allowed IPs:      .\set-external-access.ps1 -Show | -AllowExternal ... | -AddAddress ... | -Disable
   Restart:                 Restart-Service StaffMobileKeyPlatform, StaffMobileKeyGateway
 

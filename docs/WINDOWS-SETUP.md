@@ -137,6 +137,17 @@ The first run builds the image (5–10 minutes). When it prints **Ready.** the p
 The K Hotel branding (black and rose gold, your logo) is set in **Mobile app settings**. A logo
 uploaded there replaces it in the portal and the app immediately.
 
+### New in 2.7 — Monitoring, e-mail and SMS alerts
+
+| Feature | Where | What to check |
+|---|---|---|
+| Monitoring | **Monitoring** in the menu | Tiles for alerts, doors in contact, free disk, database size; tabs *Alerts*, *Doors online / offline*, *Watched doors (VIP)*, *System health*, *Messages sent*. |
+| Alert messages | Lock simulator page → **Alert messages** | Every e-mail and SMS the platform sends in the test setup arrives here (to "Duty manager (test)"). **Settings → Alerts & notifications → Test**. |
+| VIP door | **Monitoring → Watched doors (VIP)** → choose *GM Office* | Open the GM Office with a key on the lock simulator: the first entrance is highlighted (★) and announced. |
+| Door offline | **Settings → Alert thresholds** → offline code `9001`, online `9002` → Save; wait a minute; lock simulator → **Lock offline / online** → 9001 | Red "Door offline" alert, SMS and e-mail; send 9002 and it closes. |
+| Disk and database | **Settings → Alert thresholds** | Set the database limit to 1 MB: a warning appears. The disk alert is red on every page while it lasts. |
+| Database copy | `.\scripts\windows\database-tools.ps1 -Action Copy` | A checked copy in C:\khb\backups\db-copies. |
+
 ### New in 2.6 — Event log, PDF reports, any hotel
 
 | Feature | Where | What to check |
@@ -218,7 +229,7 @@ Runs inside the container, so Node.js is not needed:
 .\scripts\windows\test.ps1          # full run including the 2-minute expiry check
 ```
 
-It should end with `192 passed, 0 failed` (`189 passed` with `-Fast`).
+It should end with `224 passed, 0 failed` (`221 passed` with `-Fast`).
 
 ## Step 10 — Test the staff app on your phone (optional)
 

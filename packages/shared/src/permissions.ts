@@ -30,6 +30,10 @@ export const PERMISSIONS = [
   'reports.read',
   /** Event log: lock entrances, refused entries, alarms, battery, key and system events; PDF printing only. */
   'events.read',
+  /** Monitoring: alerts (doors offline, VIP doors, lock alarms, disk, database, connector) and system health. */
+  'alerts.read',
+  /** Acknowledge alerts, manage e-mail/SMS contacts and watched (VIP) doors. */
+  'alerts.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -67,17 +71,17 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   HOTEL_ADMIN: ALL.filter((p) => p !== 'key.approve_broad'),
   SECURITY_MANAGER: [
     'staff.read', 'key.read', 'key.approve_broad', 'key.revoke', 'endpoint.delete',
-    'resources.read', 'templates.manage', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read',
+    'resources.read', 'templates.manage', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read', 'alerts.read', 'alerts.manage',
   ],
   KEY_ISSUER: ['staff.read', 'staff.manage', 'endpoint.onboard', 'key.read', 'key.issue', 'key.revoke', 'resources.read'],
   APPROVER: ['staff.read', 'key.read', 'key.approve_broad', 'resources.read'],
   // Phase 2. "work" = report, comment, attach and move a request up to Resolved; "manage" = assign, prioritise,
   // set due dates, close, cancel and reopen.
-  MAINTENANCE_MANAGER: ['staff.read', 'resources.read', 'battery.read', 'battery.manage', 'maintenance.read', 'maintenance.work', 'maintenance.manage', 'connector.read'],
+  MAINTENANCE_MANAGER: ['staff.read', 'resources.read', 'battery.read', 'battery.manage', 'maintenance.read', 'maintenance.work', 'maintenance.manage', 'connector.read', 'alerts.read'],
   TECHNICIAN: ['resources.read', 'battery.read', 'maintenance.read', 'maintenance.work'],
   // Read-only view for the general manager and department heads: every report, nothing they can change.
-  HOTEL_MANAGEMENT: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read', 'reports.read', 'audit.export', 'events.read'],
-  AUDITOR: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read'],
+  HOTEL_MANAGEMENT: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read', 'reports.read', 'audit.export', 'events.read', 'alerts.read'],
+  AUDITOR: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read', 'alerts.read'],
   READ_ONLY: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read'],
 };
 

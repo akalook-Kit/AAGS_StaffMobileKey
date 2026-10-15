@@ -25,7 +25,7 @@ export type EventClass = 'all' | 'entrances' | 'errors';
 export interface EventFilter { from: Date; to: Date; cls: EventClass; categories: Category[] | null; door: string | null; q: string | null; limit: number }
 export interface EventRow {
   id: string; at: string; category: Category; severity: 'error' | 'warning' | 'info'; code: number | null; event: string;
-  door: string | null; doorId: string | null; person: string | null; card: string | null; source: string; detail: string | null;
+  door: string | null; doorId: string | null; person: string | null; card: string | null; source: string; detail: string | null; watched: string | null;
 }
 
 const TASK_NAMES: Record<string, string> = {
@@ -48,16 +48,18 @@ const KEY_ACTIONS: Record<string, { event: string; severity: EventRow['severity'
 export async function eventLogContext(hotelId: string) {
   const [policy, property, hotel] = await Promise.all([getConfig(pool, hotelId, 'policy'), getConfig(pool, hotelId, 'property'), one(pool, 'SELECT timezone FROM hotels WHERE id=$1', [hotelId])]);
   const entranceCodes: number[] = policy?.eventLog?.entranceEventCodes ?? [64];
-  return { tz: (property?.timezone ?? hotel?.timezone ?? 'UTC') as string, entranceCodes };
+  const offlineCodes: number[] = policy?.monitoring?.doorOffline?.offlineEventCodes ?? [];
+  const onlineCodes: number[] = policy?.monitoring?.doorOffline?.onlineEventCodes ?? [];
+  return { tz: (property?.timezone ?? hotel?.timezone ?? 'UTC') as string, entranceCodes, offlineCodes, onlineCodes };
 }
 
 export async function queryEvents(hotelId: string, f: EventFilter) {
-  const { tz, entranceCodes } = await eventLogContext(hotelId);
+  const { tz, entranceCodes, offlineCodes, onlineCodes } = await eventLogContext(hotelId);
   const denial = [...VL.denialEventCodes, 53];
   const batteryAlarm = [...VL.batteryEvents.low, ...VL.batteryEvents.critical];
   const batteryCritical = [...VL.batteryEvents.critical];
   const all = `
-    WITH doors AS (SELECT external_id, name FROM resources WHERE hotel_id=$1 AND kind='door'),
+    WITH doors AS (SELECT external_id, name, data->>'doorID' AS vid FROM resources WHERE hotel_id=$1 AND kind='door'),
     ev AS (
       SELECT 'v' || e.id AS id,
         COALESCE(CASE WHEN e.event_time ~ '^\\d{8}T\\d{4}' THEN (to_timestamp(substr(e.event_time, 1, 13), 'YYYYMMDD"T"HH24MI')::timestamp AT TIME ZONE $4) END, e.received_at) AS at,
@@ -97,8 +99,10 @@ export async function queryEvents(hotelId: string, f: EventFilter) {
         COALESCE(c.error->>'code', '') || COALESCE(' · ' || (c.error->>'message'), '')
       FROM commands c WHERE c.hotel_id=$1 AND c.status IN ('FAILED', 'EXPIRED') AND COALESCE(c.completed_at, c.expires_at) BETWEEN $2 AND $3
     )
-    SELECT ev.*, COALESCE(d1.name, d2.name, ev.door_ref) AS door_name, COALESCE(d1.external_id, d2.external_id) AS door_id
-    FROM ev LEFT JOIN doors d1 ON d1.external_id=ev.door_ref LEFT JOIN LATERAL (SELECT * FROM doors d WHERE d.name=ev.door_ref LIMIT 1) d2 ON d1.external_id IS NULL
+    SELECT ev.*, COALESCE(dd.name, ev.door_ref) AS door_name, dd.external_id AS door_id, wd.label AS watched
+    FROM ev LEFT JOIN LATERAL (SELECT * FROM doors d WHERE d.external_id=ev.door_ref OR d.vid=ev.door_ref OR d.name=ev.door_ref
+        ORDER BY (d.external_id=ev.door_ref) DESC, (d.vid=ev.door_ref) DESC LIMIT 1) dd ON true
+      LEFT JOIN watched_doors wd ON wd.hotel_id=$1 AND wd.active AND wd.door_id=dd.external_id
     WHERE ev.at BETWEEN $2 AND $3`;
   const params = [hotelId, f.from, f.to, tz, entranceCodes, denial, batteryAlarm, batteryCritical, Object.keys(KEY_ACTIONS), [...VL.batteryEvents.exchanged]];
   const rows = await many(pool, `${all} ORDER BY ev.at DESC, ev.id DESC`, params);
@@ -106,12 +110,16 @@ export async function queryEvents(hotelId: string, f: EventFilter) {
     let category = r.category as string;
     let event = r.event as string | null;
     let severity = r.severity as EventRow['severity'];
-    if (r.id.startsWith('v')) event = r.code != null && isBatteryEvent(r.code) ? batteryEventName(r.code) : EVENT_NAMES[r.code] ?? `Lock event ${r.code}`; else if (r.id.startsWith('c')) event = CARD_STATUS[r.code] ?? `Card status ${r.code}`;
+    if (r.id.startsWith('v')) {
+      event = r.code != null && isBatteryEvent(r.code) ? batteryEventName(r.code) : EVENT_NAMES[r.code] ?? `Lock event ${r.code}`;
+      if (offlineCodes.includes(r.code)) { event = 'Lock went offline'; severity = 'error'; }
+      else if (onlineCodes.includes(r.code)) event = 'Lock back online';
+    } else if (r.id.startsWith('c')) event = CARD_STATUS[r.code] ?? `Card status ${r.code}`;
     else if (r.id.startsWith('x')) { const [st, type] = String(r.event).split(':'); event = `${st === 'EXPIRED' ? 'Connector did not answer in time' : 'Connector could not'}${st === 'EXPIRED' ? ': ' : ' '}${TASK_NAMES[type!] ?? type}`; }
     else if (r.id.startsWith('k')) { const a = KEY_ACTIONS[r.event]!; event = a.event; severity = a.severity; category = a.category; }
     return {
       id: r.id, at: new Date(r.at).toISOString(), category: category as Category, severity, code: r.code ?? null, event: event ?? '',
-      door: r.door_name ?? null, doorId: r.door_id ?? null, person: r.person ?? null, card: r.card && r.card !== '0' ? r.card : null, source: r.source, detail: r.detail ?? null,
+      door: r.door_name ?? null, doorId: r.door_id ?? null, person: r.person ?? null, card: r.card && r.card !== '0' ? r.card : null, source: r.source, detail: r.detail ?? null, watched: r.watched ?? null,
     };
   });
   const isErr = (e: EventRow) => e.severity === 'error' || e.severity === 'warning';

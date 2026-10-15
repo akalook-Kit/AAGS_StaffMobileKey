@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { auth, ApiError } from '../api';
 import { useHotel } from '../App';
 import { ErrorNote, PageHead, useApi } from '../ui';
+import { NoData } from '../components/charts';
 
 /**
  * Event log (2.6): every door and system event in one list, split into All / Entrance / Error events, with a
@@ -152,15 +153,15 @@ export function EventLogPage() {
           <thead><tr><th>Time</th><th>Type</th><th>Event</th><th>Door</th><th>Person / card</th><th>Source</th><th>Details</th></tr></thead>
           <tbody>
             {(data?.events ?? []).map((e: any) => (
-              <tr key={e.id} className={e.severity}>
+              <tr key={e.id} className={`${e.severity}${e.watched && e.category === 'entrance' ? ' vip-row' : ''}`}>
                 <td className="t">{timeFmt.format(new Date(e.at))}</td>
                 <td><span className={`ev-tag ${e.severity !== 'info' ? e.severity : e.category === 'entrance' ? 'entrance' : ''}`}>{data.categories.find((c: any) => c.id === e.category)?.label}{e.severity !== 'info' && <b>· {e.severity === 'error' ? 'Error' : 'Warning'}</b>}</span></td>
-                <td>{e.event}</td><td>{e.door ?? '—'}</td>
+                <td>{e.event}</td><td>{e.door ?? '—'}{e.watched && <span className="vip-tag" title={`Watched door: ${e.watched}`}>★ {e.watched}</span>}</td>
                 <td>{e.person ?? ''}{e.person && e.card ? ' · ' : ''}{e.card ? <span className="mono">{e.card}</span> : (!e.person ? '—' : '')}</td>
                 <td className="muted" style={{ whiteSpace: 'nowrap' }}>{e.source}</td><td className="muted small">{e.detail ?? ''}</td>
               </tr>
             ))}
-            {data && !data.events.length && <tr><td colSpan={7} className="muted" style={{ padding: 18 }}>No events match this selection.</td></tr>}
+            {data && !data.events.length && <tr><td colSpan={7}><NoData text="No events match this selection for now" hint="New events appear by themselves (refreshed every 30 seconds)." /></td></tr>}
           </tbody>
         </table>
       </div>

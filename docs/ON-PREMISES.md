@@ -37,6 +37,8 @@ installer with the C# compiler that is part of Windows: no third-party wrapper.
 - Node.js 22 LTS for all users, PostgreSQL 16 (keep port 5432, note the `postgres` password).
 - Outbound HTTPS from the server to `hospitality.credential-services.api.assaabloy.com` (ASSA ABLOY Credential
   Services). Nothing inbound from the internet is needed for keys to work.
+- For alerts (2.7): outbound to the hotel's mail server (SMTP, usually port 587), and either the Android SMS phone
+  on the hotel network or the SMS service's address.
 
 ## Installing (any hotel)
 
@@ -142,7 +144,7 @@ there is no inbound path, so the platform runs with `CS_CALLBACKS=off` and **ask
 | Keys being issued or revoked | every 10 s |
 | Issued keys (removed by a phone deletion or a Visionline override) | each key about every 2 minutes; keys on a deleted phone every 15 s |
 
-The automated checks run the full suite in this mode (191 checks). One thing is not available without callbacks:
+The automated checks run the full suite in this mode (223 checks). One thing is not available without callbacks:
 the *first use at a door* time (Credential Services READBACK). Lock events from Visionline still arrive through
 the connector.
 
@@ -164,9 +166,11 @@ the public IP outside and to the server inside) and pass it with `-CertPfx`.
 | `...\gateway.config.json` | Listeners, allow-lists, secret path |
 | `...\logs\` | platform.log, gateway.log, gateway-access.log, backup.log (rotated, 10 MB × 5) |
 | `...\backups\` | Daily dumps (14 kept) and pre-upgrade dumps — SYSTEM and Administrators only |
+| `database-tools.ps1` | Size, Copy (to USB/share, checked), Verify, Optimize, Restore — see [MONITORING.md](MONITORING.md) |
 
 The secrets files are readable only by SYSTEM, Administrators and LOCAL SERVICE. Change the Credential Services
-password with `set-platform-secrets.ps1` (it never shows or logs it).
+password, the alert e-mail (SMTP) password and the SMS gateway password/API key with `set-platform-secrets.ps1`
+(it never shows or logs them).
 
 ## Backups, upgrade, rollback
 

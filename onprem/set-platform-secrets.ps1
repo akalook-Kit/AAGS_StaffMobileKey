@@ -4,6 +4,7 @@
   for this machine (Windows DPAPI).
     - Credential Services user and password (ASSA ABLOY, from Visionline Options -> Mobile Access)
     - JWT signing key (rotating it signs everyone out)
+    - Alert e-mail password (SMTP) and SMS gateway password / API key (Settings -> Alerts & notifications)
 #>
 param([string]$DataDir = (Join-Path $env:ProgramData 'StaffMobileKey\Platform'))
 $ErrorActionPreference = 'Stop'
@@ -25,12 +26,16 @@ $user = Read-Host "  Credential Services user (Enter = keep $(if ($map['SECRET_C
 if ($user) { $map['SECRET_CS_TENANT_USER'] = $user }
 $pw = Read-Secret '  Credential Services password (Enter = keep)'
 if ($pw) { $map['SECRET_CS_TENANT_PASSWORD'] = $pw }
+$smtp = Read-Secret '  Alert e-mail (SMTP) password (Enter = keep)'
+if ($smtp) { $map['SECRET_SMTP_PASSWORD'] = $smtp }
+$smsKey = Read-Secret '  SMS gateway password / API key (Enter = keep)'
+if ($smsKey) { $map['SECRET_SMS_API_KEY'] = $smsKey }
 $rot = Read-Host '  Sign everyone out by changing the JWT key? (y/N)'
 if ($rot -eq 'y') { $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); $map['JWT_SECRET'] = [Convert]::ToBase64String($b) }
 $text = ($map.Keys | ForEach-Object { "$_=$($map[$_])" }) -join "`n"
 $bytes = [Text.Encoding]::UTF8.GetBytes($text)
 [IO.File]::WriteAllBytes($file, [Security.Cryptography.ProtectedData]::Protect($bytes, $entropy, 'LocalMachine'))
-[Array]::Clear($bytes, 0, $bytes.Length); $pw = $null; $text = $null
+[Array]::Clear($bytes, 0, $bytes.Length); $pw = $null; $smtp = $null; $smsKey = $null; $text = $null
 & icacls $file /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' '*S-1-5-19:R' | Out-Null
 Restart-Service StaffMobileKeyPlatform
 Write-Host 'Saved and restarted. Connector health -> "Credential Services" shows whether the account answers.' -ForegroundColor Green

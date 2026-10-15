@@ -56,6 +56,8 @@ const TABS = [
   { id: 'battery', label: 'Battery & maintenance' },
   { id: 'reports', label: 'Reports & sync' },
   { id: 'eventlog', label: 'Event log' },
+  { id: 'alerts', label: 'Alerts & notifications' },
+  { id: 'thresholds', label: 'Alert thresholds' },
   { id: 'credential_services', label: 'Credential Services' },
   { id: 'features', label: 'Modules' },
 ];
@@ -71,6 +73,8 @@ export function SettingsPage() {
       {tab === 'visionline' ? <VisionlineSettings />
         : tab === 'templates' ? <TemplatesSettings />
         : tab === 'reports' ? <ConfigForm key="reports" kind="visionline" intro="Insights can read people, valid keycards and lock alarms from Visionline, read-only. Each save is a new version of the Visionline settings." render={(d, set) => <ReportsSync data={d} set={set} />} aside={<SyncHistory />} />
+        : tab === 'alerts' ? <ConfigForm key="alerts" kind="notifications" intro="How alerts reach people. Passwords and API keys are never entered here: they are kept on the server (set-platform-secrets.ps1 on the server, or the hosting's secret settings)." render={(d, set) => <ChannelsEditor data={d} set={set} />} aside={<AlertContacts />} />
+        : tab === 'thresholds' ? <ConfigForm key="thresholds" kind="policy" intro="When Monitoring raises an alert. Part of the hotel policy; each save is a new policy version." render={(d, set) => <ThresholdsEditor data={d} set={set} />} />
         : tab === 'eventlog' ? <ConfigForm key="eventlog" kind="policy" intro="Which lock events the connector records for the Event log. Refused entries and battery events are always recorded. Part of the hotel policy; each save is a new policy version." render={(d, set) => <EventLogPolicy data={d} set={set} />} />
         : tab === 'battery' ? <ConfigForm key="battery" kind="policy" intro="How battery alarms and maintenance requests are handled. Part of the hotel policy; each save is a new policy version." render={(d, set) => <Phase2Policy data={d} set={set} />} />
         : tab === 'buildings' ? <ConfigForm key="buildings" kind="property" intro="Extra addresses for buildings or wings. Staff see the address (and a map link) for keys that include doors from these door groups." render={(d, set) => <BuildingsEditor data={d} set={set} />} />
@@ -511,6 +515,150 @@ function ReportsSync({ data, set }: { data: any; set: (patch: any) => void }) {
       </div>
       <label className="check"><input type="checkbox" checked={ds.includeCards} disabled={!ds.enabled} onChange={(e) => setD({ includeCards: e.target.checked })} /><span>Valid keycards of each person</span></label>
       <label className="check"><input type="checkbox" checked={ds.includeAlarms} disabled={!ds.enabled} onChange={(e) => setD({ includeAlarms: e.target.checked })} /><span>Lock alarms<span className="hint" style={{ display: 'block' }}>Needs the Visionline option "Web service for checking and confirming alarms". Alarms are only read, never marked completed.</span></span></label>
+    </>
+  );
+}
+
+const NOTIFY_DEFAULTS = {
+  email: { enabled: false, host: '', port: 587, security: 'starttls', user: '', passwordRef: 'SMTP_PASSWORD', from: '' },
+  sms: { enabled: false, provider: 'android-gateway', url: '', username: '', secretRef: 'SMS_API_KEY', sender: '', contentType: 'json', bodyTemplate: '{"to": "{to}", "message": "{text}"}', authHeader: 'Authorization: Bearer {key}' },
+};
+/** Settings → Alerts & notifications: the notifications config (e-mail through SMTP, SMS through a gateway). */
+function ChannelsEditor({ data, set }: { data: any; set: (patch: any) => void }) {
+  const e = { ...NOTIFY_DEFAULTS.email, ...(data.email ?? {}) };
+  const m = { ...NOTIFY_DEFAULTS.sms, ...(data.sms ?? {}) };
+  const setE = (p: any) => set({ email: { ...e, ...p }, sms: m });
+  const setM = (p: any) => set({ sms: { ...m, ...p }, email: e });
+  return (
+    <>
+      <h3>E-mail</h3>
+      <label className="check"><input type="checkbox" checked={e.enabled} onChange={(x) => setE({ enabled: x.target.checked })} /><span><strong>Send alerts by e-mail</strong>
+        <span className="hint" style={{ display: 'block' }}>Through the hotel's own mail server or mailbox (Microsoft 365, Google Workspace, the hotel's SMTP server). No cost per message.</span></span></label>
+      <div className="field-row">
+        <div className="field"><label htmlFor="eh">Mail server (SMTP)</label><input id="eh" value={e.host} disabled={!e.enabled} placeholder="smtp.office365.com" onChange={(x) => setE({ host: x.target.value.trim() })} /></div>
+        <div className="field"><label htmlFor="ep">Port</label><input id="ep" type="number" value={e.port} disabled={!e.enabled} onChange={(x) => setE({ port: Number(x.target.value) })} /></div>
+        <div className="field"><label htmlFor="es">Security</label><select id="es" value={e.security} disabled={!e.enabled} onChange={(x) => setE({ security: x.target.value })}><option value="starttls">STARTTLS (usually port 587)</option><option value="tls">TLS (usually port 465)</option><option value="none">None (internal relay only)</option></select></div>
+      </div>
+      <div className="field-row">
+        <div className="field"><label htmlFor="eu">User name</label><input id="eu" value={e.user} disabled={!e.enabled} autoComplete="off" onChange={(x) => setE({ user: x.target.value.trim() })} /><span className="hint">Empty for a relay without sign-in. The password is the server secret <code>SMTP_PASSWORD</code>.</span></div>
+        <div className="field"><label htmlFor="ef">Sender</label><input id="ef" value={e.from} disabled={!e.enabled} placeholder="Hotel alerts <alerts@yourhotel.com>" onChange={(x) => setE({ from: x.target.value })} /></div>
+      </div>
+      <h3 style={{ marginTop: 16 }}>SMS</h3>
+      <label className="check"><input type="checkbox" checked={m.enabled} onChange={(x) => setM({ enabled: x.target.checked })} /><span><strong>Send alerts by SMS</strong>
+        <span className="hint" style={{ display: 'block' }}>There is no free SMS service. The cheapest option is an <b>Android phone in the hotel</b> with the free app "SMS Gateway for Android" (local server mode): messages go out from its SIM, so they cost only what the SIM bundle costs. A paid service such as Africa's Talking works too.</span></span></label>
+      <div className="field-row">
+        <div className="field"><label htmlFor="mp">Service</label><select id="mp" value={m.provider} disabled={!m.enabled} onChange={(x) => setM({ provider: x.target.value })}>
+          <option value="android-gateway">Android phone in the hotel (SMS Gateway for Android)</option><option value="africastalking">Africa's Talking</option><option value="http">Other SMS service (HTTP)</option></select></div>
+        {m.provider !== 'africastalking' && <div className="field"><label htmlFor="mu">Address</label><input id="mu" value={m.url} disabled={!m.enabled} placeholder={m.provider === 'android-gateway' ? 'http://192.168.1.50:8080' : 'https://api.example.com/sms'} onChange={(x) => setM({ url: x.target.value.trim() })} />
+          <span className="hint">{m.provider === 'android-gateway' ? 'Shown in the app under "Local server". Give the phone a fixed address on the hotel Wi-Fi.' : 'The service\'s send address.'}</span></div>}
+        <div className="field"><label htmlFor="mn">User name</label><input id="mn" value={m.username} disabled={!m.enabled} autoComplete="off" onChange={(x) => setM({ username: x.target.value.trim() })} /><span className="hint">The password / API key is the server secret <code>SMS_API_KEY</code>.</span></div>
+        {m.provider === 'africastalking' && <div className="field"><label htmlFor="ms">Sender ID</label><input id="ms" value={m.sender} disabled={!m.enabled} maxLength={20} onChange={(x) => setM({ sender: x.target.value })} /><span className="hint">Optional; must be registered with Africa's Talking.</span></div>}
+      </div>
+      {m.provider === 'http' && (
+        <div className="field-row">
+          <div className="field"><label htmlFor="mc">Body format</label><select id="mc" value={m.contentType} disabled={!m.enabled} onChange={(x) => setM({ contentType: x.target.value })}><option value="json">JSON</option><option value="form">Form</option></select></div>
+          <div className="field"><label htmlFor="mb">Body</label><input id="mb" value={m.bodyTemplate} disabled={!m.enabled} onChange={(x) => setM({ bodyTemplate: x.target.value })} /><span className="hint">{'{to}'} = phone number, {'{text}'} = message, {'{sender}'}, {'{username}'}, {'{key}'}.</span></div>
+          <div className="field"><label htmlFor="ma">Key header</label><input id="ma" value={m.authHeader} disabled={!m.enabled} onChange={(x) => setM({ authHeader: x.target.value })} /></div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function AlertContacts() {
+  const { base } = useHotel();
+  const c = useApi<any>(`${base}/monitoring/contacts`);
+  const blank = { name: '', email: '', phone: '', byEmail: true, bySms: false, categories: ['doors', 'vip', 'locks', 'system'], active: true };
+  const [f, setF] = useState<any>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const save = async () => {
+    setError(null);
+    try { if (f.id) await api(`${base}/monitoring/contacts/${f.id}`, { method: 'PUT', body: f }); else await api(`${base}/monitoring/contacts`, { body: f }); setF(null); await c.reload(); } catch (e) { setError(e); }
+  };
+  const remove = async (x: any) => { if (!confirm(`Remove ${x.name}?`)) return; try { await api(`${base}/monitoring/contacts/${x.id}`, { method: 'DELETE' }); await c.reload(); } catch (e) { setError(e); } };
+  const test = async (id?: string) => {
+    setError(null); setMsg(null);
+    try { const r = await api(`${base}/monitoring/test`, { body: { contactId: id ?? null } }); setMsg(`Test: ${r.sent} message(s) sent${r.failed ? `, ${r.failed} failed: ${r.failures.map((x: any) => `${x.channel} ${x.recipient}: ${x.error}`).join('; ')}` : ''}.`); } catch (e) { setError(e); }
+  };
+  const cats: { id: string; label: string }[] = c.data?.categories ?? [];
+  return (
+    <div className="panel">
+      <h2>Who is told</h2>
+      <p className="small muted">Each person chooses e-mail, SMS or both, and which kinds of alert. Save the e-mail/SMS settings above first, then send a test.</p>
+      <ErrorNote error={error ?? c.error} />
+      {msg && <div className="alert ok">{msg}</div>}
+      {(c.data?.contacts ?? []).length ? (
+        <table className="grid small"><thead><tr><th>Name</th><th>E-mail / SMS</th><th>Alerts</th><th /></tr></thead><tbody>
+          {c.data.contacts.map((x: any) => (
+            <tr key={x.id} className={x.active ? '' : 'muted'}>
+              <td>{x.name}{x.active ? '' : ' (paused)'}</td>
+              <td>{x.byEmail && x.email ? <div>{x.email}</div> : null}{x.bySms && x.phone ? <div>{x.phone}</div> : null}</td>
+              <td>{x.categories.map((k: string) => cats.find((y) => y.id === k)?.label.split(' (')[0] ?? k).join(', ')}</td>
+              <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}><button className="btn small" onClick={() => test(x.id)}>Test</button> <button className="btn small" onClick={() => setF({ ...x, email: x.email ?? '', phone: x.phone ?? '' })}>Edit</button> <button className="btn small ghost" onClick={() => remove(x)}>Remove</button></td>
+            </tr>
+          ))}
+        </tbody></table>
+      ) : <p className="muted small">Nobody yet.</p>}
+      {!f ? <button className="btn" onClick={() => setF(blank)} style={{ marginTop: 8 }}>Add a person</button> : (
+        <div className="panel" style={{ marginTop: 10 }}>
+          <div className="field-row">
+            <div className="field"><label htmlFor="cn">Name</label><input id="cn" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
+            <div className="field"><label htmlFor="ce">E-mail</label><input id="ce" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
+            <div className="field"><label htmlFor="cp">Mobile (international)</label><input id="cp" value={f.phone} placeholder="+254712345678" onChange={(e) => setF({ ...f, phone: e.target.value })} /></div>
+          </div>
+          <div className="row" style={{ gap: 16, flexWrap: 'wrap' }}>
+            <label className="check"><input type="checkbox" checked={f.byEmail} onChange={(e) => setF({ ...f, byEmail: e.target.checked })} /><span>By e-mail</span></label>
+            <label className="check"><input type="checkbox" checked={f.bySms} onChange={(e) => setF({ ...f, bySms: e.target.checked })} /><span>By SMS</span></label>
+            <label className="check"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /><span>Active</span></label>
+          </div>
+          <div className="slicer" style={{ marginTop: 8 }}><span>Alerts</span><div className="ev-types">
+            {cats.map((k) => <button key={k.id} type="button" className="chip" aria-pressed={f.categories.includes(k.id)} onClick={() => setF({ ...f, categories: f.categories.includes(k.id) ? f.categories.filter((y: string) => y !== k.id) : [...f.categories, k.id] })}>{k.label}</button>)}
+          </div></div>
+          <div className="row" style={{ marginTop: 10 }}><button className="btn primary" onClick={save}>{f.id ? 'Save' : 'Add'}</button><button className="btn ghost" onClick={() => setF(null)}>Cancel</button></div>
+        </div>
+      )}
+      {(c.data?.contacts ?? []).length > 0 && <button className="btn small ghost" style={{ marginTop: 8 }} onClick={() => test()}>Send a test to everyone told about system alerts</button>}
+    </div>
+  );
+}
+
+/** Settings → Alert thresholds: policy.monitoring. */
+function ThresholdsEditor({ data, set }: { data: any; set: (patch: any) => void }) {
+  const mon = { connectorOfflineMinutes: 10, diskMinFreeGb: 50, diskPath: null, dbMaxMb: 500, ...(data.monitoring ?? {}) };
+  const door = { enabled: true, silentHours: 24, learnDays: 7, minEvents: 3, offlineEventCodes: [], onlineEventCodes: [], alarmKeywords: ['offline', 'communication', 'no contact', 'lost contact'], ...(mon.doorOffline ?? {}) };
+  const notify = { cooldownMinutes: 60, sendResolved: true, ...(mon.notify ?? {}) };
+  const setMon = (p: any) => set({ monitoring: { ...mon, doorOffline: door, notify, ...p } });
+  const codes = (v: string) => [...new Set(v.split(/[\s,;]+/).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  const [off, setOff] = useState(door.offlineEventCodes.join(', '));
+  const [on, setOn] = useState(door.onlineEventCodes.join(', '));
+  const [kw, setKw] = useState(door.alarmKeywords.join(', '));
+  return (
+    <>
+      <h3>Server</h3>
+      <div className="field-row">
+        <div className="field"><label htmlFor="tdisk">Alert when free disk space is below (GB)</label><input id="tdisk" type="number" min={1} value={mon.diskMinFreeGb} onChange={(e) => setMon({ diskMinFreeGb: Number(e.target.value) })} /><span className="hint">Stays red until fixed. Applies to the platform server and to the Visionline PC (connector 0.8.0).</span></div>
+        <div className="field"><label htmlFor="tdp">Disk to watch</label><input id="tdp" value={mon.diskPath ?? ''} placeholder="C:\" onChange={(e) => setMon({ diskPath: e.target.value || null })} /><span className="hint">Empty = C:\ on Windows.</span></div>
+        <div className="field"><label htmlFor="tdb">Alert when the database is bigger than (MB)</label><input id="tdb" type="number" min={1} value={mon.dbMaxMb} onChange={(e) => setMon({ dbMaxMb: Number(e.target.value) })} /></div>
+        <div className="field"><label htmlFor="tco">Connector offline after (minutes)</label><input id="tco" type="number" min={2} value={mon.connectorOfflineMinutes} onChange={(e) => setMon({ connectorOfflineMinutes: Number(e.target.value) })} /></div>
+      </div>
+      <h3 style={{ marginTop: 14 }}>Doors offline</h3>
+      <label className="check"><input type="checkbox" checked={door.enabled} onChange={(e) => setMon({ doorOffline: { ...door, enabled: e.target.checked } })} /><span>Watch doors for lost contact</span></label>
+      <div className="field-row">
+        <div className="field"><label htmlFor="tsh">Offline after no contact for (hours)</label><input id="tsh" type="number" min={1} value={door.silentHours} disabled={!door.enabled} onChange={(e) => setMon({ doorOffline: { ...door, silentHours: Number(e.target.value) } })} /></div>
+        <div className="field"><label htmlFor="tme">Only doors that report at least (times)</label><input id="tme" type="number" min={1} value={door.minEvents} disabled={!door.enabled} onChange={(e) => setMon({ doorOffline: { ...door, minEvents: Number(e.target.value) } })} /></div>
+        <div className="field"><label htmlFor="tld">in the last (days)</label><input id="tld" type="number" min={1} value={door.learnDays} disabled={!door.enabled} onChange={(e) => setMon({ doorOffline: { ...door, learnDays: Number(e.target.value) } })} /></div>
+      </div>
+      <div className="field-row">
+        <div className="field"><label htmlFor="toff">"Lock offline" event codes</label><input id="toff" value={off} disabled={!door.enabled} onChange={(e) => { setOff(e.target.value); setMon({ doorOffline: { ...door, offlineEventCodes: codes(e.target.value) } }); }} /><span className="hint">From the hotel's lock / online-system documentation, if the locks report it. The connector then listens for them.</span></div>
+        <div className="field"><label htmlFor="ton">"Lock back online" event codes</label><input id="ton" value={on} disabled={!door.enabled} onChange={(e) => { setOn(e.target.value); setMon({ doorOffline: { ...door, onlineEventCodes: codes(e.target.value) } }); }} /></div>
+        <div className="field"><label htmlFor="tkw">Visionline alarm words meaning "offline"</label><input id="tkw" value={kw} disabled={!door.enabled} onChange={(e) => { setKw(e.target.value); setMon({ doorOffline: { ...door, alarmKeywords: e.target.value.split(',').map((x) => x.trim()).filter((x) => x.length >= 2) } }); }} /></div>
+      </div>
+      <h3 style={{ marginTop: 14 }}>Messages</h3>
+      <div className="field-row">
+        <div className="field"><label htmlFor="tcd">Do not repeat the same alert within (minutes)</label><input id="tcd" type="number" min={0} value={notify.cooldownMinutes} onChange={(e) => setMon({ notify: { ...notify, cooldownMinutes: Number(e.target.value) } })} /></div>
+      </div>
+      <label className="check"><input type="checkbox" checked={notify.sendResolved} onChange={(e) => setMon({ notify: { ...notify, sendResolved: e.target.checked } })} /><span>Also send a message when the problem is over</span></label>
     </>
   );
 }

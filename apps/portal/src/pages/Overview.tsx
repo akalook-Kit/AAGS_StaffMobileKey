@@ -1,12 +1,14 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useHotel } from '../App';
 import { ErrorNote, PageHead, Status, fmt, useApi } from '../ui';
+import { NoData } from '../components/charts';
 
 export function Overview() {
   const { base, hotel, me, can } = useHotel();
   const nav = useNavigate();
   const s = useApi<any>(can('key.read') ? `${base}/summary` : null, [], 5000);
   const att = useApi<any>(`${base}/attention`, [], 15_000).data;
+  const mon = useApi<any>(can('alerts.read') ? `${base}/monitoring/summary` : null, [], 30_000).data;
   const d = s.data;
   const n = (k: string) => d?.keys?.[k] ?? 0;
   const hour = new Date().getHours();
@@ -16,6 +18,13 @@ export function Overview() {
         {can('key.issue') && <Link className="btn primary" to="/keys">Issue a key</Link>}
       </PageHead>
       <ErrorNote error={s.error} />
+      {mon && (
+        <div className="attn">
+          <Link to="/monitoring" className={mon.alerts.critical ? 'bad' : mon.alerts.warning ? 'warn' : 'ok'}><strong>{mon.alerts.critical + mon.alerts.warning}</strong><span>{mon.alerts.critical + mon.alerts.warning ? `open alerts${mon.alerts.critical ? ` (${mon.alerts.critical} critical)` : ''}${mon.top[0] ? ` · ${mon.top[0].title}` : ''}` : 'open alerts - all quiet'}</span></Link>
+          <Link to="/monitoring?tab=doors" className={mon.doors.offline ? 'bad' : 'ok'}><strong>{mon.doors.total ? `${mon.doors.online}/${mon.doors.total}` : '—'}</strong><span>{mon.doors.total ? `doors in contact${mon.doors.offline ? ` · ${mon.doors.offline} offline` : ''}` : 'no lock has reported yet - still looking'}</span></Link>
+          {mon.watched.length > 0 && <Link to="/monitoring?tab=vip" className="ok"><strong>★ {mon.watched.length}</strong><span>watched doors{mon.watched[0]?.last_entrance_at ? ` · last entrance ${mon.watched[0].label} ${fmt.dt(mon.watched[0].last_entrance_at)}` : ' · no entrance yet'}</span></Link>}
+        </div>
+      )}
       {att && (att.battery || att.maintenance) && (
         <div className="attn">
           {att.battery && <Link to="/battery" className={att.battery.critical ? 'bad' : att.battery.low ? 'warn' : 'ok'}><strong>{att.battery.critical + att.battery.low}</strong><span>lock batteries low or critical{att.battery.critical ? ` (${att.battery.critical} critical)` : ''}{att.battery.unacknowledged ? ` · ${att.battery.unacknowledged} not acknowledged` : ''}</span></Link>}
@@ -43,7 +52,7 @@ export function Overview() {
                     </tr>
                   ))}
                 </tbody></table>
-              ) : <div className="empty">No keys issued yet.</div>}
+              ) : <NoData text="No keys issued yet" hint="New activity appears here by itself." />}
             </div>
             <div className="panel">
               <h2>Hotel connector</h2>

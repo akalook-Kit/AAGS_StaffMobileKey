@@ -77,6 +77,17 @@ await cfg(khb, 'credential_services', { baseUrl: process.env.CS_BASE_URL ?? 'htt
     await pool.query(`UPDATE resources SET active=false WHERE hotel_id=$1 AND kind='mobileaccessaccount' AND external_id='KHB-MOBILE'`, [khb]);
   }
 }
+// 2.7 Monitoring, test setup only: alert e-mail and SMS go to the simulator's test sinks (nothing leaves the PC).
+{
+  const simHost = (() => { try { return new URL(process.env.CS_BASE_URL ?? 'http://localhost:8444/cs').hostname; } catch { return 'localhost'; } })();
+  await cfg(khb, 'notifications', {
+    email: { enabled: true, host: simHost, port: Number(process.env.SIM_SMTP_PORT ?? 2525), security: 'none', user: 'alerts', passwordRef: 'SMTP_PASSWORD', from: 'K Hotel alerts <alerts@khb.test>' },
+    sms: { enabled: true, provider: 'android-gateway', url: `http://${simHost}:8444/sms-gateway`, username: 'sms', secretRef: 'SMS_API_KEY' },
+  });
+  if (!(await one(pool, `SELECT 1 FROM alert_contacts WHERE hotel_id=$1`, [khb]))) {
+    await pool.query(`INSERT INTO alert_contacts (hotel_id, name, email, phone, by_email, by_sms, categories) VALUES ($1,'Duty manager (test)','duty@khb.test','+237600000001',true,true,$2)`, [khb, ['doors', 'vip', 'locks', 'system']]);
+  }
+}
 await cfg(khb, 'app_policy', { privacyText: 'K Hotel Bana uses your work account to deliver door keys to this phone. No location is collected.', supportEscalation: 'Call the duty manager if a door will not open.', partnerLinks: [], allowedLinkHosts: [] });
 
 const platform = await operator('platform@smk.test', 'Platform Admin', true);

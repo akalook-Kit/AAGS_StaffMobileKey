@@ -105,6 +105,34 @@ export const SCHEMAS = {
       recordEntrances: z.boolean().default(true),
       entranceEventCodes: z.array(z.number().int().min(1).max(9999)).max(40).default([64]),
     }).default({ recordEntrances: true, entranceEventCodes: [64] }),
+    /** 2.7 Monitoring: when to raise alerts. */
+    monitoring: z.object({
+      doorOffline: z.object({
+        enabled: z.boolean().default(true),
+        /** A lock that normally reports (at least minEvents in learnDays) and has been silent this long = "no contact". */
+        silentHours: z.number().min(1).max(24 * 30).default(24),
+        learnDays: z.number().int().min(1).max(60).default(7),
+        minEvents: z.number().int().min(1).max(1000).default(3),
+        /** Lock event codes that mean "lock offline" / "lock back online" (from the hotel's lock documentation). */
+        offlineEventCodes: z.array(z.number().int().min(1).max(99999)).max(40).default([]),
+        onlineEventCodes: z.array(z.number().int().min(1).max(99999)).max(40).default([]),
+        /** Open Visionline alarms whose type or text contains one of these words mark the door offline. */
+        alarmKeywords: z.array(z.string().min(2).max(40)).max(20).default(['offline', 'communication', 'no contact', 'lost contact']),
+      }).default({ enabled: true, silentHours: 24, learnDays: 7, minEvents: 3, offlineEventCodes: [], onlineEventCodes: [], alarmKeywords: ['offline', 'communication', 'no contact', 'lost contact'] }),
+      connectorOfflineMinutes: z.number().int().min(2).max(1440).default(10),
+      /** Alert (red) while free space on the server disk is below this. */
+      diskMinFreeGb: z.number().min(1).max(100000).default(50),
+      /** Disk to watch; empty = C:\ on Windows, / elsewhere. */
+      diskPath: z.string().max(200).optional().nullable(),
+      /** Alert while the database is bigger than this. */
+      dbMaxMb: z.number().int().min(1).max(1_000_000).default(500),
+      notify: z.object({
+        /** Do not announce the same problem again if it comes back within this time. */
+        cooldownMinutes: z.number().int().min(0).max(1440).default(60),
+        /** Also tell contacts when a problem is over. */
+        sendResolved: z.boolean().default(true),
+      }).default({ cooldownMinutes: 60, sendResolved: true }),
+    }).prefault({}),
     /** Phase 2 maintenance requests. */
     maintenance: z.object({
       /** Due time given to a new request by priority, in hours. */
@@ -147,6 +175,41 @@ export const SCHEMAS = {
     systemId: z.number().int(),
     tenantUserRef: z.string().min(1),
     tenantPasswordRef: z.string().min(1),
+  }),
+  /** 2.7 How alerts reach people. Passwords and API keys are secret references (SECRET_<ref>), never stored here. */
+  notifications: z.object({
+    email: z.object({
+      enabled: z.boolean().default(false),
+      host: z.string().max(200).default(''),
+      port: z.number().int().min(1).max(65535).default(587),
+      security: z.enum(['starttls', 'tls', 'none']).default('starttls'),
+      user: z.string().max(200).default(''),
+      passwordRef: z.string().min(1).max(60).default('SMTP_PASSWORD'),
+      from: z.string().max(200).default(''),
+    }).prefault({}),
+    sms: z.object({
+      enabled: z.boolean().default(false),
+      /** android-gateway: an Android phone in the hotel sends with its own SIM ("SMS Gateway for Android", local server);
+       *  africastalking: Africa's Talking SMS API; http: any HTTP SMS API (body template with {to} and {text}). */
+      provider: z.enum(['android-gateway', 'africastalking', 'http']).default('android-gateway'),
+      url: z.string().max(300).default(''),
+      username: z.string().max(200).default(''),
+      secretRef: z.string().min(1).max(60).default('SMS_API_KEY'),
+      sender: z.string().max(20).default(''),
+      contentType: z.enum(['json', 'form']).default('json'),
+      bodyTemplate: z.string().max(1000).default('{"to": "{to}", "message": "{text}"}'),
+      /** Custom HTTP: header carrying the key, e.g. "Authorization: Bearer {key}". */
+      authHeader: z.string().max(200).default('Authorization: Bearer {key}'),
+    }).prefault({}),
+  }).superRefine((v, ctx) => {
+    if (v.email.enabled) {
+      if (!v.email.host) ctx.addIssue({ code: 'custom', path: ['email', 'host'], message: 'Give the mail server (SMTP host).' });
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email.from.replace(/^.*<|>$/g, ''))) ctx.addIssue({ code: 'custom', path: ['email', 'from'], message: 'Give the sender address, e.g. alerts@yourhotel.com' });
+    }
+    if (v.sms.enabled) {
+      if (v.sms.provider !== 'africastalking' && !/^https?:\/\/[^\s]+$/.test(v.sms.url)) ctx.addIssue({ code: 'custom', path: ['sms', 'url'], message: 'Give the SMS gateway address, e.g. http://192.168.1.50:8080' });
+      if (v.sms.provider === 'africastalking' && !v.sms.username) ctx.addIssue({ code: 'custom', path: ['sms', 'username'], message: "Give the Africa's Talking username." });
+    }
   }),
   app_policy: z.object({
     notifyBeforeExpiryMinutes: z.number().int().min(0).default(30),

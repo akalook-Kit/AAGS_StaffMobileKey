@@ -45,6 +45,11 @@ function endRounded(x: number, y: number, w: number, h: number, dir: 'right' | '
   return `M${x},${y + h} V${y + rr} Q${x},${y} ${x + rr},${y} H${x + w - rr} Q${x + w},${y} ${x + w},${y + rr} V${y + h} Z`;
 }
 
+// ---- Empty state: no data yet, the page keeps checking -------------------------------------------
+export function NoData({ text = 'No data for now', hint = 'Still looking - this updates by itself.' }: { text?: string; hint?: string }) {
+  return <div className="viz-empty no-data" role="status"><span className="pulse" aria-hidden />{text}<span className="muted"> · {hint}</span></div>;
+}
+
 // ---- Tooltip -----------------------------------------------------------------------------------------
 interface Tip { x: number; y: number; title: string; rows: { label: string; value: string; color?: string }[] }
 function Tooltip({ tip }: { tip: Tip | null }) {
@@ -66,12 +71,12 @@ export function Legend({ series }: { series: { name: string; color: string }[] }
 
 // ---- Horizontal bars (single or stacked) ---------------------------------------------------------
 export interface BarRow { key: string; label: string; sub?: string; values: number[] }
-export function HBars({ rows, series, onSelect, max: maxIn, unit = '', empty = 'Nothing to show for this period.' }: {
+export function HBars({ rows, series, onSelect, max: maxIn, unit = '', empty = 'No data for this period yet' }: {
   rows: BarRow[]; series: { name: string; color: string }[]; onSelect?: (r: BarRow) => void; max?: number; unit?: string; empty?: string;
 }) {
   const [ref, w] = useWidth<HTMLDivElement>();
   const [tip, setTip] = useState<Tip | null>(null);
-  if (!rows.length) return <div className="viz-empty">{empty}</div>;
+  if (!rows.length || rows.every((r) => r.values.every((v) => !v))) return <NoData text={empty} />;
   const labelW = Math.min(170, Math.max(90, w * 0.3));
   const valueW = 48;
   const plotW = Math.max(60, w - labelW - valueW - 8);
@@ -124,7 +129,7 @@ export function Lines({ points, series, height = 210, label }: {
 }) {
   const [ref, w] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
-  if (!points.length) return <div className="viz-empty">No data for this period.</div>;
+  if (!points.length || points.every((p) => p.values.every((v) => !v))) return <NoData text="No data for this period yet" />;
   const left = 38, right = 14, top = 10, bottom = 26;
   const pw = Math.max(80, w - left - right), ph = height - top - bottom;
   const max = Math.max(1, ...points.flatMap((p) => p.values));
@@ -230,7 +235,7 @@ export function VizCard({ title, sub, chart, table, actions, span = 6, filtered 
 }
 
 export function DataTable({ head, rows, numeric = [] }: { head: string[]; rows: (string | number | null | ReactNode)[][]; numeric?: number[] }) {
-  if (!rows.length) return <div className="viz-empty">No rows.</div>;
+  if (!rows.length) return <NoData text="No rows yet" />;
   return (
     <div className="viz-table-wrap"><table className="grid viz-table">
       <thead><tr>{head.map((h, i) => <th key={i} className={numeric.includes(i) ? 'num' : ''}>{h}</th>)}</tr></thead>

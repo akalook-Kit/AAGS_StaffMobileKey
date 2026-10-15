@@ -208,6 +208,16 @@ export function registerCredentialServices(app: FastifyInstance, st: SimState, o
     opts.log(`LOCK ${door.doorName}: battery event ${code}`);
     return { door: door.id, eventCode: code };
   });
+  // Any other lock event, e.g. a hotel-specific "lock offline" / "lock online" code (2.7 monitoring tests).
+  app.post('/sim/doors/:id/event', async (req, reply) => {
+    const door = st.doors.find((d) => d.id === (req.params as any).id);
+    if (!door) return reply.code(404).send({ code: 'UnknownDoor' });
+    const code = Number((req.body as any)?.code);
+    if (!Number.isInteger(code) || code <= 0) return reply.code(400).send({ code: 'BadCode' });
+    vlPublish(st, 'events', { doorID: door.doorID, registrationNumber: 0, eventCode: code, eventTime: toVisionlineLocal(new Date(), opts.timeZone ?? 'Africa/Douala'), repeatFlags: 0 });
+    opts.log(`LOCK ${door.doorName}: event ${code}`);
+    return { door: door.id, eventCode: code };
+  });
   app.post('/sim/faults', async (req) => {
     const b = { ...(req.body as any ?? {}) };
     if (b.revokeWhen) { st.mobileAccessOptions.revokeWhen = b.revokeWhen; delete b.revokeWhen; }

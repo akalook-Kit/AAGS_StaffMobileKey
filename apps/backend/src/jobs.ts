@@ -4,6 +4,7 @@ import { enqueueIssue, notify, applyCredentialEvent, processPendingEvents, handl
 import { csForHotel, ensureCallbacks } from './credential-services.ts';
 import { scheduleDirectorySyncs } from './directory.ts';
 import { config } from './config.ts';
+import { runMonitoring } from './monitoring/monitor.ts';
 
 /**
  * Housekeeping loop: command expiry, scheduled issuance, key expiry, invitation expiry, and
@@ -145,6 +146,7 @@ export function startJobs() {
       else if (n % 12 === 0) await reconcile();
       if (n % 12 === 0) await ensureAllCallbacks();
       if (n % 12 === 6) await scheduleDirectorySyncs();
+      if (n % 12 === 3) await runMonitoring(); // every minute
     } catch (e) {
       console.error('[jobs]', e);
     }

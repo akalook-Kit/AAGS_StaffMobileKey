@@ -237,7 +237,7 @@ foreach ($d in 'app', 'migrations', 'portal', 'brand', 'service') {
   Copy-Item (Join-Path $here $d) $target -Recurse
 }
 Copy-Item (Join-Path $here 'VERSION') $InstallDir -Force
-foreach ($f in 'backup-onprem.ps1', 'set-platform-secrets.ps1', 'set-external-access.ps1', 'rollback-onprem.ps1', 'uninstall-onprem.ps1') { Copy-Item (Join-Path $here $f) $InstallDir -Force }
+foreach ($f in 'backup-onprem.ps1', 'database-tools.ps1', 'set-platform-secrets.ps1', 'set-external-access.ps1', 'rollback-onprem.ps1', 'uninstall-onprem.ps1') { Copy-Item (Join-Path $here $f) $InstallDir -Force }
 $exe = Join-Path $InstallDir 'StaffMobileKeyHost.exe'
 & $csc /nologo /target:exe /optimize+ "/out:$exe" /reference:System.ServiceProcess.dll /reference:System.Security.dll (Join-Path $InstallDir 'service\NodeService.cs')
 if ($LASTEXITCODE -ne 0) { Fail 'Building the service host failed (see the compiler messages above).' }
@@ -250,7 +250,7 @@ $envLines = @(
   '# Non-secret settings of the platform service. Secrets are in platform.secrets (encrypted).',
   'HOST=127.0.0.1', 'PORT=4000', "PORTAL_DIST=$(Join-Path $InstallDir 'portal')", "SMK_MIGRATIONS_DIR=$(Join-Path $InstallDir 'migrations')",
   "SMK_BRAND_DIR=$(Join-Path $InstallDir 'brand')", 'PROVISION_ON_START=1', 'CS_CALLBACKS=off',
-  "PUBLIC_URL=https://$($ServerName):$LanPort", 'LOG_LEVEL=info', "CORS_ORIGINS=https://$($ServerName):$LanPort", "SMK_SERVER_NAME=$ServerName",
+  "PUBLIC_URL=https://$($ServerName):$LanPort", 'LOG_LEVEL=info', "SMK_BACKUP_LOG=$(Join-Path $DataDir 'logs\backup.log')", "CORS_ORIGINS=https://$($ServerName):$LanPort", "SMK_SERVER_NAME=$ServerName",
   '# The hotel (used when the database is first created; afterwards change details in the portal: Settings -> Hotel details).'
 )
 foreach ($k in $hotel.Keys) { $envLines += "$k=$($hotel[$k])" }

@@ -27,8 +27,10 @@ export async function insights(hotelId: string, f: InsightFilters) {
   const floorDoors: string[] | null = f.floor
     ? (await many(pool, `SELECT external_id FROM resources WHERE hotel_id=$1 AND kind='door' AND active AND data->>'doorGroup'=$2`, [hotelId, f.floor])).map((r) => r.external_id)
     : null;
-  const doorNames = new Map((await many(pool, `SELECT external_id, name, data->>'doorGroup' AS g FROM resources WHERE hotel_id=$1 AND kind='door'`, [hotelId]))
-    .map((d) => [d.external_id as string, { name: d.name as string, group: d.g as string | null }]));
+  const doorRows = await many(pool, `SELECT external_id, name, data->>'doorGroup' AS g, data->>'doorID' AS vid FROM resources WHERE hotel_id=$1 AND kind='door'`, [hotelId]);
+  const doorNames = new Map(doorRows.map((d) => [d.external_id as string, { name: d.name as string, group: d.g as string | null }]));
+  // Lock events carry Visionline's numeric doorID, which can differ from the door's id in the door list.
+  const byVid = new Map(doorRows.filter((d) => d.vid).map((d) => [String(d.vid), d.external_id as string]));
   const doorIn = (id: string | null) => !floorDoors || (id != null && floorDoors.includes(id));
   // Staff scope for the user-group slicer.
   const staffGroup = f.group;
@@ -97,6 +99,7 @@ export async function insights(hotelId: string, f: InsightFilters) {
   const resolveEventDoor = (raw: string | null) => {
     if (!raw) return null;
     if (doorNames.has(raw)) return raw;
+    if (byVid.has(raw)) return byVid.get(raw)!;
     for (const [id, d] of doorNames) if (d.name === raw) return id;
     return raw;
   };

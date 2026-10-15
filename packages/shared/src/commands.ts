@@ -223,5 +223,7 @@ export const ConnectorHealth = z.object({
   capabilities: z.array(z.string()).optional(),
   /** Directory sync in progress or last result, for the status page and connector health. */
   directorySync: z.string().optional(),
+  /** 2.7 Monitoring: free space on the Visionline PC's system disk. */
+  disk: z.object({ host: z.string().max(100).optional(), path: z.string().max(200), freeBytes: z.number(), totalBytes: z.number() }).optional(),
 });
 export type ConnectorHealth = z.infer<typeof ConnectorHealth>;

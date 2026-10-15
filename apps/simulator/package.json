@@ -4,6 +4,17 @@
   "private": true,
   "type": "module",
   "description": "Local stand-in for Visionline Web API + ASSA ABLOY Credential Services + BLE locks. For development only.",
-  "scripts": { "dev": "tsx watch src/main.ts", "start": "tsx src/main.ts" },
-  "dependencies": { "@smk/shared": "0.1.0", "fastify": "^5.12.5", "selfsigned": "^5.5.0" }
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@smk/shared": "0.1.0",
+    "fastify": "^5.12.5",
+    "selfsigned": "^5.5.0",
+    "smtp-server": "^3.19.14"
+  },
+  "devDependencies": {
+    "@types/smtp-server": "^3.5.10"
+  }
 }

@@ -41,7 +41,7 @@ cpSync(join(root, 'apps/portal/dist'), join(out, 'portal'), { recursive: true })
 cpSync(join(root, 'brand'), join(out, 'brand'), { recursive: true });
 const op = join(root, 'onprem');
 cpSync(join(op, 'service'), join(out, 'service'), { recursive: true });
-for (const f of ['install-onprem.ps1', 'backup-onprem.ps1', 'set-platform-secrets.ps1', 'set-external-access.ps1', 'rollback-onprem.ps1', 'uninstall-onprem.ps1', 'README.txt', 'gateway.config.template.json'])
+for (const f of ['install-onprem.ps1', 'backup-onprem.ps1', 'database-tools.ps1', 'set-platform-secrets.ps1', 'set-external-access.ps1', 'rollback-onprem.ps1', 'uninstall-onprem.ps1', 'README.txt', 'gateway.config.template.json'])
   cpSync(join(op, f), join(out, f));
 cpSync(connectorDir, join(out, 'connector'), { recursive: true });
 writeFileSync(join(out, 'VERSION'), `${version}\r\n`);

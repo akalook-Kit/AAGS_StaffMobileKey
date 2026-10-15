@@ -1,10 +1,12 @@
 import type pg from 'pg';
 import type { VisionlineEventsBatch } from '@smk/shared';
-import { one, tx, lockHotel } from './db.ts';
+import { one, tx, lockHotel, pool } from './db.ts';
 import { audit } from './audit.ts';
 import { getConfig } from './hotel-config.ts';
 import { enqueueRevoke, notify } from './keys.ts';
 import { applyBatteryEvent, batteryContext, isBatteryEvent, type BatteryContext } from './battery.ts';
+import { onLockEvent } from './monitoring/monitor.ts';
+import { fromVisionlineLocal } from '@smk/shared/node';
 
 const LIVE = ['QUEUED', 'ISSUING', 'ISSUED', 'REVOKING'];
 /** Lock event names the portal shows [Web API §7.14.1]. */
@@ -24,11 +26,16 @@ export const EVENT_NAMES: Record<number, string> = {
  */
 export async function processVisionlineBatch(hotelId: string, b: VisionlineEventsBatch) {
   const summary = { cards: 0, events: 0, revoked: 0, wrongDoor: 0, autoCancelled: 0, ignored: 0, battery: 0 };
+  const seen: { doorId: string | null; code: number; reg: string | null }[] = [];
+  let entranceCodes: number[] = [64];
+  let tz = 'UTC';
   await tx(async (c) => {
     await lockHotel(c, hotelId);
     const policy = await getConfig(c, hotelId, 'policy');
     const codes: number[] = policy?.wrongDoorEventCodes ?? [320, 323];
     const limit: number = policy?.wrongDoorLimit ?? 5;
+    entranceCodes = policy?.eventLog?.entranceEventCodes ?? [64];
+    tz = (await getConfig(c, hotelId, 'property'))?.timezone ?? 'UTC';
     let battery: BatteryContext | null | undefined;
 
     for (const card of b.cards) {
@@ -66,6 +73,7 @@ export async function processVisionlineBatch(hotelId: string, b: VisionlineEvent
         [hotelId, b.batchId, b.source, reg ?? null, ev.eventCode, ev.doorID ?? null, ev.eventTime ?? null, `event:${b.batchId}:${i}`]);
       if (!row) { summary.ignored++; continue; }
       summary.events++;
+      seen.push({ doorId: ev.doorID ?? null, code: ev.eventCode, reg: reg && reg !== '0' ? reg : null, time: ev.eventTime ?? null } as any);
       if (isBatteryEvent(ev.eventCode)) {
         // Phase 2: battery alarms and readings (only while the hotel has battery monitoring switched on).
         if (battery === undefined) battery = await batteryContext(c, hotelId);
@@ -89,6 +97,17 @@ export async function processVisionlineBatch(hotelId: string, b: VisionlineEvent
       }
     }
   });
+  // Watched (VIP) doors: announced after the batch is saved, outside the hotel lock (sending can take seconds).
+  for (const e of seen as any[]) {
+    if (!entranceCodes.includes(e.code)) continue;
+    try {
+      const person = e.reg ? (await one(pool, `SELECT COALESCE(s.full_name, (SELECT NULLIF(trim(coalesce(u.given_name,'') || ' ' || coalesce(u.surname,'')), '') FROM vl_cards vc JOIN vl_users u ON u.hotel_id=vc.hotel_id AND u.user_id=vc.card_holder WHERE vc.hotel_id=$1 AND vc.reg_no=$2 LIMIT 1)) AS n
+          FROM (SELECT 1) x LEFT JOIN key_requests k ON k.hotel_id=$1 AND (k.card_reg_no=$2 OR (k.card_reg_no IS NULL AND k.credential_id=$2)) LEFT JOIN staff s ON s.id=k.staff_id ORDER BY k.created_at DESC NULLS LAST LIMIT 1`, [hotelId, e.reg]))?.n ?? null : null;
+      let at = new Date();
+      if (e.time) { try { at = fromVisionlineLocal(e.time, tz); } catch { /* keep now */ } }
+      await onLockEvent(hotelId, { doorId: e.doorId, code: e.code, person, at }, entranceCodes);
+    } catch (err) { console.error('[monitor] watched door', (err as Error).message); }
+  }
   return summary;
 }
 

@@ -16,6 +16,9 @@ label{display:block;margin:4px 0}button{font:inherit;padding:4px 10px}
 <section><h2>Credentials</h2><table id="cards"></table></section>
 <section><h2>Endpoints</h2><table id="eps"></table></section>
 <section><h2>Lock batteries</h2><p style="margin:0 0 6px;color:#6b645a">Send a battery event from a lock to Visionline, as the lock would.</p><table id="bat"></table></section>
+<section><h2>Lock offline / online</h2><p style="margin:0 0 6px;color:#6b645a">Send any lock event code, e.g. the "offline" / "online" codes set in the portal (Settings → Alert thresholds).</p>
+<label>Door <select id="ocdoor"></select></label> <label>Code <input id="occode" type="number" value="9001" style="width:7em"></label> <button id="ocbtn">Send event</button></section>
+<section><h2>Alert messages (e-mail and SMS received by the test sinks)</h2><table id="outbox"></table></section>
 <section><h2>Fault injection</h2>
 <label><input type="checkbox" id="down"> Visionline outage (503)</label>
 <label>Fail next card with code <input id="failcode" placeholder="e.g. 40308" size="8"> <button id="failbtn">Arm</button></label>
@@ -38,5 +41,9 @@ document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=async()=>{await 
 $('eps').innerHTML='<tr><th>Endpoint</th><th>Device</th><th>Status</th></tr>'+s.endpoints.map(e=>'<tr><td>'+esc(e.endpointId.slice(0,8))+'…</td><td>'+esc(e.deviceModel)+'</td><td class="'+e.endpointStatus+'">'+e.endpointStatus+'</td></tr>').join('');
 $('bat').innerHTML='<tr><th>Door</th><th>Group</th><th>Last sent</th><th></th></tr>'+s.doors.map(d=>'<tr><td>'+esc(d.doorName)+'</td><td>'+esc(d.doorGroup)+'</td><td>'+esc(d.battery??'')+'</td><td><button data-bat="low" data-door="'+esc(d.id)+'">Low</button> <button data-bat="critical" data-door="'+esc(d.id)+'">Critical</button> <button data-bat="exchanged" data-door="'+esc(d.id)+'">Exchanged</button></td></tr>').join('');
 document.querySelectorAll('[data-bat]').forEach(b=>b.onclick=async()=>{await fetch('/sim/doors/'+encodeURIComponent(b.dataset.door)+'/battery',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind:b.dataset.bat})});load()});}
+$('ocbtn').onclick=async()=>{await fetch('/sim/doors/'+encodeURIComponent($('ocdoor').value)+'/event',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:Number($('occode').value)})});load()};
+async function loadOutbox(){const o=await (await fetch('/sim/outbox')).json();$('outbox').innerHTML='<tr><th>Time</th><th>Via</th><th>To</th><th>Message</th></tr>'+(o.length?o.slice(0,30).map(m=>'<tr><td>'+new Date(m.at).toLocaleTimeString()+'</td><td>'+esc(m.via)+'</td><td>'+esc(m.to.join(', '))+'</td><td>'+esc(m.subject||m.text)+'</td></tr>').join(''):'<tr><td colspan=4>Nothing yet.</td></tr>');}
+let ocFilled=false;async function fillDoors(){if(ocFilled)return;const s=await (await fetch('/sim/state')).json();$('ocdoor').innerHTML=s.doors.map(d=>'<option value="'+esc(d.id)+'">'+esc(d.doorName)+'</option>').join('');ocFilled=true;}
+fillDoors();loadOutbox();setInterval(loadOutbox,4000);
 load();setInterval(load,4000);
 </script></body></html>`;

@@ -76,7 +76,7 @@ export function eventRoutes(app: FastifyInstance) {
       note: r.truncated ? `Only the newest ${LIMIT} of ${r.total} events are printed. Narrow the period or the selection to print the rest.` : null,
       columns: [{ label: 'Time', width: 15 }, { label: 'Type', width: 11 }, { label: 'Event', width: 25 }, { label: 'Door', width: 13 }, { label: 'Person / card', width: 17 }, { label: 'Source', width: 11 }, { label: 'Details', width: 18 }],
       rows: r.events.map((e) => [
-        dt.format(new Date(e.at)), [CATEGORY_LABELS[e.category], SEVERITY_LABEL[e.severity]].filter(Boolean).join(' · '), e.event, e.door ?? '',
+        dt.format(new Date(e.at)), [CATEGORY_LABELS[e.category], SEVERITY_LABEL[e.severity]].filter(Boolean).join(' · '), e.event, `${e.door ?? ''}${e.watched ? ` (watched: ${e.watched})` : ''}`,
         [e.person, e.card ? `card ${e.card}` : null].filter(Boolean).join(' · '), e.source, e.detail ?? '',
       ]),
       tones, filters: { ...f, from: f.from.toISOString(), to: f.to.toISOString() },

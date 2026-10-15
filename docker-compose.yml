@@ -80,6 +80,9 @@ services:
       # Credential Services user/password. Defaults are the simulator's; a pilot sets real ones in .env (never committed).
       SECRET_CS_TENANT_USER: ${SECRET_CS_TENANT_USER:-khb-tenant}
       SECRET_CS_TENANT_PASSWORD: ${SECRET_CS_TENANT_PASSWORD:-dev-tenant-password}
+      # Alert e-mail/SMS in the test setup go to the simulator's test sinks (see the lock simulator page).
+      SECRET_SMTP_PASSWORD: ${SECRET_SMTP_PASSWORD:-dev-smtp-password}
+      SECRET_SMS_API_KEY: ${SECRET_SMS_API_KEY:-sms-dev-password}
       LOG_LEVEL: info
     ports: ["${SMK_BIND:-127.0.0.1}:${SMK_PORTAL_PORT:-14080}:4000"]
     mem_limit: 512m

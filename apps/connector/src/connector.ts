@@ -1,3 +1,5 @@
+import { statfs } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { createHash } from 'node:crypto';
 import { CONTRACT_VERSION, PAYLOAD_SCHEMAS, type CommandEnvelope, type CommandResult, type ConnectorHealth, type SealedCredentialPlain, type SealedSecret } from '@smk/shared';
 import { generateSealingKey, openSealed } from '@smk/shared/node';
@@ -12,7 +14,7 @@ import { readDirectory } from './visionline/directory.ts';
 /** Commands that change Visionline; refused in read-only mode. */
 const WRITES = new Set(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'CREATE_USER_GROUP']);
 
-export const CONNECTOR_VERSION = '0.7.0';
+export const CONNECTOR_VERSION = '0.8.0';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -92,6 +94,7 @@ export class Connector {
       // Battery alarms ride on the Visionline watch; without the watch there are none to report.
       capabilities: [...(this.cfg.visionline.watch ? ['battery-events', 'entrance-events'] : []), 'directory-sync'],
       directorySync: this.directorySync,
+      ...(this.disk ? { disk: this.disk } : {}),
     };
   }
 
@@ -312,9 +315,17 @@ export class Connector {
     }
   }
 
+  /** Free space on the system disk of this PC (2.7 monitoring), refreshed every heartbeat. */
+  private disk: { host: string; path: string; freeBytes: number; totalBytes: number } | null = null;
+  private async readDisk() {
+    const path = process.platform === 'win32' ? `${(process.env.SystemDrive ?? 'C:')}\\` : '/';
+    try { const s = await statfs(path); this.disk = { host: hostname(), path, freeBytes: Number(s.bavail) * Number(s.bsize), totalBytes: Number(s.blocks) * Number(s.bsize) }; } catch { this.disk = null; }
+  }
+
   private async heartbeatLoop() {
     let n = 0;
     while (!this.stopping) {
+      await this.readDisk();
       if (n++ % 4 === 0 && this.secrets.has('vlUsername')) await this.probeVisionline();
       try { if (this.hotel) this.applyWatchSettings((await this.platform<any>('/connector/v1/heartbeat', this.health(), 10_000))?.watch); } catch { this.platformReachable = false; }
       await sleep(this.cfg.heartbeatSec * 1000);

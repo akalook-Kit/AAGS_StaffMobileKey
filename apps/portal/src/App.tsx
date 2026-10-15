@@ -16,6 +16,7 @@ import { BatteryPage } from './pages/Battery';
 import { MaintenancePage } from './pages/Maintenance';
 import { InsightsPage } from './pages/Insights';
 import { EventLogPage } from './pages/EventLog';
+import { MonitoringPage } from './pages/Monitoring';
 
 export interface Me {
   id: string; email: string; displayName: string; isPlatformAdmin: boolean; mfaEnabled: boolean;
@@ -49,6 +50,9 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const pending = useApi<any[]>(hotel.permissions.includes('key.approve_broad') ? `${base}/keys?status=PENDING_APPROVAL` : null, [hotel.id], 15_000);
   // Phase 2 modules appear only when the hotel has them switched on and the role allows them.
   const attention = useApi<any>(hotel.permissions.includes('resources.read') ? `${base}/attention` : null, [hotel.id], 30_000);
+  const mon = useApi<any>(hotel.permissions.includes('alerts.read') ? `${base}/monitoring/summary` : null, [hotel.id], 30_000);
+  // Red band on every page while a critical system alert (disk space, connector, Visionline) is open.
+  const banner = useApi<any[]>(hotel.permissions.includes('alerts.read') ? `${base}/monitoring/banner` : null, [hotel.id], 60_000);
   const b = branding.data?.data;
   useEffect(() => {
     applyBrand(b);
@@ -84,6 +88,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             {can('connector.read') && <NavLink to="/connector">Connector health</NavLink>}
             {can('branding.manage') && <NavLink to="/branding">Branding and logo</NavLink>}
             {can('settings.manage') && <NavLink to="/settings">Settings</NavLink>}
+            {can('alerts.read') && <NavLink to="/monitoring">Monitoring {(mon.data?.alerts?.critical ?? 0) > 0 && <span className="count bad" title="Critical alerts">{mon.data.alerts.critical}</span>}</NavLink>}
             {can('events.read') && <NavLink to="/events">Event log</NavLink>}
             {can('audit.read') && <NavLink to="/audit">Audit trail</NavLink>}
             {can('battery.read') && attention.data?.batteryMonitoring && <NavLink to="/battery">Battery status {(attention.data.battery?.critical ?? 0) > 0 && <span className="count" title="Critical lock batteries">{attention.data.battery.critical}</span>}</NavLink>}
@@ -96,6 +101,9 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           </div>
         </aside>
         <main className="content" key={hotel.id}>
+          {(banner.data ?? []).map((a) => (
+            <div key={a.id} className="sys-banner no-print" role="alert"><strong>{a.title}</strong><span>{a.detail}</span><NavLink to="/monitoring?tab=system">Monitoring →</NavLink></div>
+          ))}
           <Routes>
             <Route path="/" element={<Overview />} />
             <Route path="/staff" element={<StaffPage />} />
@@ -109,6 +117,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <Route path="/account" element={<AccountPage />} />
             <Route path="/insights" element={<InsightsPage />} />
             <Route path="/events" element={<EventLogPage />} />
+            <Route path="/monitoring" element={<MonitoringPage />} />
             <Route path="/battery" element={<BatteryPage />} />
             <Route path="/battery/:doorId" element={<BatteryPage />} />
             <Route path="/maintenance" element={<MaintenancePage />} />
