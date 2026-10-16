@@ -2,6 +2,7 @@ import pg from 'pg';
 import { config } from './config.ts';
 
 pg.types.setTypeParser(20, (v) => Number(v)); // bigint -> number (audit seq, counts)
+pg.types.setTypeParser(1082, (v) => v); // date -> 'YYYY-MM-DD' as stored (no time zone shift)
 export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 });
 export type Db = pg.Pool | pg.PoolClient;
 

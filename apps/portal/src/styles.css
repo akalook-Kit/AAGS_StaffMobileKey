@@ -414,3 +414,11 @@ table.mon-alerts tr.critical td:first-child { box-shadow: inset 4px 0 0 var(--st
 .sys-banner a { color: #fff; font-weight: 600; } .sys-banner strong { font-weight: 700; }
 .vip-tag { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 650; color: #6b5100; background: #fff1c2; border-radius: 8px; padding: 1px 6px; }
 .rail nav .count.bad { background: var(--st-crit); color: #fff; }
+
+/* Time & attendance */
+.att-state { display: inline-block; font-size: 12px; font-weight: 650; padding: 2px 8px; border-radius: 10px; background: var(--line-2, #eee); }
+.att-state.ok { background: #dff0e7; color: #0f4a33; } .att-state.warn { background: #fbedcc; color: #5e3e00; } .att-state.idle { color: var(--ink-2); }
+table.desk td { vertical-align: middle; } table.desk .btn { min-width: 104px; }
+tr.clickable { cursor: pointer; } tr.clickable:hover td { background: var(--line-2, #f4efec); }
+tr.warning td { background: #fff8e6; }
+.mon-tile[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--brand); }

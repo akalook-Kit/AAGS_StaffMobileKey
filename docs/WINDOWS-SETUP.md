@@ -137,6 +137,17 @@ The first run builds the image (5–10 minutes). When it prints **Ready.** the p
 The K Hotel branding (black and rose gold, your logo) is set in **Mobile app settings**. A logo
 uploaded there replaces it in the portal and the app immediately.
 
+### New in 2.8 — Time & attendance, hiding modules, sturdier screens
+
+| Feature | Where | What to check |
+|---|---|---|
+| Check-in desk | Sign in as **desk@khb.test** → **Time & attendance** | Check in *Joseph Kamau* (a daily worker without a keycard), then check him out. The timekeeper sees nothing else. |
+| Keycard / mobile key at the staff entrance | Lock simulator → open *Staff Entrance* with a staff key | The person is clocked in automatically (Time & attendance → Timesheets → click the person). |
+| Timesheets, leave, payroll | Sign in as **hr@khb.test** | Add leave or a public holiday, a missing check-out (with a reason), export **Summary (CSV)** / **Day by day (CSV)** / **Print PDF**, **Approve** last week. |
+| People without a card | **People → Add a person without a card** | Payroll number, department, casual/daily, shift. |
+| Hide modules | **Operators → Modules** next to a person | Hide *Staff mobile keys* from one person; or **Settings → Modules → Mobile keys module visible to → Hotel administrators only**. |
+| A screen that fails | any page | Shows what went wrong in that part only, with *Try again*; the menu and other pages keep working. |
+
 ### New in 2.7 — Monitoring, e-mail and SMS alerts
 
 | Feature | Where | What to check |
@@ -229,7 +240,7 @@ Runs inside the container, so Node.js is not needed:
 .\scripts\windows\test.ps1          # full run including the 2-minute expiry check
 ```
 
-It should end with `224 passed, 0 failed` (`221 passed` with `-Fast`).
+It should end with `265 passed, 0 failed` (`262 passed` with `-Fast`).
 
 ## Step 10 — Test the staff app on your phone (optional)
 

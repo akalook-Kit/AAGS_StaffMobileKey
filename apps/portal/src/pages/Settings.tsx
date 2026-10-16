@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ApiError, api, sealCredential } from '../api';
 import { useHotel } from '../App';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { ErrorNote, PageHead, Status, fmt, useApi, waitForCommand } from '../ui';
 import { DoorMap, groupDoors, resolveScope, type DoorRes } from '../components/DoorMap';
 
@@ -40,6 +41,8 @@ const GENERIC: Record<string, { intro: string; fields: Field[] }> = {
   ] },
   features: { intro: 'Modules can be switched on only when they are released, licensed and supported by the connector.', fields: [
     { k: 'staffMobileKeys', label: 'Staff mobile keys', type: 'bool' },
+    { k: 'mobileKeysVisibleTo', label: 'Mobile keys module visible to', type: 'select', options: [{ v: 'everyone', l: 'Everyone whose role allows it' }, { v: 'administrators', l: 'Hotel administrators only (while it is being finalised)' }], hint: 'Hides mobile keys, staff phones, app settings and the key settings tabs from everyone except hotel administrators. Per person: Operators -> Modules.' },
+    { k: 'timeAttendance', label: 'Time & attendance', type: 'bool', hint: 'Check-in desk, timesheets, leave, payroll exports. Door entrances count when attendance doors are set (Time & attendance -> Setup).' },
     { k: 'batteryMonitoring', label: 'Battery monitoring', type: 'bool', hint: 'Lock battery alarms from Visionline, read by the connector (version 0.5.0 or newer, with its Visionline watch on).' },
     { k: 'maintenance', label: 'Maintenance requests', type: 'bool', hint: 'Requests from the portal, the staff app and battery alarms; tasks for technicians in the app.' },
     { k: 'guestKeys', label: 'Guest keys (phase 3)', type: 'bool', disabled: true }, { k: 'pmsOccupancy', label: 'Room occupancy from PMS (phase 3)', type: 'bool', disabled: true },
@@ -62,14 +65,22 @@ const TABS = [
   { id: 'features', label: 'Modules' },
 ];
 
+/** Settings tabs that belong to the mobile keys module (hidden with it). */
+const KEY_TABS = new Set(['visionline', 'templates', 'policy', 'credential_services']);
+
 export function SettingsPage() {
-  const [tab, setTab] = useState(() => new URLSearchParams(location.search).get('tab') ?? 'property');
+  const { hotel } = useHotel();
+  const keysHidden = (hotel.hiddenModules ?? []).includes('mobileKeys');
+  const tabs = TABS.filter((x) => !(keysHidden && KEY_TABS.has(x.id)));
+  const [tab0, setTab] = useState(() => new URLSearchParams(location.search).get('tab') ?? 'property');
+  const tab = tabs.some((x) => x.id === tab0) ? tab0 : 'property';
   return (
     <>
       <PageHead title="Settings" intro="Each save creates a new version you can roll back to." />
       <div className="seg" role="tablist" style={{ marginBottom: 16, flexWrap: 'wrap' }}>
-        {TABS.map((x) => <button key={x.id} role="tab" aria-pressed={tab === x.id} onClick={() => setTab(x.id)}>{x.label}</button>)}
+        {tabs.map((x) => <button key={x.id} role="tab" aria-pressed={tab === x.id} onClick={() => setTab(x.id)}>{x.label}</button>)}
       </div>
+      <ErrorBoundary key={tab} label="This settings tab">
       {tab === 'visionline' ? <VisionlineSettings />
         : tab === 'templates' ? <TemplatesSettings />
         : tab === 'reports' ? <ConfigForm key="reports" kind="visionline" intro="Insights can read people, valid keycards and lock alarms from Visionline, read-only. Each save is a new version of the Visionline settings." render={(d, set) => <ReportsSync data={d} set={set} />} aside={<SyncHistory />} />
@@ -79,6 +90,7 @@ export function SettingsPage() {
         : tab === 'battery' ? <ConfigForm key="battery" kind="policy" intro="How battery alarms and maintenance requests are handled. Part of the hotel policy; each save is a new policy version." render={(d, set) => <Phase2Policy data={d} set={set} />} />
         : tab === 'buildings' ? <ConfigForm key="buildings" kind="property" intro="Extra addresses for buildings or wings. Staff see the address (and a map link) for keys that include doors from these door groups." render={(d, set) => <BuildingsEditor data={d} set={set} />} />
         : <ConfigForm key={tab} kind={tab} intro={GENERIC[tab]!.intro} fields={GENERIC[tab]!.fields} />}
+      </ErrorBoundary>
     </>
   );
 }
@@ -143,8 +155,8 @@ function FieldGrid({ fields, data, set }: { fields: Field[]; data: any; set: (f:
         <div className="field" key={f.k}>
           <label htmlFor={f.k}>{f.label}</label>
           {f.type === 'select' ? (
-            <select id={f.k} value={data[f.k] ?? ''} onChange={(e) => set(f, e.target.value)}>
-              {!f.options?.some((o) => o.v === (data[f.k] ?? '')) && <option value={data[f.k] ?? ''}>{data[f.k] ?? '—'}{data[f.k] ? ' (not discovered)' : ''}</option>}
+            <select id={f.k} value={data[f.k] ?? (f.nullable ? '' : f.options?.[0]?.v ?? '')} onChange={(e) => set(f, e.target.value)}>
+              {!f.options?.some((o) => o.v === (data[f.k] ?? (f.nullable ? '' : f.options?.[0]?.v ?? ''))) && <option value={data[f.k] ?? ''}>{data[f.k] ?? '—'}{data[f.k] ? ' (not discovered)' : ''}</option>}
               {f.options?.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
             </select>
           ) : <input id={f.k} type={f.type === 'number' ? 'number' : 'text'} value={data[f.k] ?? ''} disabled={f.disabled} onChange={(e) => set(f, e.target.value)} />}

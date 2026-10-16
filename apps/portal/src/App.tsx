@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type FormEvent } from 'react';
-import { BrowserRouter, NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import type { Permission } from '@smk/shared';
 import { api, auth } from './api';
 import { ErrorNote, applyBrand, useApi } from './ui';
@@ -17,10 +17,13 @@ import { MaintenancePage } from './pages/Maintenance';
 import { InsightsPage } from './pages/Insights';
 import { EventLogPage } from './pages/EventLog';
 import { MonitoringPage } from './pages/Monitoring';
+import { AttendancePage } from './pages/Attendance';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export interface Me {
   id: string; email: string; displayName: string; isPlatformAdmin: boolean; mfaEnabled: boolean;
-  hotels: { id: string; slug: string; name: string; roles: string[]; permissions: Permission[] }[];
+  hotels: { id: string; slug: string; name: string; roles: string[]; permissions: Permission[]; hiddenModules?: string[] }[];
+  modules?: Record<string, string>;
   roleLabels: Record<string, string>;
 }
 interface Ctx { me: Me; hotel: Me['hotels'][number]; can: (p: Permission) => boolean; branding: any; reloadBranding: () => void; base: string }
@@ -43,6 +46,7 @@ export function App() {
 }
 
 function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+  const loc = useLocation();
   const [hotelId, setHotelId] = useState(() => { try { return localStorage.getItem('smk.hotel') ?? me.hotels[0]!.id; } catch { return me.hotels[0]!.id; } });
   const hotel = me.hotels.find((h) => h.id === hotelId) ?? me.hotels[0]!;
   const base = `/api/v1/hotels/${hotel.id}`;
@@ -90,6 +94,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             {can('settings.manage') && <NavLink to="/settings">Settings</NavLink>}
             {can('alerts.read') && <NavLink to="/monitoring">Monitoring {(mon.data?.alerts?.critical ?? 0) > 0 && <span className="count bad" title="Critical alerts">{mon.data.alerts.critical}</span>}</NavLink>}
             {can('events.read') && <NavLink to="/events">Event log</NavLink>}
+            {can('attendance.clock') && <NavLink to="/attendance">Time & attendance</NavLink>}
             {can('audit.read') && <NavLink to="/audit">Audit trail</NavLink>}
             {can('battery.read') && attention.data?.batteryMonitoring && <NavLink to="/battery">Battery status {(attention.data.battery?.critical ?? 0) > 0 && <span className="count" title="Critical lock batteries">{attention.data.battery.critical}</span>}</NavLink>}
             {can('maintenance.read') && attention.data?.maintenance && <NavLink to="/maintenance">Maintenance {(attention.data.maintenance?.open ?? 0) > 0 && <span className="count" title="Open requests">{attention.data.maintenance.open}</span>}</NavLink>}
@@ -104,6 +109,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           {(banner.data ?? []).map((a) => (
             <div key={a.id} className="sys-banner no-print" role="alert"><strong>{a.title}</strong><span>{a.detail}</span><NavLink to="/monitoring?tab=system">Monitoring →</NavLink></div>
           ))}
+          <ErrorBoundary key={loc.pathname} label="This page">
           <Routes>
             <Route path="/" element={<Overview />} />
             <Route path="/staff" element={<StaffPage />} />
@@ -122,8 +128,10 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <Route path="/battery/:doorId" element={<BatteryPage />} />
             <Route path="/maintenance" element={<MaintenancePage />} />
             <Route path="/maintenance/:ticketId" element={<MaintenancePage />} />
+            <Route path="/attendance" element={<AttendancePage />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
+          </ErrorBoundary>
         </main>
       </div>
     </HotelCtx.Provider>

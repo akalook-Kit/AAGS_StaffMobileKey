@@ -68,6 +68,10 @@ export const SCHEMAS = {
   }),
   features: z.object({
     staffMobileKeys: z.boolean(),
+    /** While the hotel finalises mobile keys: show the module to everyone with the permission, or to administrators only. */
+    mobileKeysVisibleTo: z.enum(['everyone', 'administrators']).default('everyone'),
+    /** 2.8 Time & attendance. */
+    timeAttendance: z.boolean().default(false),
     batteryMonitoring: z.boolean().default(false),
     maintenance: z.boolean().default(false),
     guestKeys: z.boolean().default(false),
@@ -132,6 +136,23 @@ export const SCHEMAS = {
         /** Also tell contacts when a problem is over. */
         sendResolved: z.boolean().default(true),
       }).default({ cooldownMinutes: 60, sendResolved: true }),
+    }).prefault({}),
+    /** 2.8 Time & attendance. */
+    attendance: z.object({
+      /** Entrances at these doors count as clock records (e.g. the staff entrance). Empty = only the desk and HR. */
+      doorIds: z.array(z.string().min(1).max(120)).max(50).default([]),
+      /** A working day runs from this time (night shifts belong to the day they started). */
+      dayStartsAt: z.string().regex(/^\d{2}:\d{2}$/).default('04:00'),
+      /** Door entrances closer than this to the previous record are ignored (passing the door twice). */
+      ignoreRepeatMinutes: z.number().int().min(0).max(240).default(10),
+      /** Worked time above this per day is overtime (when the person has no shift). */
+      overtimeAfterMinutes: z.number().int().min(60).max(24 * 60).default(480),
+      /** Round worked minutes to this step for payroll (0 = exact). */
+      roundToMinutes: z.number().int().refine((n) => [0, 5, 10, 15, 30].includes(n), 'Use 0, 5, 10, 15 or 30').default(0),
+      /** Break deducted when the person has no shift and worked more than 6 hours. */
+      defaultBreakMinutes: z.number().int().min(0).max(240).default(60),
+      /** Corrections must give a reason. */
+      requireReason: z.boolean().default(true),
     }).prefault({}),
     /** Phase 2 maintenance requests. */
     maintenance: z.object({
@@ -224,7 +245,7 @@ export type ConfigKind = keyof typeof SCHEMAS;
 export const CONFIG_KINDS = Object.keys(SCHEMAS) as ConfigKind[];
 
 /** Modules that exist in this release. Phase 3 modules cannot be switched on yet (spec §13.4.3). */
-const AVAILABLE_FEATURES = new Set(['staffMobileKeys', 'batteryMonitoring', 'maintenance']);
+const AVAILABLE_FEATURES = new Set(['staffMobileKeys', 'batteryMonitoring', 'maintenance', 'timeAttendance', 'mobileKeysVisibleTo']);
 
 export async function validateConfig(db: Db, hotelId: string, kind: ConfigKind, raw: unknown) {
   const parsed = SCHEMAS[kind].safeParse(raw);

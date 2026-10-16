@@ -16,6 +16,7 @@ import { phase2Routes } from './routes/phase2.ts';
 import { insightsRoutes } from './routes/insights.ts';
 import { eventRoutes } from './routes/events.ts';
 import { monitoringRoutes } from './routes/monitoring.ts';
+import { attendanceRoutes } from './routes/attendance.ts';
 
 export async function buildServer() {
   const app = Fastify({
@@ -51,6 +52,7 @@ export async function buildServer() {
   insightsRoutes(app);
   eventRoutes(app);
   monitoringRoutes(app);
+  attendanceRoutes(app);
 
   const dist = resolve(config.portalDist);
   if (existsSync(dist)) {

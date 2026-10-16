@@ -144,7 +144,7 @@ there is no inbound path, so the platform runs with `CS_CALLBACKS=off` and **ask
 | Keys being issued or revoked | every 10 s |
 | Issued keys (removed by a phone deletion or a Visionline override) | each key about every 2 minutes; keys on a deleted phone every 15 s |
 
-The automated checks run the full suite in this mode (223 checks). One thing is not available without callbacks:
+The automated checks run the full suite in this mode (264 checks). One thing is not available without callbacks:
 the *first use at a door* time (Credential Services READBACK). Lock events from Visionline still arrive through
 the connector.
 

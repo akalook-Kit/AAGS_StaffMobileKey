@@ -6,6 +6,7 @@ import { getConfig } from './hotel-config.ts';
 import { enqueueRevoke, notify } from './keys.ts';
 import { applyBatteryEvent, batteryContext, isBatteryEvent, type BatteryContext } from './battery.ts';
 import { onLockEvent } from './monitoring/monitor.ts';
+import { recordDoorEntrance } from './attendance/service.ts';
 import { fromVisionlineLocal } from '@smk/shared/node';
 
 const LIVE = ['QUEUED', 'ISSUING', 'ISSUED', 'REVOKING'];
@@ -73,7 +74,7 @@ export async function processVisionlineBatch(hotelId: string, b: VisionlineEvent
         [hotelId, b.batchId, b.source, reg ?? null, ev.eventCode, ev.doorID ?? null, ev.eventTime ?? null, `event:${b.batchId}:${i}`]);
       if (!row) { summary.ignored++; continue; }
       summary.events++;
-      seen.push({ doorId: ev.doorID ?? null, code: ev.eventCode, reg: reg && reg !== '0' ? reg : null, time: ev.eventTime ?? null } as any);
+      seen.push({ id: String(row.id), doorId: ev.doorID ?? null, code: ev.eventCode, reg: reg && reg !== '0' ? reg : null, time: ev.eventTime ?? null } as any);
       if (isBatteryEvent(ev.eventCode)) {
         // Phase 2: battery alarms and readings (only while the hotel has battery monitoring switched on).
         if (battery === undefined) battery = await batteryContext(c, hotelId);
@@ -106,6 +107,8 @@ export async function processVisionlineBatch(hotelId: string, b: VisionlineEvent
       let at = new Date();
       if (e.time) { try { at = fromVisionlineLocal(e.time, tz); } catch { /* keep now */ } }
       await onLockEvent(hotelId, { doorId: e.doorId, code: e.code, person, at }, entranceCodes);
+      // 2.8 Time & attendance: entrances at the attendance doors are clock records.
+      await recordDoorEntrance(hotelId, { eventId: e.id, doorId: e.doorId, reg: e.reg, at });
     } catch (err) { console.error('[monitor] watched door', (err as Error).message); }
   }
   return summary;

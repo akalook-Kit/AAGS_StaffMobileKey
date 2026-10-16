@@ -633,6 +633,99 @@ async function main() {
   ok(msgs27.length > 0 && !msgs27.some((m: any) => m.recipient.includes('duty@khb.test') || m.recipient.includes('+237600000001')), 'the message log keeps addresses and numbers masked');
   ok((await call('GET', `${H}/monitoring`, lakeAdmin)).status === 403, 'another hotel cannot see K Hotel Bana monitoring');
 
+  // ---- 2.8: hide modules from people; time & attendance --------------------------------------------------------
+  console.log('\n2.8: modules hidden per person or for non-administrators; time & attendance and payroll');
+  const meAdmin = (await call('GET', `${API}/api/v1/me`, admin)).json;
+  const ops28 = (await call('GET', `${H}/operators`, admin)).json;
+  const issuerOp = ops28.find((o: any) => o.email === 'issuer@khb.test');
+  ok(meAdmin.modules?.mobileKeys && (await call('PUT', `${H}/operators/${meAdmin.id}/modules`, admin, { hidden: ['mobileKeys'] })).status === 403, 'modules can be hidden per person, but not from yourself');
+  ok((await call('PUT', `${H}/operators/${issuerOp.id}/modules`, admin, { hidden: ['mobileKeys', 'eventLog'] })).status === 200, 'admin hides mobile keys and the event log from the key issuer');
+  const issuerMe28 = (await call('GET', `${API}/api/v1/me`, issuer)).json.hotels.find((x: any) => x.id === khb);
+  ok(issuerMe28.hiddenModules.includes('mobileKeys') && !issuerMe28.permissions.includes('key.issue'), 'the issuer no longer has the mobile keys rights (menu and server)');
+  ok((await call('GET', `${H}/keys`, issuer)).status === 403, 'hidden on the server too: the keys API refuses the issuer');
+  await call('PUT', `${H}/operators/${issuerOp.id}/modules`, admin, { hidden: [] });
+  ok((await call('GET', `${H}/keys`, issuer)).status === 200, 'shown again: the issuer can use mobile keys');
+  const feat28 = (await call('GET', `${H}/config/features`, admin)).json.data;
+  ok((await call('PUT', `${H}/config/features`, admin, { ...feat28, mobileKeysVisibleTo: 'administrators' })).status === 200, 'mobile keys limited to administrators while being finalised');
+  ok((await call('GET', `${H}/keys`, security)).status === 403 && (await call('GET', `${H}/keys`, admin)).status === 200, 'the security manager no longer sees mobile keys; the hotel administrator still does');
+  await call('PUT', `${H}/config/features`, admin, { ...feat28, mobileKeysVisibleTo: 'everyone' });
+  ok((await call('GET', `${H}/keys`, security)).status === 200, 'back to everyone');
+
+  const hr28 = await login('hr@khb.test');
+  const desk28 = await login('desk@khb.test');
+  ok((await call('GET', `${H}/attendance/today`, tech)).status === 403, 'a technician has no access to time & attendance');
+  const today28 = await call('GET', `${H}/attendance/today`, desk28);
+  ok(today28.status === 200 && today28.json.people.length >= 6, `check-in desk lists ${today28.json.people?.length} people (staff and daily workers)`);
+  ok((await call('GET', `${H}/attendance/timesheet?from=${today28.json.date}&to=${today28.json.date}`, desk28)).status === 403, 'the desk timekeeper cannot read timesheets');
+  const joseph28 = today28.json.people.find((p: any) => p.name === 'Joseph Kamau');
+  const bricePerson = today28.json.people.find((p: any) => p.name === 'Brice Ngono');
+  ok(joseph28?.kind === 'manual' && bricePerson?.kind === 'staff', 'a daily worker without a keycard and a staff member are both on the list');
+  const cin = await call('POST', `${H}/attendance/clock`, desk28, { personId: joseph28.id, direction: 'in' });
+  ok(cin.status === 200 && cin.json.direction === 'in', 'the desk checks the daily worker in');
+  ok((await call('POST', `${H}/attendance/clock`, desk28, { personId: joseph28.id, direction: 'out', at: new Date(Date.now() - 3600_000).toISOString(), reason: 'x' })).status === 403, 'the desk cannot enter another time (HR only)');
+  const t28 = (await call('GET', `${H}/attendance/today`, desk28)).json;
+  ok(t28.people.find((p: any) => p.id === joseph28.id).state === 'in', 'the desk shows him as In');
+  ok((await call('POST', `${H}/attendance/clock`, hr28, { personId: joseph28.id, direction: 'out', at: new Date(Date.now() - 60_000 * 30).toISOString() })).status === 400, 'HR must give a reason for another time');
+  await call('POST', `${H}/attendance/clock`, desk28, { personId: joseph28.id, direction: 'out' });
+  ok((await call('GET', `${H}/attendance/today`, desk28)).json.people.find((p: any) => p.id === joseph28.id).state === 'out', 'checked out at the desk');
+
+  // Keycard / mobile key at the attendance door (Staff Entrance) clocks the person automatically.
+  ok((await tap(briceOb.me.endpoint.endpointId, 'Staff Entrance')).result === 'OPENED', 'Brice opens the staff entrance (attendance door)');
+  const day28 = today28.json.date as string;
+  const bp = await until('door clock record', () => call('GET', `${H}/attendance/people/${bricePerson.id}/punches?from=${day28}&to=${day28}`, hr28), (r) => r.json.some?.((x: any) => x.source === 'door'), 60_000);
+  ok(bp.json.some((x: any) => x.source === 'door' && x.door === 'Staff Entrance'), 'the entrance became a clock record for Brice (door, no desk needed)');
+  await tap(briceOb.me.endpoint.endpointId, 'Staff Entrance');
+  await sleep(5000);
+  ok((await call('GET', `${H}/attendance/people/${bricePerson.id}/punches?from=${day28}&to=${day28}`, hr28)).json.filter((x: any) => x.source === 'door').length === 1, 'passing the door again within 10 minutes is not a second record');
+  const addOut = await call('POST', `${H}/attendance/punches`, hr28, { personId: bricePerson.id, at: new Date(Date.now() - 60_000).toISOString(), direction: 'out', reason: 'Left by the main gate' });
+  ok(addOut.status === 200, 'HR adds a missing check-out with a reason');
+  const ts28 = (await call('GET', `${H}/attendance/timesheet?from=${day28}&to=${day28}`, hr28)).json;
+  const bDay = ts28.people.find((p: any) => p.id === bricePerson.id).days[0];
+  const jDay = ts28.people.find((p: any) => p.id === joseph28.id).days[0];
+  ok(jDay.status === 'present' && jDay.punches === 2 && bDay.firstIn && bDay.punches === 2, `timesheet: daily worker present (${jDay.punches} records), Brice in by door and out by HR`);
+  ok((await call('POST', `${H}/attendance/punches/${addOut.json.id}/void`, hr28, { reason: 'x' })).status === 400 && (await call('POST', `${H}/attendance/punches/${addOut.json.id}/void`, hr28, { reason: 'Entered for the wrong person' })).status === 200, 'a wrong record is voided with a reason (never deleted)');
+  const voided = (await call('GET', `${H}/attendance/people/${bricePerson.id}/punches?from=${day28}&to=${day28}`, hr28)).json.find((x: any) => x.id === addOut.json.id);
+  ok(voided?.voided_at && voided.void_reason === 'Entered for the wrong person', 'the voided record stays visible with who and why');
+
+  const sh28 = await call('POST', `${H}/attendance/shifts`, hr28, { name: 'Night 22-06', start: '22:00', end: '06:00', breakMinutes: 30, graceMinutes: 5, workDays: [1, 2, 3, 4, 5, 6, 7] });
+  ok(sh28.status === 200 && (await call('POST', `${H}/attendance/shifts`, desk28, { name: 'X', start: '08:00', end: '09:00' })).status === 403, 'HR adds a night shift; the desk cannot');
+  const casual28 = await call('POST', `${H}/attendance/people`, hr28, { fullName: 'Peter Daily', employeeNo: 'DW-003', department: 'Laundry', employment: 'casual', payBasis: 'daily', shiftId: sh28.json.id });
+  ok(casual28.status === 200 && casual28.json.kind === 'manual', 'HR adds another daily worker without a keycard');
+  ok((await call('POST', `${H}/attendance/people`, hr28, { fullName: 'Duplicate', employeeNo: 'dw-003' })).status === 400, 'payroll numbers are unique');
+
+  const yesterday28 = new Date(new Date(`${day28}T12:00:00Z`).getTime() - 86400_000).toISOString().slice(0, 10);
+  const hol28 = await call('POST', `${H}/attendance/absences`, hr28, { personId: null, from: yesterday28, to: yesterday28, kind: 'public_holiday', note: 'Test holiday' });
+  ok(hol28.status === 200, 'HR records a public holiday for everybody');
+  ok((await call('POST', `${H}/attendance/absences`, hr28, { personId: null, from: yesterday28, to: yesterday28, kind: 'sick' })).status === 400, 'only a public holiday can apply to everybody');
+  const tsY = (await call('GET', `${H}/attendance/timesheet?from=${yesterday28}&to=${yesterday28}`, hr28)).json;
+  ok(tsY.people.every((p: any) => p.days[0].status === 'holiday' || p.days[0].punches > 0 || p.days[0].status === 'off'), 'yesterday shows as a public holiday, not as absent');
+  const appr28 = await call('POST', `${H}/attendance/periods`, hr28, { from: yesterday28, to: yesterday28 });
+  ok(appr28.status === 200, 'HR approves yesterday for payroll');
+  ok((await call('POST', `${H}/attendance/periods`, hr28, { from: day28, to: day28 })).status === 400, 'today cannot be approved before it is over');
+  const locked28 = await call('POST', `${H}/attendance/punches`, hr28, { personId: joseph28.id, at: new Date(`${yesterday28}T10:00:00Z`).toISOString(), direction: 'in', reason: 'late entry' });
+  ok(locked28.status === 409 && locked28.json.error?.code === 'PERIOD_APPROVED', 'nothing can be changed in an approved period');
+
+  const sumCsv = await fetch(`${H}/attendance/export/summary.csv?from=${yesterday28}&to=${day28}`, { headers: { authorization: `Bearer ${gm}` } });
+  const sumText = Buffer.from(await sumCsv.arrayBuffer());
+  ok(sumCsv.status === 200 && sumText[0] === 0xef && /employee_no,name,department,employment,pay_basis,days_present/.test(sumText.toString('utf8')) && /DW-001,Joseph Kamau/.test(sumText.toString('utf8')), 'payroll summary CSV (one row per person) for hotel management');
+  const daily28 = await call('GET', `${H}/attendance/export/daily.json?from=${yesterday28}&to=${day28}`, gm);
+  const jRow = daily28.json.rows?.find((r: any) => r.employee_no === 'DW-001' && r.date === day28);
+  ok(daily28.status === 200 && jRow?.status === 'Present' && jRow.first_in && jRow.last_out && daily28.json.rows.some((r: any) => r.status === 'Public holiday'), 'day-by-day JSON for a payroll system: times, hours, status');
+  const pdfA = await fetch(`${H}/attendance/pdf`, { method: 'POST', headers: { authorization: `Bearer ${hr28}`, 'content-type': 'application/json' }, body: JSON.stringify({ from: yesterday28, to: day28 }) });
+  const pdfBytes = Buffer.from(await pdfA.arrayBuffer());
+  ok(pdfA.status === 200 && pdfBytes.subarray(0, 5).toString() === '%PDF-' && (await call('POST', `${H}/reports/verify`, gm, { sha256: (await import('node:crypto')).createHash('sha256').update(pdfBytes).digest('hex') })).json.genuine, 'printed attendance summary (PDF with the hotel header) can be verified');
+  const per28 = (await call('GET', `${H}/attendance/periods`, hr28)).json.find((p: any) => p.date_from === yesterday28);
+  ok((await call('DELETE', `${H}/attendance/periods/${per28.id}?reason=Correction%20needed`, hr28)).status === 200 && (await call('POST', `${H}/attendance/punches`, hr28, { personId: joseph28.id, at: new Date(`${yesterday28}T10:00:00Z`).toISOString(), direction: 'in', reason: 'late entry' })).status === 200, 'HR re-opens the period with a reason; corrections are possible again');
+  const st28 = await call('PUT', `${H}/attendance/settings`, hr28, { doorIds: ['Staff Entrance', 'Main Entrance'], dayStartsAt: '04:00', ignoreRepeatMinutes: 10, overtimeAfterMinutes: 480, roundToMinutes: 15, defaultBreakMinutes: 60, requireReason: true });
+  ok(st28.status === 200 && st28.json.settings.roundToMinutes === 15, 'HR changes the attendance doors and rounding without full settings rights');
+  ok((await call('PUT', `${H}/attendance/settings`, desk28, { doorIds: [] })).status === 403, 'the desk cannot change attendance settings');
+  const f28 = (await call('GET', `${H}/config/features`, admin)).json.data;
+  await call('PUT', `${H}/config/features`, admin, { ...f28, timeAttendance: false });
+  const off28 = await call('GET', `${H}/attendance/today`, desk28);
+  ok(off28.status === 409 && off28.json.error?.code === 'MODULE_OFF', 'with the module switched off the desk says so');
+  await call('PUT', `${H}/config/features`, admin, { ...f28, timeAttendance: true });
+  ok((await call('GET', `${H}/attendance/today`, lakeAdmin)).status === 403, 'another hotel cannot see K Hotel Bana attendance');
+
   console.log('\nGate: every request is traceable without exposing secrets');
   const trail = (await call('GET', `${H}/keys/${keyId}`, issuer)).json;
   const kt = await call('GET', `${H}/keys/${keyId}`, auditor);

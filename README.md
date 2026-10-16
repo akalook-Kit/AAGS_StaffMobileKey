@@ -77,6 +77,7 @@ Developers can also run the services directly with Node.js 22 (`npm install`, `n
 | [docs/UPGRADING.md](docs/UPGRADING.md) | Installing a newer version with a backup, and going back |
 | [docs/DEPLOY-RENDER.md](docs/DEPLOY-RENDER.md) | Hosting the platform on Render (Blueprint `render.yaml`), connector and app pointed at it |
 | [docs/ON-PREMISES.md](docs/ON-PREMISES.md) | Installing everything on a hotel's Vingcard/Visionline server (any hotel); outside access by public IP and secret path, changeable with set-external-access.ps1 |
+| [docs/ATTENDANCE.md](docs/ATTENDANCE.md) | Time & attendance: check-in desk, timesheets, daily workers without a keycard, shifts, leave, approval and payroll exports; hiding modules from people |
 | [docs/MONITORING.md](docs/MONITORING.md) | Monitoring: doors offline, watched (VIP) doors, lock alarms, disk space and database size; alerts by e-mail and SMS; database copy tools |
 | [docs/EVENT-LOG.md](docs/EVENT-LOG.md) | Event log (all / entrance / error events), PDF-only printing with the hotel header on every page, verifying a printed PDF |
 | [docs/INSIGHTS.md](docs/INSIGHTS.md) | Management reports (keycards, user groups, lock alarms, battery life, maintenance) and the read-only Visionline directory read |

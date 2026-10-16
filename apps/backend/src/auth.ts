@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { SignJWT, jwtVerify } from 'jose';
-import { permissionsFor, type Permission, type Role } from '@smk/shared';
+import { permissionsFor, withoutModules, type Permission, type Role } from '@smk/shared';
 import { config } from './config.ts';
 import { pool, many, one } from './db.ts';
 import { ApiError, forbidden } from './lib/errors.ts';
@@ -83,6 +83,8 @@ async function readToken(req: FastifyRequest): Promise<TokenClaims> {
 export interface OperatorCtx {
   id: string; email: string; displayName: string; isPlatformAdmin: boolean;
   roles: Map<string, Role[]>; // hotelId -> roles
+  /** hotelId -> portal modules hidden from this person (2.8). */
+  hidden?: Map<string, string[]>;
 }
 
 export async function requireOperator(req: FastifyRequest): Promise<OperatorCtx> {
@@ -95,14 +97,23 @@ export async function requireOperator(req: FastifyRequest): Promise<OperatorCtx>
   for (const m of await many(pool, 'SELECT hotel_id, role FROM memberships WHERE operator_id=$1', [op.id])) {
     roles.set(m.hotel_id, [...(roles.get(m.hotel_id) ?? []), m.role]);
   }
-  const ctx: OperatorCtx = { id: op.id, email: op.email, displayName: op.display_name, isPlatformAdmin: op.is_platform_admin, roles };
+  // Modules hidden from this person (Operators page) and mobile keys limited to administrators (Settings -> Modules).
+  const hidden = new Map<string, string[]>();
+  for (const h of await many(pool, `SELECT hotel_id, hidden_modules FROM operator_module_access WHERE operator_id=$1`, [op.id])) hidden.set(h.hotel_id, h.hidden_modules ?? []);
+  if (!op.is_platform_admin && roles.size) {
+    for (const f of await many(pool, `SELECT DISTINCT ON (hotel_id) hotel_id, data FROM hotel_config_versions WHERE kind='features' AND hotel_id = ANY($1) ORDER BY hotel_id, version DESC`, [[...roles.keys()]])) {
+      const adminsOnly = f.data?.mobileKeysVisibleTo === 'administrators' || f.data?.staffMobileKeys === false;
+      if (adminsOnly && !(roles.get(f.hotel_id) ?? []).includes('HOTEL_ADMIN')) hidden.set(f.hotel_id, [...new Set([...(hidden.get(f.hotel_id) ?? []), 'mobileKeys'])]);
+    }
+  }
+  const ctx: OperatorCtx = { id: op.id, email: op.email, displayName: op.display_name, isPlatformAdmin: op.is_platform_admin, roles, hidden };
   (req as any).operator = ctx;
   return ctx;
 }
 
 export function permsIn(op: OperatorCtx, hotelId: string): Set<Permission> {
-  if (op.isPlatformAdmin) return permissionsFor(['PLATFORM_ADMIN']);
-  return permissionsFor(op.roles.get(hotelId) ?? []);
+  if (op.isPlatformAdmin) return withoutModules(permissionsFor(['PLATFORM_ADMIN']), op.hidden?.get(hotelId) ?? []);
+  return withoutModules(permissionsFor(op.roles.get(hotelId) ?? []), op.hidden?.get(hotelId) ?? []);
 }
 
 /** Enforces hotel membership (tenant isolation) and a permission. Returns the operator. */

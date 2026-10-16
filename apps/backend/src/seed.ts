@@ -98,6 +98,8 @@ const auditor = await operator('auditor@khb.test', 'Alain Auditor');
 const maint = await operator('maint@khb.test', 'Martin Maintenance');
 const tech = await operator('tech@khb.test', 'Tina Technician');
 const gm = await operator('gm@khb.test', 'Gerald Manager');
+const hr = await operator('hr@khb.test', 'Hanna HR');
+const desk = await operator('desk@khb.test', 'Daniel Desk');
 await member(admin, khb, 'HOTEL_ADMIN');
 await member(issuer, khb, 'KEY_ISSUER');
 await member(security, khb, 'SECURITY_MANAGER');
@@ -105,11 +107,33 @@ await member(auditor, khb, 'AUDITOR');
 await member(maint, khb, 'MAINTENANCE_MANAGER');
 await member(tech, khb, 'TECHNICIAN');
 await member(gm, khb, 'HOTEL_MANAGEMENT');
+await member(hr, khb, 'HR_MANAGER');
+await member(desk, khb, 'TIMEKEEPER');
 
 await staff(khb, 'Amina Uwase', 'amina@khb.test', 'Housekeeper', 'khb-amina', 'Housekeeping');
 await staff(khb, 'Jean Mugisha', 'jean@khb.test', 'Housekeeper', 'khb-jean', 'Housekeeping');
 await staff(khb, 'Peter Otieno', 'peter@khb.test', 'Maintenance', 'khb-peter', 'Maintenance');
 await staff(khb, 'Brice Ngono', 'brice@khb.test', 'Security', 'khb-brice', 'Security');
+
+// 2.8 Time & attendance, test setup: module on, a day shift, the staff entrance as attendance door, the staff list and
+// two daily workers without a keycard. Only added once; later changes in the portal are kept.
+{
+  const firstTime = !(await one(pool, `SELECT 1 FROM ta_shifts WHERE hotel_id=$1`, [khb]));
+  if (firstTime) {
+    const f = await one(pool, `SELECT data FROM hotel_config_versions WHERE hotel_id=$1 AND kind='features' ORDER BY version DESC LIMIT 1`, [khb]);
+    if (f) await saveConfig(pool, khb, 'features', await validateConfig(pool, khb, 'features', { ...f.data, timeAttendance: true }), null);
+    const pol = await one(pool, `SELECT data FROM hotel_config_versions WHERE hotel_id=$1 AND kind='policy' ORDER BY version DESC LIMIT 1`, [khb]);
+    if (pol) await saveConfig(pool, khb, 'policy', await validateConfig(pool, khb, 'policy', { ...pol.data, attendance: { ...(pol.data.attendance ?? {}), doorIds: ['Staff Entrance'] } }), null);
+  }
+  const shift = (await one(pool, `INSERT INTO ta_shifts (hotel_id, name, start_time, end_time, break_minutes, grace_minutes, work_days) VALUES ($1,'Day 08-17','08:00','17:00',60,10,'{1,2,3,4,5,6}')
+    ON CONFLICT (hotel_id, name) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [khb]))!.id;
+  if (!(await one(pool, `SELECT 1 FROM ta_people WHERE hotel_id=$1`, [khb]))) {
+    await pool.query(`INSERT INTO ta_people (hotel_id, kind, staff_id, vl_user_id, full_name, employee_no, department, job_title, shift_id, start_date)
+      SELECT hotel_id, 'staff', id, visionline_user, full_name, employee_no, COALESCE(visionline_user_group, job_role), job_role, $2, current_date - 7 FROM staff WHERE hotel_id=$1 AND status='ACTIVE'`, [khb, shift]);
+    await pool.query(`INSERT INTO ta_people (hotel_id, kind, full_name, employee_no, department, employment, pay_basis, shift_id, start_date) VALUES
+      ($1,'manual','Joseph Kamau','DW-001','Gardening','casual','daily',$2, current_date - 7), ($1,'manual','Esther Wanjiru','DW-002','Kitchen','casual','daily',$2, current_date - 7)`, [khb, shift]);
+  }
+}
 
 await template(khb, { name: 'Floor 1 rooms', description: 'Guest rooms on floor 1 plus staff entrance and linen store', doorGroupIds: ['Floor 1'], doorIds: ['Staff Entrance', 'Linen Store'], roles: ['Housekeeper'], hours: 10 });
 await template(khb, { name: 'Floor 2 rooms', description: 'Guest rooms on floor 2 plus staff entrance and linen store', doorGroupIds: ['Floor 2'], doorIds: ['Staff Entrance', 'Linen Store'], roles: ['Housekeeper'], hours: 10 });
@@ -132,7 +156,7 @@ await staff(lake, 'Lake Housekeeper', 'hk@lakeside.test', 'Housekeeper', 'lake-h
 
 await tx((c) => audit(c, { hotelId: null, actorType: 'system', action: 'seed.applied', details: { hotels: ['k-hotel-bana', 'demo-lakeside'] } }));
 console.log(`Seed complete.
-  Portal sign-in (password ${PW}): admin@khb.test · issuer@khb.test · security@khb.test · auditor@khb.test · maint@khb.test · tech@khb.test · gm@khb.test · platform@smk.test · admin@lakeside.test
+  Portal sign-in (password ${PW}): admin@khb.test · issuer@khb.test · security@khb.test · auditor@khb.test · maint@khb.test · tech@khb.test · gm@khb.test · hr@khb.test · desk@khb.test · platform@smk.test · admin@lakeside.test
   Staff app sign-in (hotel k-hotel-bana, password ${STAFF_PW}): amina@khb.test · jean@khb.test · peter@khb.test · brice@khb.test
   K Hotel Bana connector token: ${KHB_CONNECTOR_TOKEN}`);
 await pool.end();

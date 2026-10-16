@@ -34,6 +34,12 @@ export const PERMISSIONS = [
   'alerts.read',
   /** Acknowledge alerts, manage e-mail/SMS contacts and watched (VIP) doors. */
   'alerts.manage',
+  /** Time & attendance: timesheets and payroll reports. */
+  'attendance.read',
+  /** Check people in and out at the desk (time clock). */
+  'attendance.clock',
+  /** People, shifts, leave, corrections, approving periods for payroll, attendance settings. */
+  'attendance.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -46,6 +52,8 @@ export const ROLES = [
   'MAINTENANCE_MANAGER',
   'TECHNICIAN',
   'HOTEL_MANAGEMENT',
+  'HR_MANAGER',
+  'TIMEKEEPER',
   'AUDITOR',
   'READ_ONLY',
 ] as const;
@@ -60,6 +68,8 @@ export const ROLE_LABELS: Record<Role, string> = {
   MAINTENANCE_MANAGER: 'Maintenance Manager',
   TECHNICIAN: 'Technician',
   HOTEL_MANAGEMENT: 'Hotel Management (reports)',
+  HR_MANAGER: 'HR Manager (time & attendance)',
+  TIMEKEEPER: 'Timekeeper (check-in desk)',
   AUDITOR: 'Auditor',
   READ_ONLY: 'Read Only',
 };
@@ -80,10 +90,37 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   MAINTENANCE_MANAGER: ['staff.read', 'resources.read', 'battery.read', 'battery.manage', 'maintenance.read', 'maintenance.work', 'maintenance.manage', 'connector.read', 'alerts.read'],
   TECHNICIAN: ['resources.read', 'battery.read', 'maintenance.read', 'maintenance.work'],
   // Read-only view for the general manager and department heads: every report, nothing they can change.
-  HOTEL_MANAGEMENT: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read', 'reports.read', 'audit.export', 'events.read', 'alerts.read'],
-  AUDITOR: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read', 'alerts.read'],
+  HOTEL_MANAGEMENT: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read', 'reports.read', 'audit.export', 'events.read', 'alerts.read', 'attendance.read'],
+  // Time & attendance: HR runs it; the timekeeper only checks people in and out at the desk.
+  HR_MANAGER: ['staff.read', 'resources.read', 'attendance.read', 'attendance.clock', 'attendance.manage'],
+  TIMEKEEPER: ['attendance.clock'],
+  AUDITOR: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read', 'alerts.read', 'attendance.read'],
   READ_ONLY: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read'],
 };
+
+/**
+ * Portal modules that can be hidden from people (2.8): per person (Operators page) and, for mobile keys while the
+ * hotel finalises them, for everyone except administrators (Settings -> Modules). Hiding removes the module's
+ * permissions on the server too, not only the menu item.
+ */
+export const MODULES = {
+  mobileKeys: { label: 'Staff mobile keys (keys, phones, app settings, key policy)', permissions: ['key.read', 'key.issue', 'key.approve_broad', 'key.revoke', 'endpoint.onboard', 'endpoint.delete', 'branding.manage', 'templates.manage'] },
+  insights: { label: 'Insights (reports)', permissions: ['reports.read'] },
+  eventLog: { label: 'Event log', permissions: ['events.read'] },
+  monitoring: { label: 'Monitoring', permissions: ['alerts.read', 'alerts.manage'] },
+  attendance: { label: 'Time & attendance', permissions: ['attendance.read', 'attendance.clock', 'attendance.manage'] },
+  battery: { label: 'Battery status', permissions: ['battery.read', 'battery.manage'] },
+  maintenance: { label: 'Maintenance', permissions: ['maintenance.read', 'maintenance.work', 'maintenance.manage'] },
+  audit: { label: 'Audit trail', permissions: ['audit.read', 'audit.export'] },
+} as const satisfies Record<string, { label: string; permissions: readonly Permission[] }>;
+export type ModuleId = keyof typeof MODULES;
+export const MODULE_IDS = Object.keys(MODULES) as ModuleId[];
+
+export function withoutModules(perms: Set<Permission>, hidden: readonly string[]): Set<Permission> {
+  const out = new Set(perms);
+  for (const m of hidden) for (const p of (MODULES as Record<string, { permissions: readonly Permission[] }>)[m]?.permissions ?? []) out.delete(p);
+  return out;
+}
 
 export function permissionsFor(roles: readonly Role[]): Set<Permission> {
   const s = new Set<Permission>();

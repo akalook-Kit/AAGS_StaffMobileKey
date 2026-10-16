@@ -2,7 +2,7 @@ import { EVENT_NAMES } from '../visionline-events.ts';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ROLES, ROLE_LABELS, type Role } from '@smk/shared';
+import { MODULES, MODULE_IDS, ROLES, ROLE_LABELS, type ModuleId, type Role } from '@smk/shared';
 import { pool, tx, one, many } from '../db.ts';
 import { audit, verifyAuditChain } from '../audit.ts';
 import {
@@ -71,8 +71,9 @@ export function portalRoutes(app: FastifyInstance) {
     const r = await one(pool, 'SELECT mfa_enabled FROM operators WHERE id=$1', [op.id]);
     return {
       id: op.id, email: op.email, displayName: op.displayName, isPlatformAdmin: op.isPlatformAdmin, mfaEnabled: r.mfa_enabled,
-      hotels: hotels.map((h) => ({ ...h, roles: op.isPlatformAdmin ? ['PLATFORM_ADMIN'] : op.roles.get(h.id), permissions: [...permsIn(op, h.id)] })),
+      hotels: hotels.map((h) => ({ ...h, roles: op.isPlatformAdmin ? ['PLATFORM_ADMIN'] : op.roles.get(h.id), permissions: [...permsIn(op, h.id)], hiddenModules: op.hidden?.get(h.id) ?? [] })),
       roleLabels: ROLE_LABELS,
+      modules: Object.fromEntries(MODULE_IDS.map((m) => [m, MODULES[m].label])),
     };
   });
 
@@ -296,8 +297,23 @@ export function portalRoutes(app: FastifyInstance) {
   app.get(`${P}/hotels/:hotelId/operators`, async (req) => {
     const hotelId = hid(req);
     await requirePerm(req, hotelId, 'operators.manage');
-    return many(pool, `SELECT o.id, o.email, o.display_name, o.status, o.mfa_enabled, o.last_sign_in_at, o.idp_subject, array_agg(m.role ORDER BY m.role) AS roles
+    return many(pool, `SELECT o.id, o.email, o.display_name, o.status, o.mfa_enabled, o.last_sign_in_at, o.idp_subject, array_agg(m.role ORDER BY m.role) AS roles,
+        COALESCE((SELECT a.hidden_modules FROM operator_module_access a WHERE a.operator_id=o.id AND a.hotel_id=$1), '{}') AS hidden_modules
       FROM operators o JOIN memberships m ON m.operator_id=o.id WHERE m.hotel_id=$1 GROUP BY o.id ORDER BY o.display_name`, [hotelId]);
+  });
+  /** 2.8: hide portal modules from one person (menu and permissions). */
+  app.put(`${P}/hotels/:hotelId/operators/:operatorId/modules`, async (req) => {
+    const hotelId = hid(req);
+    const op = await requirePerm(req, hotelId, 'operators.manage');
+    const b = z.object({ hidden: z.array(z.enum(MODULE_IDS as [ModuleId, ...ModuleId[]])).max(MODULE_IDS.length) }).parse(req.body);
+    const target = (req.params as any).operatorId as string;
+    if (target === op.id) throw forbidden('You cannot hide modules from yourself.');
+    if (!(await one(pool, 'SELECT 1 FROM memberships WHERE operator_id=$1 AND hotel_id=$2', [target, hotelId]))) throw notFound('Operator');
+    const before = (await one(pool, 'SELECT hidden_modules FROM operator_module_access WHERE operator_id=$1 AND hotel_id=$2', [target, hotelId]))?.hidden_modules ?? [];
+    await pool.query(`INSERT INTO operator_module_access (operator_id, hotel_id, hidden_modules) VALUES ($1,$2,$3)
+      ON CONFLICT (operator_id, hotel_id) DO UPDATE SET hidden_modules=EXCLUDED.hidden_modules, updated_at=now()`, [target, hotelId, [...new Set(b.hidden)]]);
+    await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'operator.modules_changed', targetType: 'operator', targetId: target, details: { before, after: b.hidden } });
+    return { ok: true };
   });
   app.post(`${P}/hotels/:hotelId/operators`, async (req) => {
     const hotelId = hid(req);
