@@ -1,0 +1,37 @@
+{
+  "name": "staff-mobile-key",
+  "private": true,
+  "version": "0.1.0",
+  "description": "White-label staff mobile-key platform for Visionline hotels (K Hotel Bana reference tenant)",
+  "workspaces": [
+    "packages/*",
+    "apps/backend",
+    "apps/simulator",
+    "apps/connector",
+    "apps/portal"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "typecheck": "tsc -p packages/shared && tsc -p apps/simulator && tsc -p apps/backend && tsc -p apps/connector && tsc -p apps/portal",
+    "test": "vitest run",
+    "db:migrate": "npm run migrate -w apps/backend",
+    "db:seed": "npm run seed -w apps/backend",
+    "dev:simulator": "npm run dev -w apps/simulator",
+    "dev:backend": "npm run dev -w apps/backend",
+    "dev:connector": "npm run dev -w apps/connector",
+    "dev:portal": "npm run dev -w apps/portal",
+    "build:portal": "npm run build -w apps/portal",
+    "e2e": "tsx scripts/e2e.ts",
+    "package:connector": "node scripts/package-connector.mjs",
+    "package:onprem": "node scripts/package-onprem.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.3"
+  }
+}

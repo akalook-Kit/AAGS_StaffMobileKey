@@ -1,0 +1,15 @@
+{
+  "platformUrl": "https://your-platform.example.com",
+  "dataDir": "C:\\ProgramData\\StaffMobileKey\\Connector",
+  "localAdmin": { "host": "127.0.0.1", "port": 8090 },
+  "visionline": {
+    "baseUrl": "https://localhost/api/v1",
+    "caFile": "C:\\ProgramData\\StaffMobileKey\\Connector\\visionline-ca.crt",
+    "pinSha256": "",
+    "servername": "",
+    "revokeStrategy": "checkoutPerDoor",
+    "watch": true,
+    "readOnly": false
+  },
+  "heartbeatSec": 15
+}
