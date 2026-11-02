@@ -22,9 +22,9 @@ export function Overview() {
         {can('key.issue') && <Link className="btn primary" to="/keys">Issue a key</Link>}
       </PageHead>
       <ErrorNote error={s.error} />
+      <TodoNow />
       <GettingStarted />
       <Notices />
-      <TodoNow />
       {(mon || att?.battery || att?.maintenance) && (
         <div className="attn">
           {mon && <><Link to="/monitoring" className={mon.alerts.critical ? 'bad' : mon.alerts.warning ? 'warn' : 'ok'}><strong>{mon.alerts.critical + mon.alerts.warning}</strong><span>{mon.alerts.critical + mon.alerts.warning ? `open alerts${mon.alerts.critical ? ` (${mon.alerts.critical} critical)` : ''}${mon.top[0] ? ` · ${mon.top[0].title}` : ''}` : 'open alerts - all quiet'}</span></Link>
@@ -101,8 +101,16 @@ function TodoNow() {
   const { base, can, hotel } = useHotel();
   const t = useApi<any>(`${base}/today`, [], 20_000);
   const items = t.data?.items ?? [];
-  const quick: [string, string, boolean][] = [['/keycards', 'Keycard request', can('keycards.request')], ['/keycards?tab=lockouts', 'Unpaid guest', can('lockout.request') && hotel.kind !== 'institution'],
-    ['/visionline?tab=lookup', 'Read a card', can('reports.read')], ['/muster', 'Who is in the building', can('muster.read')], ['/access', 'Access history', can('events.read')]];
+  // 2.24 The everyday tasks, one tap away (only those this person may do).
+  const quick: [string, string, string, boolean][] = [
+    ['/keycards?tab=verify', 'Verify or extend a keycard', 'Card on the encoder', can('keycards.read') || can('keycards.manage')],
+    ['/visionline?tab=lookup', 'Look up a card', 'By its number', can('reports.read')],
+    ['/keycards', 'Keycard request', 'New, replacement or return', can('keycards.request')],
+    ['/keycards?tab=lockouts', 'Unpaid guest', 'Lock-out request', can('lockout.request') && hotel.kind !== 'institution'],
+    ['/muster', 'Who is in the building', 'Live occupancy', can('muster.read')],
+    ['/events', 'Who opened a door', 'Event log', can('events.read')],
+    ['/battery', 'Lock batteries', 'Low and critical locks', can('battery.read')],
+    ['/monitoring', 'Alerts', 'Doors, connector, server', can('alerts.read')]];
   return (
     <section className="todo-now" aria-label="To do now">
       <div className="todo-list">
@@ -110,7 +118,7 @@ function TodoNow() {
           <Link key={i.id} to={i.to} className={`todo ${i.tone}`}><span className="todo-n">{i.n}</span><span><strong>{i.title}</strong><small>{i.detail}</small></span><span aria-hidden>→</span></Link>
         )) : <div className="todo ok"><span className="todo-n">✓</span><span><strong>Nothing waiting for you</strong><small>Updated {t.data ? fmt.rel(t.data.at) : '…'}</small></span></div>}
       </div>
-      <div className="quick">{quick.filter((q) => q[2]).map(([to, l]) => <Link key={to} to={to} className="chip">{l}</Link>)}</div>
+      <nav className="quick" aria-label="Shortcuts">{quick.filter((q) => q[3]).slice(0, 6).map(([to, l, d]) => <Link key={to} to={to} className="quick-task"><strong>{l}</strong><small>{d}</small></Link>)}</nav>
     </section>
   );
 }

@@ -1539,6 +1539,46 @@ async function main() {
     ok((await call('POST', `${H}/visionline/cards/99999999/verify`, gm, {})).json.error?.code === 'NO_HOLDER', 'a card not read from Visionline cannot be verified by its holder (read it on an encoder)');
     ok((await call('POST', `${H}/visionline/cards/${desk.json.regNo}/verify`, rest, {})).status === 403, 'the restaurant cannot verify keycards');
     ok((await call('POST', `${H}/visionline/cards/${desk.json.regNo}/verify`, lakeAdmin, {})).status === 403, 'another site cannot verify K Hotel Bana keycards');
+    // 2.23 Verify a keycard at the encoder and extend it.
+    const cmdDone = (tok: string, id: string) => until('command', () => call('GET', `${H}/commands/${id}`, tok), (r) => ['SUCCEEDED', 'FAILED', 'EXPIRED'].includes(r.json?.status), 60_000);
+    const pol23 = (await call('GET', `${H}/config/policy`, admin)).json.data;
+    await call('PUT', `${H}/config/policy`, admin, { ...pol23, keycards: { ...(pol23.keycards ?? {}), encodeEnabled: true, encoders: ['fd1'] } });
+    const readCheck = async (who: string) => {
+      const r = await call('POST', `${H}/keycards/check/read`, who, { encoder: 'fd1' });
+      if (r.status !== 200) return r;
+      return until('card read', () => call('GET', `${H}/keycards/check/${r.json.readId}`, who), (x) => ['SUCCEEDED', 'FAILED', 'EXPIRED'].includes(x.json?.status), 60_000).then((x) => ({ ...x, readId: r.json.readId }));
+    };
+    await sleep(3200);
+    await call('POST', `${SIM}/sim/encoder`, undefined, { encoder: 'fd1', regNo: String(desk.json.regNo) });
+    const ck = await readCheck(issuer) as any;
+    const k23 = ck.json?.card;
+    ok(ck.json?.status === 'SUCCEEDED' && k23?.holder === 'Ines Ndongo' && k23.valid && k23.label === 'HK 021' && k23.doors.length > 0, `Verify at the encoder: card ${k23?.regNo} is HK 021 of ${k23?.holder}, works until ${String(k23?.expiresAt).slice(0, 10)}`, ck.json);
+    ok(ck.json.extend?.possible === true, 'it can be extended from the portal', ck.json.extend);
+    ok((await call('POST', `${H}/keycards/check/read`, rest, { encoder: 'fd1' })).status === 403 && (await call('POST', `${H}/keycards/check/read`, lakeAdmin, { encoder: 'fd1' })).status === 403, 'the restaurant and another site cannot read keycards here');
+    const newDate = new Date(Date.now() + 360 * 86_400_000); newDate.setUTCHours(20, 59, 0, 0);
+    const ex = await call('POST', `${H}/keycards/check/${ck.readId}/extend`, issuer, { validUntil: newDate.toISOString() });
+    const exc = await cmdDone(issuer, ex.json.commandId);
+    ok(ex.status === 200 && exc.json.status === 'SUCCEEDED', `extended to ${newDate.toISOString().slice(0, 10)} at the encoder`, exc.json);
+    ok((await call('POST', `${H}/keycards/check/${ck.readId}/extend`, issuer, { validUntil: newDate.toISOString() })).json.error?.code === 'ALREADY_EXTENDED', 'the same reading cannot be used twice');
+    await sleep(1500);
+    const rg23 = (await call('GET', `${H}/keycards/register`, issuer)).json.find((x: any) => x.label === 'HK 021');
+    const rq23 = (await call('GET', `${H}/keycards/requests?q=Ndongo`, issuer)).json[0];
+    ok(rg23?.regNo === String(exc.json.result.regNo) && rq23.validUntil?.slice(0, 10) === newDate.toISOString().slice(0, 10) && rq23.history.some((h: any) => /Keycard extended/.test(h.what)),
+      'the register and the request follow the new card number and date', { rg23, until: rq23.validUntil });
+    await sleep(3200);
+    const ck2 = await readCheck(issuer) as any;
+    ok(ck2.json?.card?.valid && String(ck2.json.card.expiresAt).slice(0, 10) === newDate.toISOString().slice(0, 10), 'read again: Visionline says the card now works until the new date', ck2.json?.card);
+    // A card that had ended: it works again only when confirmed.
+    const old = await call('POST', `${SIM}/sim/desk/cards`, undefined, { userId: `vl-ol-${Date.now() % 100000}`, givenName: 'Paul', surname: 'Etoga', userGroup: 'Housekeeping', days: -2 });
+    await call('POST', `${SIM}/sim/encoder`, undefined, { encoder: 'fd1', regNo: String(old.json.regNo) });
+    await sleep(3200);
+    const ck3 = await readCheck(issuer) as any;
+    ok(ck3.json?.card && ck3.json.card.valid === false && ck3.json.card.expired, 'a card that ended reads as ended', ck3.json?.card);
+    ok((await call('POST', `${H}/keycards/check/${ck3.readId}/extend`, issuer, { validUntil: newDate.toISOString() })).json.error?.code === 'CARD_ENDED', 'making an ended card work again must be confirmed');
+    const re = await call('POST', `${H}/keycards/check/${ck3.readId}/extend`, issuer, { validUntil: newDate.toISOString(), reactivate: true });
+    ok(re.status === 200 && (await cmdDone(issuer, re.json.commandId)).json.status === 'SUCCEEDED', 'confirmed: the ended card works again until the new date');
+    ok((await call('POST', `${H}/keycards/check/${ck3.readId}/extend`, rest, { validUntil: newDate.toISOString() })).status === 403, 'only people who issue keycards can extend them');
+    await call('PUT', `${H}/config/policy`, admin, pol23);
     // A keycard in a generic name: the administrators get an e-mail (once per card).
     const gen = await call('POST', `${SIM}/sim/desk/cards`, undefined, { userId: `vl-st-${Date.now() % 100000}`, givenName: 'Staff', surname: '2', userGroup: 'Housekeeping', days: 30 });
     await until('generic card read', () => call('GET', `${H}/keycards/attention`, admin), (x) => x.json?.generic?.some((g: any) => g.regNo === String(gen.json.regNo)), 60_000);
@@ -1548,6 +1588,15 @@ async function main() {
     await call('POST', `${H}/monitoring/check`, admin, {});
     const m2 = (await call('GET', `${H}/monitoring/messages`, admin)).json.filter((m: any) => /in a generic name/.test(m.subject ?? '') && !m.contact);
     ok(m2.length === m1.length, 'the same card is not e-mailed again');
+  }
+
+  console.log('\n2.24: sign-in page on a public address');
+  {
+    const home = await fetch(`${API}/`);
+    ok(/noindex/.test(home.headers.get('x-robots-tag') ?? '') && /<meta name="robots" content="noindex/.test(await home.text()), 'search engines are asked not to list the portal (header and page)');
+    ok((await (await fetch(`${API}/robots.txt`)).text()).includes('Disallow: /'), 'robots.txt keeps search engines out');
+    const cfg = (await call('GET', `${API}/mobile/v1/config?hotel=k-hotel-bana`)).json;
+    ok(cfg.property?.kind === 'hotel' && !Object.keys(cfg.property).some((k) => /password|secret|token/i.test(k)), 'the sign-in page learns the property name and kind, nothing secret', cfg.property);
   }
 
   console.log('\nGate: every request is traceable without exposing secrets');

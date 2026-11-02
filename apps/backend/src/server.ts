@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { keycardCheckRoutes } from './keycard-check.ts';
 import { resolve } from 'node:path';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
@@ -61,6 +62,7 @@ export async function buildServer() {
     reply.header('x-content-type-options', 'nosniff');
     reply.header('x-frame-options', 'DENY');
     reply.header('referrer-policy', 'no-referrer');
+    reply.header('x-robots-tag', 'noindex, nofollow');
     reply.header('permissions-policy', 'camera=(self), microphone=(), geolocation=()');
     if (!reply.getHeader('content-security-policy'))
       reply.header('content-security-policy', "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'");
@@ -93,6 +95,7 @@ export async function buildServer() {
   reportBuilderRoutes(app);
   safetyRoutes(app);
   keycardRoutes(app);
+  keycardCheckRoutes(app);
   inviteRoutes(app);
   noticeRoutes(app);
   vlImportRoutes(app);

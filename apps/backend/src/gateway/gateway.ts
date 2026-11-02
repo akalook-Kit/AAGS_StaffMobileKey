@@ -121,6 +121,8 @@ const SECURITY_HEADERS: Record<string, string> = {
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
   'referrer-policy': 'no-referrer',
+  // 2.24 Reachable from the internet (tunnel / public address): search engines must not list the portal.
+  'x-robots-tag': 'noindex, nofollow',
   'permissions-policy': 'camera=(self), microphone=(), geolocation=()',
   'content-security-policy': "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
 };

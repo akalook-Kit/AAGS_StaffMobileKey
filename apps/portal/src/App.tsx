@@ -109,10 +109,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // Red band on every page while a critical system alert (disk space, connector, Visionline) is open.
   const banner = useApi<any[]>(hotel.permissions.includes('alerts.read') ? `${base}/monitoring/banner` : null, [hotel.id], 60_000);
   const b = branding.data?.data;
-  useEffect(() => {
-    applyBrand(b);
-    document.title = b?.portalTitle ?? `${hotel.name} · Access monitoring`;
-  }, [b, hotel.name]);
+  useEffect(() => { applyBrand(b); }, [b]);
   const can = (p: Permission) => hotel.permissions.includes(p);
   // 2.17 Own charts for everyone who can read some data.
   const chartsOk = (['reports.read', 'events.read', 'maintenance.read', 'key.read', 'breakfast.read'] as Permission[]).some((p) => hotel.permissions.includes(p));
@@ -139,8 +136,14 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     ['/settings', 'Settings', can('settings.manage')], ['/settings?tab=licence', 'Licence', can('settings.manage')], ['/audit', 'Audit trail', can('audit.read')], ['/usage', 'Usage', can('settings.manage')], ['/setup-report', 'System setup report', can('settings.manage')], ['/help', 'Help and manual', true], ['/account', 'My account', true],
   ] as [string, string, boolean][]).filter((x) => x[2]).map(([to, label]) => ({ to, label }));
 
+  // 2.24 Each page has its own title (browser tabs, history, bookmarks).
+  const here = `${loc.pathname}${loc.search}`;
+  const pageLabel = pageList.find((p) => p.to === here)?.label ?? pageList.find((p) => p.to !== '/' && loc.pathname.startsWith(p.to.split('?')[0]!))?.label ?? (loc.pathname === '/' ? 'Overview' : null);
+  useEffect(() => { const site = b?.portalTitle ?? `${hotel.name} · Access monitoring`; document.title = pageLabel ? `${pageLabel} · ${site}` : site; }, [pageLabel, b?.portalTitle, hotel.name]);
+
   return (
     <HotelCtx.Provider value={{ me: { ...me, prefs }, hotel, can, branding: b, reloadBranding: branding.reload, base, pages: pageList, setPrefs }}>
+      <a className="skip" href="#main">Skip to the page</a>
       <div className="shell">
         <aside className={`rail${menu ? ' open' : ''}`}>
           <button className="menu-btn" aria-expanded={menu} aria-label="Menu" onClick={() => setMenu(!menu)}>{menu ? '✕' : '☰'}</button>
@@ -208,7 +211,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <button onClick={onSignOut}>Sign out</button>
           </div>
         </aside>
-        <main className="content" key={hotel.id}>
+        <main className="content" id="main" tabIndex={-1} key={hotel.id}>
           <LicenceBanner />
           {hotel.mfaRequired && <div className="sys-banner no-print" role="alert"><strong>Two-step sign-in is required for administrators.</strong><span>Settings, Users and Branding open once it is on.</span><NavLink to="/account?tab=mfa">Turn it on →</NavLink></div>}
           {(banner.data ?? []).map((a) => (
@@ -266,12 +269,13 @@ const LOGIN_HOTEL = new URLSearchParams(location.search).get('hotel') ?? (import
 function Login({ onSignedIn }: { onSignedIn: (t: string) => void }) {
   const [brand, setBrand] = useState<any>(null);
   useEffect(() => {
-    api(`/mobile/v1/config?hotel=${encodeURIComponent(LOGIN_HOTEL)}`).then((c) => { setBrand({ ...c.branding, hotelName: c.hotel?.name }); applyBrand(c.branding); if (c.branding?.portalTitle) document.title = c.branding.portalTitle; }).catch(() => {});
+    api(`/mobile/v1/config?hotel=${encodeURIComponent(LOGIN_HOTEL)}`).then((c) => { setBrand({ ...c.branding, hotelName: c.property?.displayName ?? c.hotel?.name, kind: c.property?.kind, supportEmail: c.property?.supportEmail, supportPhone: c.property?.supportPhone }); applyBrand(c.branding); document.title = c.branding?.portalTitle ?? `${c.hotel?.name ?? 'Access Monitoring Tool'} · Sign in`; }).catch(() => {});
   }, []);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
   const [needTotp, setNeedTotp] = useState(false);
+  const [help, setHelp] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const submit = async (e: FormEvent) => {
@@ -282,56 +286,95 @@ function Login({ onSignedIn }: { onSignedIn: (t: string) => void }) {
       if (r.mfaRequired) setNeedTotp(true); else onSignedIn(r.token);
     } catch (err) { setError(err); } finally { setBusy(false); }
   };
+  const name = brand?.hotelName ?? null;
+  const org = brand?.kind === 'institution' ? 'institution' : 'hotel';
   return (
-    <div className="login">
-      <div className="side">
-        {brand?.logo ? <img className="brand-logo" src={brand.logo} alt={brand.hotelName ?? 'Logo'} /> : <div className="keytag" aria-hidden>101</div>}
-        <LoginFeed />
-      </div>
-      <form onSubmit={submit}>
-        <h1 style={{ marginBottom: 20 }}>Sign in</h1>
-        <ErrorNote error={error} />
-        {!needTotp ? (
-          <>
-            <div className="field"><label htmlFor="em">Work email</label><input id="em" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></div>
-            <div className="field"><label htmlFor="pw">Password</label><input id="pw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></div>
-          </>
-        ) : (
-          <div className="field"><label htmlFor="otp">Authentication code</label><input id="otp" inputMode="numeric" autoComplete="one-time-code" value={totp} onChange={(e) => setTotp(e.target.value)} autoFocus required /><span className="hint">The 6-digit code from your authenticator app.</span></div>
-        )}
-        <button className="btn primary" disabled={busy} style={{ width: '100%', justifyContent: 'center', padding: 10 }}>{busy ? 'Signing in…' : needTotp ? 'Verify' : 'Sign in'}</button>
-      </form>
+    <div className="landing">
+      <a className="skip" href="#signin">Skip to sign in</a>
+      <section className="land-hero" aria-label={name ?? 'Access Monitoring Tool'}>
+        <header className="land-top">
+          {brand?.logo ? <img className="land-logo" src={brand.logo} alt={name ?? 'Logo'} /> : <strong className="land-name">{name ?? 'Access Monitoring Tool'}</strong>}
+        </header>
+        <div className="land-copy">
+          <h1>{name ? <>Every door, keycard and lock at {name}.</> : <>Every door, keycard and lock, in one place.</>}</h1>
+          <p>Who opened which door, which keycards are in use, which locks need batteries, and who is in the building in an emergency. Read from Visionline; nothing is changed without a person asking for it.</p>
+        </div>
+        <TapScene logo={brand?.logo} name={name} />
+      </section>
+      <section className="land-form" id="signin" aria-label="Sign in">
+        <form onSubmit={submit}>
+          <h2>Sign in</h2>
+          <p className="muted small">{needTotp ? 'Enter the code from your authenticator app.' : `With the work e-mail address your ${org}'s administrator invited.`}</p>
+          <ErrorNote error={error} />
+          {!needTotp ? (
+            <>
+              <div className="field"><label htmlFor="em">Work email</label><input id="em" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></div>
+              <div className="field"><label htmlFor="pw">Password</label><input id="pw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></div>
+            </>
+          ) : (
+            <div className="field"><label htmlFor="otp">Authentication code</label><input id="otp" inputMode="numeric" autoComplete="one-time-code" value={totp} onChange={(e) => setTotp(e.target.value)} autoFocus required /><span className="hint">The 6-digit code from your authenticator app.</span></div>
+          )}
+          <button className="btn primary land-submit" disabled={busy}>{busy ? 'Signing in…' : needTotp ? 'Verify' : 'Sign in'}</button>
+          <button type="button" className="linklike" aria-expanded={help} onClick={() => setHelp(!help)}>Forgotten password or first time here?</button>
+          {help && (
+            <div className="land-help">
+              <p><strong>First time:</strong> open the invitation link from your e-mail and choose your password there.</p>
+              <p><strong>Forgotten password:</strong> ask an administrator for a password link (Users, then Password link). It works once.</p>
+              <p><strong>Lost the phone with your authenticator app:</strong> an administrator can reset your two-step sign-in.</p>
+              {(brand?.supportPhone || brand?.supportEmail) && <p><strong>Help:</strong> {brand.supportPhone && <a href={`tel:${brand.supportPhone}`}>{brand.supportPhone}</a>}{brand.supportPhone && brand.supportEmail ? ', ' : ''}{brand.supportEmail && <a href={`mailto:${brand.supportEmail}`}>{brand.supportEmail}</a>}</p>}
+            </div>
+          )}
+        </form>
+        <div className="land-more">
+          <LoginFeed />
+          <ul className="land-roles">
+            {ROLES.map(([t, d]) => <li key={t}><strong>{t}</strong><span>{d}</span></li>)}
+          </ul>
+          <p className="land-foot small muted">Access Monitoring Tool. Every sign-in and every change is kept in the audit trail.</p>
+        </div>
+      </section>
     </div>
   );
 }
 
 /**
- * 2.17 The sign-in page is not a blank form: it shows the notice board's public posts (written by the site's
- * administrators), what people find inside, and good-practice reminders, one after the other.
+ * 2.24 The one moving thing on the sign-in page: a keycard with the property's logo is held to a lock and the light
+ * turns green. Plays once; still with reduced motion.
  */
+function TapScene({ logo, name }: { logo?: string; name: string | null }) {
+  return (
+    <div className="tap" aria-hidden>
+      <div className="tap-card">
+        {logo ? <img src={logo} alt="" /> : <span className="tap-mono">{(name ?? 'Staff').split(/\s+/).map((w) => w[0]).join('').slice(0, 3)}</span>}
+        <span className="tap-label">Staff</span>
+      </div>
+      <div className="tap-lock"><span className="tap-led" /><span className="tap-handle" /></div>
+    </div>
+  );
+}
+
+/** 2.17 Notices (the site's public posts) and good-practice reminders, one after the other. */
 const LOGIN_TIPS = [
   { kind: 'tip', title: 'Lost a keycard?', body: 'Tell front office or security at once: the card is cancelled in minutes and nobody can use it.' },
   { kind: 'tip', title: 'Leaving the company?', body: 'Your manager asks for your keycard to be returned and cancelled; it takes one minute.' },
   { kind: 'tip', title: 'Your password is yours', body: 'Never share it. Turn on two-step sign-in under Your account for extra protection.' },
   { kind: 'tip', title: 'Lock batteries', body: 'When a lock shows a battery alarm, report it: changing batteries in good time avoids lock-outs.' },
 ];
-const INSIDE = [
-  ['Who opened which door', 'Event log and keycards per room, printable and verifiable.'],
-  ['Keycards', 'Requests, register, returns and who holds what, made in Visionline.'],
-  ['Safety', 'Live occupancy and roll call in an emergency.'],
-  ['Locks', 'Battery status, alarms, doors offline and maintenance requests.'],
-  ['Your charts', 'Build your own charts from the data you may see.'],
+const ROLES = [
+  ['Front office and security', 'Issue, verify and extend staff keycards, look up any card, see who is in the building.'],
+  ['Engineering', 'Lock batteries, locks offline, troubleshooting reports and maintenance requests.'],
+  ['Managers and HR', 'Keycard requests for their team, returns when someone leaves, reports and charts.'],
+  ['Administrators', 'Users, settings, the setup report and the audit trail.'],
 ];
 function LoginFeed() {
   const [posts, setPosts] = useState<any[]>([]);
   const [i, setI] = useState(0);
   useEffect(() => { api(`/api/v1/public/notices?hotel=${encodeURIComponent(LOGIN_HOTEL)}`).then((r) => setPosts(r.notices ?? [])).catch(() => undefined); }, []);
   const slides = [...posts, ...LOGIN_TIPS];
-  useEffect(() => { const t = setInterval(() => setI((x) => x + 1), 8000); return () => clearInterval(t); }, []);
+  useEffect(() => { const t = setInterval(() => setI((x) => x + 1), 9000); return () => clearInterval(t); }, []);
   const cur = slides[i % slides.length]!;
   return (
-    <div className="login-feed">
-      <h1 style={{ fontSize: 28, maxWidth: '18ch' }}>Doors, keycards and locks, in one place.</h1>
+    <div className="land-feed">
       <div className="login-slide" key={i % slides.length} aria-live="polite">
         {cur.image && <img src={cur.image} alt="" />}
         <span className={`notice-kind k-${cur.kind}`}>{cur.kind === 'tip' ? 'Good to know' : cur.kind === 'important' ? 'Important' : cur.kind === 'event' ? 'Event' : 'News'}</span>
@@ -339,7 +382,6 @@ function LoginFeed() {
         {cur.body && <p>{cur.body}</p>}
       </div>
       <div className="login-dots" role="tablist" aria-label="Messages">{slides.map((_, k) => <button key={k} aria-label={`Message ${k + 1}`} aria-pressed={k === i % slides.length} onClick={() => setI(k)} />)}</div>
-      <ul className="login-inside">{INSIDE.map(([t, d]) => <li key={t}><strong>{t}</strong><span>{d}</span></li>)}</ul>
     </div>
   );
 }

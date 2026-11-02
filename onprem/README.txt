@@ -14,6 +14,14 @@ WHAT THE SERVER NEEDS
   - .NET Framework 4.8 (part of Windows)
   - 2 GB free disk space (more as the database grows; Monitoring warns below 50 GB)
 
+NEW IN 2.24
+  New sign-in page (logo, keycard-and-lock picture, what each team does, help for a forgotten password), shortcuts
+  on the Overview, page titles, a clearer phone menu, no listing by search engines. Updated e-mail library.
+
+NEW IN 2.23
+  Staff keycards → Verify & extend: read a keycard on an encoder (Visionline says whose it is and until when it works)
+  and give it a new expiry date (180 / 360 / 730 days or a date), also for a card that had ended. Connector 0.16.0.
+
 NEW IN 2.22
   Verify a keycard with Visionline now: Card lookup (Verify with Visionline) and Staff keycards (Verify keycard).
 

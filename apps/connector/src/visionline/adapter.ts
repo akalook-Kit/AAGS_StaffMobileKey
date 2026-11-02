@@ -154,6 +154,9 @@ export class WebApiAdapter implements VisionlineAdapter {
       cancelled: d?.cancelled === true, expired: d?.expired === true, overridden: d?.overridden === true, timeSchedule: firstText(d?.timeSchedule),
       doors: [...new Set(ops.flatMap((o: any) => (Array.isArray(o?.doors) ? o.doors : []).map(String)))].slice(0, 300),
       doorGroups: [...new Set(ops.flatMap((o: any) => (Array.isArray(o?.doorGroups) ? o.doorGroups : []).map(String)))].slice(0, 100),
+      // 2.23 The door operations as Visionline has them, so the card can be written again with a new expiry.
+      operations: ops.slice(0, 10).map((o: any) => ({ operation: String(o?.operation ?? 'normal').slice(0, 30),
+        doors: (Array.isArray(o?.doors) ? o.doors : []).map(String).slice(0, 2000), doorGroups: (Array.isArray(o?.doorGroups) ? o.doorGroups : []).map(String).slice(0, 200) })),
       encoder, readAt: new Date().toISOString(),
       // 2.17 a phone's mobile key reads as serial FFFFFFFF; only this yes/no is passed on
       mobile: isMobileCard(d),
@@ -184,7 +187,10 @@ export class WebApiAdapter implements VisionlineAdapter {
     } else {
       if (p.kind === 'oneTime') { q.push('type=oneTime'); body[F.format] = 'rfid48'; } // [§7.22.3]
       if (p.kind === 'standOpen') q.push('type=standOpen'); // [§7.22.5] doors with operation normal only
-      const doors = ops(p.doorIds, p.kind === 'staff' ? p.onOffDoorIds : []);
+      // 2.23 Extending a card: its door operations exactly as read from Visionline (doors, door groups, operation).
+      const doors = p.kind === 'staff' && p.operations?.length
+        ? p.operations.filter((o) => o.doors.length || o.doorGroups.length).map((o) => ({ [F.operation]: o.operation, ...(o.doors.length ? { [F.doors]: o.doors } : {}), ...(o.doorGroups.length ? { doorGroups: o.doorGroups } : {}) }))
+        : ops(p.doorIds, p.kind === 'staff' ? p.onOffDoorIds : []);
       if (!doors.length) throw Object.assign(new Error('Choose at least one door for this card.'), { code: 'NO_DOORS' });
       body[F.doorOperations] = doors;
       // expireNow: the next whole minute + 1 (Visionline times have minute precision), so the card is dead a minute later.

@@ -109,6 +109,11 @@ export const EncodeKeycardPayload = z.object({
   timeSchedule: z.string().max(60).optional(),
   override: z.boolean().default(false),
   overwriteValidCard: z.boolean().default(false),
+  /**
+   * 2.23 Extend a keycard: the card's door operations exactly as Visionline read them (doors, door groups, operation),
+   * written again with the new expiry. Connector 0.16.0+ ("encode-operations"); older connectors would drop it.
+   */
+  operations: z.array(z.object({ operation: z.string().min(1).max(30), doors: z.array(z.string().min(1).max(100)).max(2000).default([]), doorGroups: z.array(z.string().min(1).max(100)).max(200).default([]) })).max(10).optional(),
 });
 export type EncodeKeycardPayload = z.infer<typeof EncodeKeycardPayload>;
 /** 2.14 Cancel a physical keycard by its registration number [Web API §5.10, POST /cards/{id} {cancelled:true}]. */

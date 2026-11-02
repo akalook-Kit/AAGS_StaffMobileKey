@@ -38,8 +38,8 @@ secrets, and the libraries the platform uses.
 
 | Library | Advisory | Why it waits | Exposure here |
 |---|---|---|---|
-| fast-uri 4.2.2 | URI scheme spoofing via percent-encoded scheme | Fixed in 4.2.3 (19 Oct) — usable from 2 Nov | Used inside the JSON validator for "uri" formats, which the portal's own checks do not use. Low. |
-| nodemailer 10.0.11 | address parser can turn display text into a recipient | Fixed in 10.1.4 (18 Oct) — usable from 1 Nov | Only addresses typed by administrators (checked as e-mail addresses) are used. Low. |
+| fast-uri 4.2.2 | URI scheme spoofing via percent-encoded scheme | Fixed in 4.2.3 (19 Oct 22:51 UTC) — two weeks old from 2 Nov evening: next release | Used inside the JSON validator for "uri" formats, which the portal's own checks do not use. Low. |
+| nodemailer 10.0.11 | address parser can turn display text into a recipient | **Done in 2.24: nodemailer 10.1.7** (18 Oct) | Only addresses typed by administrators (checked as e-mail addresses) are used. Low. |
 | @fastify/static (glob, minimatch) | denial of service / cancellation bypass in glob patterns | Fix only by going back a major version | The portal serves fixed files; no user-supplied patterns. Low. |
 
 ## Recommendations for the hotel

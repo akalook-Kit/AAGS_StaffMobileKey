@@ -64,7 +64,7 @@ export function mobileRoutes(app: FastifyInstance) {
     const versions = await many(pool, `SELECT kind, MAX(version) AS v FROM hotel_config_versions WHERE hotel_id=$1 GROUP BY kind`, [hotelId]);
     return {
       hotel, branding, features,
-      property: property && { displayName: property.displayName, supportEmail: property.supportEmail, supportPhone: property.supportPhone, homepage: property.homepage, timezone: property.timezone, address: property.address ?? null, buildings: property.buildings ?? [] },
+      property: property && { kind: property.kind === 'institution' ? 'institution' : 'hotel', displayName: property.displayName, supportEmail: property.supportEmail, supportPhone: property.supportPhone, homepage: property.homepage, timezone: property.timezone, address: property.address ?? null, buildings: property.buildings ?? [] },
       // For the vendor SDK: the site's Mobile Access UUID as configured in Visionline Options → Mobile Access.
       mobileAccess: { uuid: vl?.mobileAccessUuid ?? null },
       appPolicy: appPolicy && { privacyText: appPolicy.privacyText, supportEscalation: appPolicy.supportEscalation, partnerLinks: appPolicy.partnerLinks, allowedLinkHosts: appPolicy.allowedLinkHosts },

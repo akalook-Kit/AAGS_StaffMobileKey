@@ -201,7 +201,7 @@ function Groups() {
 
 /** 2.12 Card lookup: type (or read at an encoder) a card number; see whose it is, validity, doors, who issued it, last uses. */
 function Lookup({ encoders, canRead }: { encoders: string[]; canRead: boolean }) {
-  const { base } = useHotel();
+  const { base, can } = useHotel();
   const [sp, setSp] = useSearchParams();
   const [q, setQ] = useState(sp.get('card') ?? '');
   const reg = sp.get('card');
@@ -252,7 +252,8 @@ function Lookup({ encoders, canRead }: { encoders: string[]; canRead: boolean })
           <div className="panel">
             <div className="row" style={{ justifyContent: 'space-between' }}><h2 style={{ margin: 0 }}>{x.card.kind} <span className="mono">{x.regNo}</span></h2>{x.card.valid ? <span className="pill ok">Valid</span> : <span className="pill bad">Not valid</span>}</div>
             {!x.card.mobile && <div style={{ marginTop: 10 }}><VerifyCard key={x.regNo} regNo={x.regNo} onDone={() => void r.reload()} />
-              <span className="small muted">{x.card.lastSeen ? `Last read from Visionline ${fmt.dt(x.card.lastSeen)}.` : ''} Verify asks Visionline now about this card only.</span></div>}
+              <span className="small muted">{x.card.lastSeen ? `Last read from Visionline ${fmt.dt(x.card.lastSeen)}.` : ''} Verify asks Visionline now about this card only.</span>
+              {(can('keycards.read') || can('keycards.manage')) && <div className="small" style={{ marginTop: 4 }}><Link to="/keycards?tab=verify">Card in your hand? Verify it at an encoder and extend it →</Link></div>}</div>}
             <dl className="kv" style={{ marginTop: 12 }}>
               <dt>Holder</dt><dd>{x.card.holderId ? <Link to={`/access?holder=${encodeURIComponent(x.card.holderId)}`}>{x.card.holder}</Link> : x.card.holder ?? '—'}</dd>
               <dt>User group</dt><dd>{x.card.group ?? '—'}</dd>

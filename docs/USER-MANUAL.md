@@ -59,6 +59,34 @@ Every lock event received from Visionline (entrances, refused entries, alarms, b
 system events, with filters (period, type, door, person, known/unknown card). **Print** makes a PDF with a
 fingerprint (SHA-256) that can be checked later under *Verify a PDF*: any change to the file shows.
 
+### 5h. New in 2.24: sign-in page and finding your way
+
+- **Sign-in page:** the property's logo and name, a keycard held to a lock, what each team does in the portal, the
+  notice board's public posts, and *Forgotten password or first time here?* (invitation link, password link from an
+  administrator, two-step reset, the property's help contacts from Settings → Name & details). It works on phones too.
+- **Overview shortcuts:** the everyday tasks this person may do, one tap away: verify or extend a keycard, look up a
+  card, keycard request, unpaid guest, who is in the building, who opened a door, lock batteries, alerts.
+- Each page has its own browser-tab title; *Skip to the page* for keyboard users; on a phone the menu is one list.
+- On a public address (Cloudflare Tunnel) search engines are told not to list the portal (robots.txt and a no-index
+  header), and the portal can be added to a phone's home screen.
+
+### 5g. New in 2.23: Verify a keycard at an encoder and extend it
+
+**Staff keycards → Verify & extend** (also on an issued request: *Verify this keycard at an encoder, or extend it*):
+
+1. Place the keycard on an encoder, choose the encoder and press **Read the card**. Visionline itself answers: whose
+   card it is (and its card number HK …), its doors and door groups, and whether it works and until when — or that it
+   ended, was cancelled or replaced by a newer card. A card in a generic name is pointed out.
+2. To give it more time: choose **180 / 360 / 730 days** or any date, and press **Extend to …** while the card stays
+   on the encoder. The card is written again with the same holder, doors, door groups and time schedule; only the
+   expiry date changes. The register and the request follow the new date (and the new Visionline card number).
+3. A card that had **ended or was cancelled** can be made to work again the same way, after ticking the confirmation.
+
+Visionline keeps one staff card per person: if the holder has another valid staff card, the portal says so before,
+because that card stops working. Extending needs the right to issue keycards and encoding switched on (Settings →
+Keycards & encoders); cards with door groups need connector 0.16.0 (in the 2.23 installer). Card lookup links to this
+page ("Card in your hand?").
+
 ### 5f. New in 2.22: Verify a keycard
 
 **Verify with Visionline** (Visionline cards & people → Card lookup) and **Verify keycard** (Staff keycards → a request

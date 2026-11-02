@@ -21,6 +21,7 @@ import { genericCards } from '../generic-cards.ts';
 import { enqueue, newCorrelationId } from '../commands.ts';
 import { channels } from '../monitoring/monitor.ts';
 import { sendEmail } from '../monitoring/channels.ts';
+import { onKeycardExtended } from '../keycard-check.ts';
 import { buildAccountsReport, requestGuestCardRead, sendAccountsReport } from '../accounts-report.ts';
 
 const P = '/api/v1';
@@ -131,6 +132,7 @@ export async function onKeycardCommandResult(c: pg.PoolClient, cmd: any, result:
       [cmd.hotel_id, String(result.result.regNo), cmd.payload?.kind ?? 'staff', cmd.requested_by ?? null, cmd.id]);
   }
   const ctx = cmd.payload?.context as { requestId?: string; step?: string; lockoutId?: string } | undefined;
+  if ((ctx as any)?.step === 'extend') { await onKeycardExtended(c, cmd, result); return; }
   if ((ctx as any)?.departureDay) {
     const ok = result.status === 'SUCCEEDED';
     for (const x of (result.result?.results ?? []) as any[]) await c.query(`UPDATE departure_checks SET status=$4 WHERE hotel_id=$1 AND day=$2 AND room=$3 AND status='SENT'`, [cmd.hotel_id, (ctx as any).departureDay, x.door, x.ok ? 'REACHED' : 'FAILED']);

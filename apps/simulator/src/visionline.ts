@@ -186,6 +186,7 @@ export function registerVisionline(app: FastifyInstance, st: SimState, opts: {
             if (!door) return fail(reply, E.doorNotFound, 'The specified door does not exist.', `Door ${d}`);
             if (!doors.includes(door.id)) doors.push(door.id);
           }
+          for (const g of op.doorGroups ?? []) for (const door of st.doors.filter((x) => x.doorGroup === g)) if (!doors.includes(door.id)) doors.push(door.id);
         }
       }
       let expire = now() + 3650 * 86_400_000;

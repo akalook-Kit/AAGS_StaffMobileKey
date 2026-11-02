@@ -123,15 +123,15 @@ Optional check before pushing (needs Node.js 22): `npm ci` then `npm run typeche
 ## Catching up several releases at once (2.20)
 
 When several releases were not pushed, `scripts\git-catch-up.ps1` (also in the project zip) commits each one in order,
-with a tag per version (`v2.17.0`, `v2.17.1`, … `v2.20.0`), and pushes. Versions already tagged are skipped.
+with a tag per version (`v2.17.0`, `v2.17.1`, … `v2.24.0`), and pushes. Versions already tagged are skipped.
 
 ```powershell
 # 1. Put the project zips (access-monitoring-tool-project-<version>.zip) in Downloads.
 # 2. Get the script from the newest zip and run it:
-Expand-Archive "$env:USERPROFILE\Downloads\access-monitoring-tool-project-2.20.0.zip" "$env:TEMP\amt-2.20.0" -Force
-powershell -ExecutionPolicy Bypass -File "$env:TEMP\amt-2.20.0\access-monitoring-tool-project-2.20.0\scripts\git-catch-up.ps1" `
+Expand-Archive "$env:USERPROFILE\Downloads\access-monitoring-tool-project-2.24.0.zip" "$env:TEMP\amt-2.24.0" -Force
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\amt-2.24.0\access-monitoring-tool-project-2.24.0\scripts\git-catch-up.ps1" `
   -Repo C:\khb\staff-mobile-key\staff-mobile-key -From "$env:USERPROFILE\Downloads"
 ```
 
-Only the newest zip is strictly needed: each zip holds the whole project, so pushing 2.20.0 alone also brings every
+Only the newest zip is strictly needed: each zip holds the whole project, so pushing 2.24.0 alone also brings every
 earlier change (as one commit instead of one per version).

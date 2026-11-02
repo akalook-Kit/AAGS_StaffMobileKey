@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { VerifyCard } from '../components/VerifyCard';
+import { KeycardCheck } from '../components/KeycardCheck';
 import { useHotel, useTerms } from '../App';
 import { api, download } from '../api';
 import { Drawer, ErrorNote, PageHead, Status, fmt, useApi, waitForCommand } from '../ui';
 
-type Tab = 'requests' | 'register' | 'attention' | 'lockouts' | 'departures' | 'encoders';
+type Tab = 'requests' | 'verify' | 'register' | 'attention' | 'lockouts' | 'departures' | 'encoders';
 const KIND: Record<string, string> = { new: 'New keycard', replacement: 'Replacement', cancel: 'Cancellation' };
 const ST: Record<string, string> = { SUBMITTED: 'Waiting', ISSUED: 'Issued', REJECTED: 'Rejected', COLLECTED: 'Returned / cancelled', CANCELLED: 'Cancelled', WITHDRAWN: 'Withdrawn' };
 
@@ -17,7 +18,7 @@ export function KeycardsPage() {
   const { can } = useHotel();
   const t = useTerms();
   const [tab0, setTab] = useState<Tab>(() => (new URLSearchParams(location.search).get('tab') as Tab) ?? 'requests');
-  const tabs: [Tab, string, boolean][] = [['requests', 'Requests', true], ['register', 'Register', can('keycards.read')], ['attention', 'Renewals & duplicates', can('keycards.read')],
+  const tabs: [Tab, string, boolean][] = [['requests', 'Requests', true], ['verify', 'Verify & extend', can('keycards.read') || can('keycards.manage')], ['register', 'Register', can('keycards.read')], ['attention', 'Renewals & duplicates', can('keycards.read')],
     ['lockouts', 'Unpaid guests', !t.institution && (can('lockout.request') || can('lockout.approve'))], ['departures', 'Departures', !t.institution && can('lockout.request')], ['encoders', 'Encoders & special cards', can('keycards.read')]];
   // 2.16 Guest features (unpaid guests, departures) are for hotels only.
   const tab = tabs.some((x) => x[0] === tab0 && x[2]) ? tab0 : 'requests';
@@ -28,6 +29,7 @@ export function KeycardsPage() {
         {tabs.filter((t) => t[2]).map(([id, l]) => <button key={id} role="tab" aria-pressed={tab === id} onClick={() => { setTab(id); try { history.replaceState(null, '', `?tab=${id}`); } catch { /* ignore */ } }}>{l}</button>)}
       </div>
       {tab === 'requests' && <Requests />}
+      {tab === 'verify' && <KeycardCheck />}
       {tab === 'register' && <Register />}
       {tab === 'attention' && <Attention />}
       {tab === 'lockouts' && <Lockouts />}
@@ -162,6 +164,7 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
   const [regNo, setRegNo] = useState(r.cardRegNo ?? '');
   // 2.21 Issued from Visionline: which Visionline operator made it (empty = the user's own Visionline operator).
   const [vlOp, setVlOp] = useState('');
+  const [checkOpen, setCheckOpen] = useState(false);
   const vlOps = useApi<any[]>(`${base}/visionline/operators`);
   const [until, setUntil] = useState(isoToDate(r.validUntil));
   const [ret, setRet] = useState('returned');
@@ -236,6 +239,12 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
           <button className="btn primary" disabled={(method === 'existing' ? !regNo : !group) || Boolean(busy)} onClick={issue}>{method === 'encoder' ? 'Encode the card' : method === 'existing' ? 'Link this keycard' : 'Record as issued'}</button>
           {r.status === 'SUBMITTED' && <button className="btn" style={{ marginLeft: 8 }} onClick={act(() => api(`${base}/keycards/requests/${r.id}/reject`, { body: { reason: prompt('Why is it rejected?') ?? '' } }), 'Rejected.')}>Reject</button>}
         </section>
+      )}
+      {r.status === 'ISSUED' && r.kind !== 'cancel' && (can('keycards.read') || manage) && (
+        <details style={{ marginTop: 16 }} open={checkOpen} onToggle={(e) => setCheckOpen((e.target as HTMLDetailsElement).open)}>
+          <summary><strong>Verify this keycard at an encoder, or extend it</strong></summary>
+          {checkOpen && <KeycardCheck compact expectRegNo={r.cardRegNo} />}
+        </details>
       )}
       {manage && (r.kind === 'cancel' || r.status === 'ISSUED') && !['COLLECTED', 'REJECTED'].includes(r.status) && (
         <section style={{ marginTop: 16 }}>

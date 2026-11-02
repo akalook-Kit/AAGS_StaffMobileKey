@@ -18,7 +18,7 @@ import { readDirectory } from './visionline/directory.ts';
 /** Commands that change Visionline; refused in read-only mode. */
 const WRITES = new Set(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'CREATE_USER_GROUP', 'ENCODE_KEYCARD', 'CANCEL_KEYCARD', 'DOOR_COMMANDS']);
 
-export const CONNECTOR_VERSION = '0.15.0';
+export const CONNECTOR_VERSION = '0.16.0';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -126,7 +126,7 @@ export class Connector {
       visionlineWatch: this.watch.status,
       readOnly: this.cfg.visionline.readOnly,
       // Battery alarms ride on the Visionline watch; without the watch there are none to report.
-      capabilities: ['encoder-read', 'encode-keycard', 'door-commands', ...(this.cfg.visionline.watch ? ['battery-events', 'entrance-events', 'directory-sync', 'directory-sync-users'] : [])],
+      capabilities: ['encoder-read', 'encode-keycard', 'encode-operations', 'door-commands', ...(this.cfg.visionline.watch ? ['battery-events', 'entrance-events', 'directory-sync', 'directory-sync-users'] : [])],
       directorySync: this.directorySync,
       ...(this.disk ? { disk: this.disk } : {}),
     };

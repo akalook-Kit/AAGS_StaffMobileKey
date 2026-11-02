@@ -197,7 +197,7 @@ code, .mono { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; f
 @media (max-width: 900px) {
   .shell { grid-template-columns: 1fr; }
   .rail { position: static; height: auto; }
-  .rail nav { flex-direction: row; flex-wrap: wrap; }
+  .rail nav { flex-direction: column; flex-wrap: nowrap; }
   main.content { padding: 20px 16px 40px; }
   .split { grid-template-columns: 1fr; }
   .login { grid-template-columns: 1fr; }
@@ -733,7 +733,10 @@ table.grid td .row.end, table.grid td .row { flex-wrap: nowrap; } table.grid td:
 .todo-n { font-family: var(--tag); font-size: 26px; font-weight: 650; text-align: center; }
 .todo small { display: block; color: var(--ink-2); }
 .todo.bad .todo-n { color: var(--bad); }
-.quick { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.quick { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-top: 12px; }
+.quick-task { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--line); border-left: 3px solid var(--brass); border-radius: var(--radius); background: var(--surface); color: var(--ink); text-decoration: none; }
+.quick-task:hover { background: var(--hover); }
+.quick-task small { color: var(--ink-3); }
 .quick .chip { text-decoration: none; }
 
 /* 2.16 Settings → Connector: copyable commands and numbered steps */
@@ -831,3 +834,64 @@ ol.steps > li { margin-bottom: 14px; }
 .ssr-matrix tr.none td { color: var(--ink-2); background: var(--warn-bg, #f9eeda); }
 .ssr-param h4 { margin: 12px 0 4px; } .ssr-lines { margin: 0; padding-left: 18px; columns: 2; font-size: 12.5px; } .ssr-lines li { break-inside: avoid; }
 @media print { .ssr-matrix { font-size: 8pt; } .ssr-matrix th.rot { height: 90px; } }
+
+/* ---- 2.24 Sign-in landing page ------------------------------------------------------------------------- */
+.skip { position: absolute; left: -9999px; top: 8px; z-index: 50; background: var(--surface); color: var(--ink); padding: 8px 12px; border-radius: var(--radius); }
+.skip:focus { left: 8px; }
+.landing { min-height: 100%; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+.land-hero { background: var(--brand); color: var(--brand-ink); padding: 48px clamp(28px, 5vw, 72px); display: flex; flex-direction: column; gap: clamp(28px, 5vh, 56px); position: sticky; top: 0; height: 100vh; overflow: hidden; }
+.land-logo { width: min(300px, 70%); height: auto; display: block; }
+.land-name { font-size: 22px; color: #f6efe9; }
+.land-copy h1 { font-size: clamp(32px, 3.6vw, 54px); line-height: 1.06; letter-spacing: -0.02em; font-weight: 700; color: #f6efe9; max-width: 16ch; margin: 0 0 18px; text-wrap: balance; }
+.land-copy p { font-size: 17px; line-height: 1.55; max-width: 50ch; margin: 0; opacity: .86; }
+.tap { margin-top: auto; display: flex; align-items: center; gap: clamp(18px, 3vw, 40px); padding-bottom: 8px; }
+.tap-card { width: clamp(180px, 18vw, 250px); aspect-ratio: 86 / 54; border-radius: 12px; border: 1.5px solid var(--brass);
+  background: var(--brand); box-shadow: 0 18px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.08);
+  display: flex; flex-direction: column; justify-content: space-between; padding: 14px 16px; transform: rotate(-7deg);
+  animation: tap-in 1.1s cubic-bezier(.2,.8,.2,1) .25s backwards; }
+.tap-card img { width: 72%; height: auto; }
+.tap-mono { font-family: var(--tag); font-size: 34px; color: var(--brass); letter-spacing: .04em; }
+.tap-label { font-family: var(--tag); font-size: 15px; color: var(--brass); align-self: flex-end; }
+.tap-lock { position: relative; width: 66px; height: 168px; border-radius: 33px; background: color-mix(in srgb, var(--brand) 70%, #fff 30%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.12), 0 14px 30px rgba(0,0,0,.35); display: flex; flex-direction: column; align-items: center; padding-top: 22px; }
+.tap-led { width: 12px; height: 12px; border-radius: 50%; background: #7d7470; animation: tap-led .5s ease 1.25s forwards; }
+.tap-handle { position: absolute; top: 96px; left: 40px; width: 92px; height: 16px; border-radius: 8px; background: var(--brass); box-shadow: 0 6px 14px rgba(0,0,0,.3); }
+@keyframes tap-in { from { transform: translateX(-90px) rotate(-14deg); opacity: 0; } to { transform: rotate(-7deg); opacity: 1; } }
+@keyframes tap-led { to { background: #3fd68a; box-shadow: 0 0 0 4px rgba(63,214,138,.18), 0 0 18px rgba(63,214,138,.85); } }
+@media (prefers-reduced-motion: reduce) {
+  .tap-card { animation: none; }
+  .tap-led { animation: none; background: #3fd68a; box-shadow: 0 0 0 4px rgba(63,214,138,.18), 0 0 18px rgba(63,214,138,.85); }
+}
+.land-form { background: var(--bg); padding: clamp(40px, 12vh, 120px) clamp(20px, 5vw, 64px) 40px; display: flex; flex-direction: column; gap: 48px; }
+.land-form form, .land-more { width: min(400px, 100%); margin-inline: auto; }
+.land-form h2 { font-size: 30px; margin: 0 0 4px; letter-spacing: -0.01em; }
+.land-form form > p { margin: 0 0 18px; }
+.land-submit { width: 100%; justify-content: center; padding: 12px; font-size: 16px; }
+.linklike { background: none; border: 0; padding: 12px 0 0; color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font-size: 14px; }
+.land-help { margin-top: 10px; border-left: 3px solid var(--brass); padding: 2px 0 2px 14px; font-size: 14px; color: var(--ink-2); }
+.land-help p { margin: 6px 0; }
+.land-more { display: grid; gap: 28px; }
+.land-feed .login-slide { background: var(--surface); border-color: var(--line); color: var(--ink-2); }
+.land-feed .login-slide strong { color: var(--ink); }
+.land-feed .login-dots button { background: var(--line); }
+.land-feed .login-dots button[aria-pressed="true"] { background: var(--accent-text); }
+.land-feed { display: grid; gap: 10px; }
+.land-feed .notice-kind { align-self: flex-start; text-transform: none; letter-spacing: 0; }
+.land-roles { list-style: none; margin: 0; padding: 0; }
+.land-roles li { display: grid; gap: 2px; padding: 12px 0; border-top: 1px solid var(--line); }
+.land-roles li strong { font-size: 15px; }
+.land-roles li span { color: var(--ink-2); font-size: 14px; }
+.land-foot { margin: 0; }
+@media (max-width: 900px) {
+  .landing { grid-template-columns: 1fr; }
+  .land-hero { position: static; height: auto; padding: 24px 20px 28px; gap: 22px; }
+  .land-logo { width: min(200px, 60%); }
+  .land-copy h1 { font-size: 30px; }
+  .land-copy p { font-size: 15px; }
+  .tap { margin-top: 0; }
+  .tap-card { width: 150px; padding: 10px 12px; border-radius: 9px; }
+  .tap-mono { font-size: 26px; }
+  .tap-lock { width: 46px; height: 116px; padding-top: 16px; }
+  .tap-handle { top: 66px; left: 28px; width: 64px; height: 12px; }
+  .land-form { padding: 28px 20px 40px; gap: 36px; }
+}
