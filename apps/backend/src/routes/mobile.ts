@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { CS } from '@smk/shared';
 import { pool, tx, one, many } from '../db.ts';
 import { audit } from '../audit.ts';
-import { checkThrottle, clearFailures, recordFailure, requireStaff, signToken, verifyPassword } from '../auth.ts';
+import { checkThrottle, checkIpThrottle, recordIpFailure, checkPassword, clearFailures, recordFailure, requireStaff, signToken, verifyPassword } from '../auth.ts';
 import { csForHotel, CsError } from '../credential-services.ts';
 import { getConfig } from '../hotel-config.ts';
 import { ApiError, conflict } from '../lib/errors.ts';
@@ -33,9 +33,11 @@ export function mobileRoutes(app: FastifyInstance) {
     b.hotel = await resolveHotelSlug(b.hotel);
     const tkey = `staff:${b.hotel}:${b.email.toLowerCase()}`;
     checkThrottle(tkey);
+    checkIpThrottle(req.ip);
     const s = await one(pool, `SELECT s.*, h.slug FROM staff s JOIN hotels h ON h.id=s.hotel_id WHERE h.slug=$1 AND lower(s.email)=lower($2)`, [b.hotel, b.email]);
-    if (!s || !verifyPassword(b.password, s.password_hash)) {
-      recordFailure(tkey);
+    const pwOk = await checkPassword(b.password, s?.password_hash);
+    if (!s || !pwOk) {
+      recordFailure(tkey); recordIpFailure(req.ip);
       throw new ApiError(401, 'BAD_CREDENTIALS', 'Email or password is incorrect.');
     }
     if (s.status !== 'ACTIVE') throw new ApiError(403, 'SUSPENDED', 'Your access has been suspended. Contact your supervisor.');

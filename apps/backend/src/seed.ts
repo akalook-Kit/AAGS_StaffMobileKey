@@ -101,6 +101,7 @@ const gm = await operator('gm@khb.test', 'Gerald Manager');
 const hr = await operator('hr@khb.test', 'Hanna HR');
 const desk = await operator('desk@khb.test', 'Daniel Desk');
 const restaurant = await operator('restaurant@khb.test', 'Rita Restaurant');
+const safety = await operator('safety@khb.test', 'Fire Warden Screen');
 await member(admin, khb, 'HOTEL_ADMIN');
 await member(issuer, khb, 'KEY_ISSUER');
 await member(security, khb, 'SECURITY_MANAGER');
@@ -111,6 +112,7 @@ await member(gm, khb, 'HOTEL_MANAGEMENT');
 await member(hr, khb, 'HR_MANAGER');
 await member(desk, khb, 'TIMEKEEPER');
 await member(restaurant, khb, 'RESTAURANT');
+await member(safety, khb, 'SAFETY');
 
 await staff(khb, 'Amina Uwase', 'amina@khb.test', 'Housekeeper', 'khb-amina', 'Housekeeping');
 await staff(khb, 'Jean Mugisha', 'jean@khb.test', 'Housekeeper', 'khb-jean', 'Housekeeping');
@@ -158,7 +160,7 @@ await staff(lake, 'Lake Housekeeper', 'hk@lakeside.test', 'Housekeeper', 'lake-h
 
 await tx((c) => audit(c, { hotelId: null, actorType: 'system', action: 'seed.applied', details: { hotels: ['k-hotel-bana', 'demo-lakeside'] } }));
 console.log(`Seed complete.
-  Portal sign-in (password ${PW}): admin@khb.test · issuer@khb.test · security@khb.test · auditor@khb.test · maint@khb.test · tech@khb.test · gm@khb.test · hr@khb.test · desk@khb.test · restaurant@khb.test · platform@smk.test · admin@lakeside.test
+  Portal sign-in (password ${PW}): admin@khb.test · issuer@khb.test · security@khb.test · auditor@khb.test · maint@khb.test · tech@khb.test · gm@khb.test · hr@khb.test · desk@khb.test · restaurant@khb.test · safety@khb.test · platform@smk.test · admin@lakeside.test
   Staff app sign-in (hotel k-hotel-bana, password ${STAFF_PW}): amina@khb.test · jean@khb.test · peter@khb.test · brice@khb.test
   K Hotel Bana connector token: ${KHB_CONNECTOR_TOKEN}`);
 await pool.end();

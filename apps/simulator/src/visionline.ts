@@ -8,6 +8,9 @@ import { newId, newSecret, vlPublish, type SimState, type Card } from './state.t
  * 40101 clock skew, 40103 expired session, 40104 bad signature, 40406 unknown door, 40052 endpoint
  * not found, 40902 existing staff card, 50301 outage.
  */
+/** Simulated encoders: which keycard lies on which encoder (set with POST /sim/encoder, test only). */
+export const encoderCards = new Map<string, string>();
+
 export function registerVisionline(app: FastifyInstance, st: SimState, opts: {
   basePath: string; operators: Record<string, string>; accessIds: string[]; timeZone: string;
   onCardCreated: (c: Card) => void; onCardRevoked: (c: Card) => void;
@@ -142,6 +145,14 @@ export function registerVisionline(app: FastifyInstance, st: SimState, opts: {
   // ---- staff mobile key [§7.5.6]
   app.post(p('/cards'), async (req, reply) => {
     const q = req.query as Record<string, string>;
+    // 2.12 pilot: the card lying on an encoder (placed with POST /sim/encoder). Reading changes nothing.
+    if (q.action === 'read' || q.action === 'readCard') {
+      if (!q.encoder) return fail(reply, E.missingProperty, 'A mandatory parameter is missing in the query string of the request.');
+      const reg = encoderCards.get(q.encoder);
+      if (!reg) return fail(reply, 40024, `There is no card on encoder ${q.encoder}.`);
+      const c = [...st.cards.values()].find((x) => x.cardId === reg);
+      return { id: reg, cardHolder: c?.cardHolder ?? null };
+    }
     if (q.action !== VL.query.mobileAccess) return fail(reply, 50011, 'The requested functionality has not been implemented.', 'Simulator implements action=mobileAccess only');
     if (q.returnCredential === 'true') return fail(reply, 40326, 'Returning credentials is not enabled in this simulator.');
     const b = J(req);
@@ -228,7 +239,9 @@ export function registerVisionline(app: FastifyInstance, st: SimState, opts: {
       expired: c.expireTime <= t, notIssued: false, numberOfIssuedCards: c.plastic ? 1 : 0, serialNumbers: c.plastic ? ['04A1B2C3D4'] : [],
       timeSchedule: c.timeSchedule ?? null, created: toVisionlineLocal(new Date(c.createdAt), opts.timeZone) + String(new Date(c.createdAt).getUTCSeconds()).padStart(2, '0') + String(c.createdAt % 1000).padStart(3, '0'),
       startTime: toVisionlineLocal(new Date(c.startTime), opts.timeZone), expireTime: toVisionlineLocal(new Date(c.expireTime), opts.timeZone),
-      doorOperations: [{ operation: 'normal', doors: c.doors, doorGroups: [] }] };
+      doorOperations: [{ operation: 'normal', doors: c.doors, doorGroups: [] }],
+      // Staff privilege as shown in the Visionline card dialog (simulated): security and engineering cards override the deadbolt.
+      deadboltOverride: ['Security', 'Engineering'].includes(st.users.get(c.cardHolder)?.userGroup ?? '') };
   });
   // Cancel a card [§7.7.4]
   app.post(p('/cards/:id'), async (req, reply) => {

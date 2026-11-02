@@ -116,6 +116,26 @@ user groups, then every Visionline user and their valid keycards, without anyone
 every 6 hours, and records a keycard encoded at the Visionline desk within seconds. The hotel's own user groups
 replace the placeholder names. See **Visionline cards & people** in the portal and [VISIONLINE-DATA.md](VISIONLINE-DATA.md).
 
+## Installer (.msi) and licence (2.12)
+
+`StaffMobileKey-Server-<version>.msi` installs the same package as `Install.cmd` (it runs `install-onprem.ps1` as
+SYSTEM) and is the easiest way to hand the platform to a hotel's IT. New installations run as a 60-day trial;
+the licence key goes into **Settings → Licence**. Licence checks are switched on by the installer
+(`SMK_LICENSING=on`); existing installations start their trial on upgrade, so nothing locks. See
+[LICENSING.md](LICENSING.md).
+
+## New in 2.13
+
+Live occupancy and emergency (Safety), staff ID cards (CR80), dark mode, per-person menus and "Visionline only" focus,
+the licence window, usage and the signed supplier summary, administrator protection (two-step sign-in required),
+privacy retention, the user manual in the portal, and the Visionline limiter in the connector (0.11.0). Upgrade with
+the new `.msi` (or `Install.cmd`): data, settings and licence are kept; migration 017 adds the new tables. See
+[USER-MANUAL.md](USER-MANUAL.md), [SECURITY-REVIEW-2.13.md](SECURITY-REVIEW-2.13.md) and
+[SECURITY-AND-COMPLIANCE.md](SECURITY-AND-COMPLIANCE.md).
+
+For a **fire-warden screen**, create an operator with the role *Safety / fire warden* (Operators → Add operator), sign
+in on the PC by the security desk, open *Live occupancy* and press *Full screen*.
+
 ## Breakfast (2.11)
 
 Optional module for the restaurant (Settings → Modules → Breakfast): the in-house list is imported from the PMS
@@ -187,7 +207,7 @@ there is no inbound path, so the platform runs with `CS_CALLBACKS=off` and **ask
 | Keys being issued or revoked | every 10 s |
 | Issued keys (removed by a phone deletion or a Visionline override) | each key about every 2 minutes; keys on a deleted phone every 15 s |
 
-The automated checks run the full suite in this mode (312 checks). One thing is not available without callbacks:
+The automated checks run the full suite in this mode (350 checks). One thing is not available without callbacks:
 the *first use at a door* time (Credential Services READBACK). Lock events from Visionline still arrive through
 the connector.
 

@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, scrypt, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { SignJWT, jwtVerify } from 'jose';
 import { permissionsFor, withoutModules, type Permission, type Role } from '@smk/shared';
@@ -11,6 +11,30 @@ export function hashPassword(pw: string): string {
   const salt = randomBytes(16);
   const h = scryptSync(pw, salt, 32, { N: 16384, r: 8, p: 1 });
   return `scrypt$16384$${salt.toString('base64')}$${h.toString('base64')}`;
+}
+const scryptAsync = (pw: string, salt: Buffer, n: number) => new Promise<Buffer>((res, rej) => scrypt(pw, salt, 32, { N: n, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }, (e, k) => (e ? rej(e) : res(k))));
+const DUMMY_HASH = hashPassword('not-a-real-password');
+/**
+ * 2.13 (security review) Sign-in check that takes the same time whether or not the account exists (no e-mail
+ * guessing from response times) and does not block the server while hashing (scrypt runs in the thread pool).
+ */
+export async function checkPassword(pw: string, stored: string | null | undefined): Promise<boolean> {
+  const use = stored && stored.startsWith('scrypt$') ? stored : DUMMY_HASH;
+  const [, n, salt, hash] = use.split('$');
+  const h = await scryptAsync(pw, Buffer.from(salt!, 'base64'), Number(n));
+  const ref = Buffer.from(hash!, 'base64');
+  return use === stored && h.length === ref.length && timingSafeEqual(h, ref);
+}
+/** Failed sign-ins per address too, so one computer cannot try a password on many accounts. */
+const ipFailures = new Map<string, { n: number; since: number }>();
+export function checkIpThrottle(ip: string) {
+  const f = ipFailures.get(ip);
+  if (f && Date.now() - f.since < 15 * 60_000 && f.n >= 30) throw new ApiError(429, 'TOO_MANY_ATTEMPTS', 'Too many failed sign-in attempts from this computer. Try again in 15 minutes.');
+}
+export function recordIpFailure(ip: string) {
+  const f = ipFailures.get(ip);
+  if (!f || Date.now() - f.since >= 15 * 60_000) ipFailures.set(ip, { n: 1, since: Date.now() }); else f.n++;
+  if (ipFailures.size > 50_000) ipFailures.clear();
 }
 export function verifyPassword(pw: string, stored: string | null | undefined): boolean {
   if (!stored) return false;
@@ -63,7 +87,9 @@ export const clearFailures = (key: string) => failures.delete(key);
 const key = new TextEncoder().encode(config.jwtSecret);
 export type TokenClaims =
   | { typ: 'op'; sub: string; mfa: boolean }
-  | { typ: 'staff'; sub: string; hid: string };
+  | { typ: 'staff'; sub: string; hid: string }
+  /** 2.13 Proof that the operator re-entered the password a few minutes ago (sensitive actions). */
+  | { typ: 'reauth'; sub: string };
 
 export async function signToken(claims: TokenClaims, ttl = '8h') {
   return new SignJWT({ ...claims }).setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(ttl).setIssuer('smk').sign(key);
@@ -72,7 +98,7 @@ async function readToken(req: FastifyRequest): Promise<TokenClaims> {
   const h = req.headers.authorization;
   if (!h?.startsWith('Bearer ')) throw new ApiError(401, 'UNAUTHENTICATED', 'Sign in required.');
   try {
-    const { payload } = await jwtVerify(h.slice(7), key, { issuer: 'smk' });
+    const { payload } = await jwtVerify(h.slice(7), key, { issuer: 'smk', algorithms: ['HS256'] });
     return payload as unknown as TokenClaims;
   } catch {
     throw new ApiError(401, 'UNAUTHENTICATED', 'Session expired. Sign in again.');
@@ -85,13 +111,16 @@ export interface OperatorCtx {
   roles: Map<string, Role[]>; // hotelId -> roles
   /** hotelId -> portal modules hidden from this person (2.8). */
   hidden?: Map<string, string[]>;
+  /** 2.13 Two-step sign-in switched on for this account; hotels that require it for administrators. */
+  mfa?: boolean;
+  mfaRequiredIn?: Set<string>;
 }
 
 export async function requireOperator(req: FastifyRequest): Promise<OperatorCtx> {
   if ((req as any).operator) return (req as any).operator;
   const t = await readToken(req);
   if (t.typ !== 'op') throw new ApiError(401, 'UNAUTHENTICATED', 'Operator sign-in required.');
-  const op = await one(pool, 'SELECT id, email, display_name, is_platform_admin, status FROM operators WHERE id=$1', [t.sub]);
+  const op = await one(pool, 'SELECT id, email, display_name, is_platform_admin, status, mfa_enabled FROM operators WHERE id=$1', [t.sub]);
   if (!op || op.status !== 'ACTIVE') throw new ApiError(401, 'UNAUTHENTICATED', 'Account is disabled.');
   const roles = new Map<string, Role[]>();
   for (const m of await many(pool, 'SELECT hotel_id, role FROM memberships WHERE operator_id=$1', [op.id])) {
@@ -104,9 +133,17 @@ export async function requireOperator(req: FastifyRequest): Promise<OperatorCtx>
     for (const f of await many(pool, `SELECT DISTINCT ON (hotel_id) hotel_id, data FROM hotel_config_versions WHERE kind='features' AND hotel_id = ANY($1) ORDER BY hotel_id, version DESC`, [[...roles.keys()]])) {
       const adminsOnly = f.data?.mobileKeysVisibleTo === 'administrators' || f.data?.staffMobileKeys === false;
       if (adminsOnly && !(roles.get(f.hotel_id) ?? []).includes('HOTEL_ADMIN')) hidden.set(f.hotel_id, [...new Set([...(hidden.get(f.hotel_id) ?? []), 'mobileKeys'])]);
+      // 2.13 Visionline focus: the portal shows only the Visionline side to everyone but hotel administrators.
+      if (f.data?.portalFocus === 'visionline' && !(roles.get(f.hotel_id) ?? []).includes('HOTEL_ADMIN'))
+        hidden.set(f.hotel_id, [...new Set([...(hidden.get(f.hotel_id) ?? []), 'mobileKeys', 'attendance', 'breakfast', 'battery', 'maintenance'])]);
     }
   }
-  const ctx: OperatorCtx = { id: op.id, email: op.email, displayName: op.display_name, isPlatformAdmin: op.is_platform_admin, roles, hidden };
+  // 2.13 Hotels that require two-step sign-in for administrators (Settings -> Policy -> Administrator protection).
+  const mfaRequiredIn = new Set<string>();
+  if (!op.mfa_enabled && roles.size)
+    for (const p of await many(pool, `SELECT DISTINCT ON (hotel_id) hotel_id, data->'adminSecurity'->>'requireAdminMfa' AS req FROM hotel_config_versions WHERE kind='policy' AND hotel_id = ANY($1) ORDER BY hotel_id, version DESC`, [[...roles.keys()]]))
+      if (p.req === 'true') mfaRequiredIn.add(p.hotel_id);
+  const ctx: OperatorCtx = { id: op.id, email: op.email, displayName: op.display_name, isPlatformAdmin: op.is_platform_admin, roles, hidden, mfa: op.mfa_enabled, mfaRequiredIn };
   (req as any).operator = ctx;
   return ctx;
 }
@@ -121,7 +158,20 @@ export async function requirePerm(req: FastifyRequest, hotelId: string, perm: Pe
   const op = await requireOperator(req);
   if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this hotel.');
   if (!permsIn(op, hotelId).has(perm)) throw forbidden(`Missing permission: ${perm}`);
+  if (ADMIN_AREAS.has(perm) && !op.mfa && op.mfaRequiredIn?.has(hotelId) && (op.isPlatformAdmin || (op.roles.get(hotelId) ?? []).includes('HOTEL_ADMIN')))
+    throw new ApiError(403, 'MFA_REQUIRED', 'This hotel requires two-step sign-in for administrators. Turn it on in Your account -> Two-step sign-in, then sign in again.');
   return op;
+}
+const ADMIN_AREAS = new Set<Permission>(['settings.manage', 'operators.manage', 'connector.manage', 'branding.manage']);
+
+/** 2.13 A short-lived proof that the person re-entered the password (sent as the X-SMK-Reauth header). */
+export async function requireReauth(req: FastifyRequest, op: OperatorCtx) {
+  const t = String(req.headers['x-smk-reauth'] ?? '');
+  try {
+    const { payload } = await jwtVerify(t, key, { issuer: 'smk', algorithms: ['HS256'] });
+    if (payload.typ === 'reauth' && payload.sub === op.id) return;
+  } catch { /* fall through */ }
+  throw new ApiError(401, 'REAUTH_REQUIRED', 'Confirm your password to continue.');
 }
 
 export async function requireStaff(req: FastifyRequest): Promise<{ staffId: string; hotelId: string }> {

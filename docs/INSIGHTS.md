@@ -1,4 +1,4 @@
-# Insights (management reports) — release 2.5
+# Insights (management reports) — release 2.5, builder 2.12
 
 **Insights** is a report canvas in the portal, laid out like a Power BI report: slicers across the top
 (period 7/30/90/365 days, user group, floor), KPI tiles with the change against the previous period and a
@@ -22,6 +22,29 @@ trend line, and report pages. Every chart has a **Table** view and a CSV export,
 | **Locks & batteries** | Alarms and refused entries per lock, alarm types; battery life from Visionline events: median days from battery change to "low", locks **draining fast**, locks **doing well**, locks **due soon** (predicted to reach "low" within 30 days) |
 | **Maintenance** | Requests by category and status, overdue, workload and average time to resolve per person |
 | **Valid keycards** | Searchable list of every valid card: holder, group, valid from/until, doors, time schedule; filter "expiring within N days" |
+| **Door activity** (2.12) | Entrances by hour of the day and by day of the week (refused entries in red), busiest doors, most active people, keycards vs. mobile keys at the doors, who issued the cards used. Follows the period and user-group slicers |
+| **My reports** (2.12) | Reports people build themselves (below), plus a gallery of ready-made ones to start from |
+
+## Build your own report (2.12)
+
+**＋ Build a report** (top right of Insights) opens the builder: pick the data, what to show, group by, split by
+(colours), the chart (bars, columns, line, table), the period, how many groups, and filters. The report
+redraws as you change it; **click a bar** to keep only that group. **Save** it with a name, **pin** it to the
+Summary page, and optionally **share** it with everyone who can read reports. Every report exports to CSV.
+
+| Data | Group or split by | Show |
+|---|---|---|
+| Door events | event type (entrance / refused / other), door, floor, person, user group, keycard or mobile key, issued by, card number, day, day of the week, hour, month | events, different people, different doors |
+| Keycards | user group, keycard or mobile key, valid or ended, **deadbolt override**, issued by, when they end, doors on the card, time schedule | keycards, people |
+| Mobile keys issued | status, issued by, user group, job, access template, normal or broad, how it ended, day, day of the week, month | keys, different staff |
+| Lock alarms | type, door, open or confirmed, day, day of the week, month | alarms, different doors |
+| Maintenance requests | category, priority, status, reported from, assigned to, door or place, on time, day, month | requests, average hours to resolve |
+| Breakfast served | in the rate / paying / walk-in, room, recorded by, day, day of the week, hour | guests served, entries |
+
+Each data set needs its own permission (door events: Event log; mobile keys: keys; maintenance; breakfast), so a
+person only builds reports on what they may already see. Reports are definitions only (never copies of the data):
+every time they open, they show today's numbers. Only listed fields can be used; nothing typed in the browser
+reaches the database query.
 
 Exports (CSV, UTF-8 with BOM so Excel keeps accents, formula-safe): `valid-cards`, `user-groups`,
 `lock-activity`, `battery-life`, `departments`, `maintenance-workload`. Each export is recorded in the audit

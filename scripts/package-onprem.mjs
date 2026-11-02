@@ -30,8 +30,10 @@ rmSync(outRoot, { recursive: true, force: true });
 mkdirSync(join(out, 'app'), { recursive: true });
 const common = {
   bundle: true, platform: 'node', target: 'node22', format: 'esm', legalComments: 'none', logLevel: 'warning',
+  // 2.12 Hotels receive programs, not source code: bundled and minified, no source maps (names kept for error reports).
+  minify: true, keepNames: true, sourcemap: false,
   external: ['pg-native'],
-  define: { 'process.env.SMK_BUILD_VERSION': JSON.stringify(version) },
+  define: { 'process.env.SMK_BUILD_VERSION': JSON.stringify(version), __SMK_PACKAGED__: 'true' },
   banner: { js: "import { createRequire as __smkCreateRequire } from 'node:module'; const require = __smkCreateRequire(import.meta.url);" },
 };
 const be = join(root, 'apps/backend/src');
@@ -50,7 +52,7 @@ const op = join(root, 'onprem');
 cpSync(join(op, 'service'), join(out, 'service'), { recursive: true });
 // Windows tools: CRLF line endings (cmd.exe needs them; Notepad shows them right).
 const crlf = (t) => t.replace(/\r?\n/g, '\r\n');
-for (const f of ['Install.cmd', 'Uninstall.cmd', 'install-onprem.ps1', 'database-tools.ps1', 'set-platform-secrets.ps1', 'set-external-access.ps1', 'rollback-onprem.ps1', 'uninstall-onprem.ps1', 'README.txt', 'gateway.config.template.json'])
+for (const f of ['Install.cmd', 'Uninstall.cmd', 'install-onprem.ps1', 'database-tools.ps1', 'set-platform-secrets.ps1', 'set-external-access.ps1', 'rollback-onprem.ps1', 'uninstall-onprem.ps1', 'README.txt', 'gateway.config.template.json', 'Open-StaffMobileKey.cmd', 'open-portal.ps1'])
   writeFileSync(join(out, f), /\.(cmd|ps1|txt)$/.test(f) ? crlf(readFileSync(join(op, f), 'utf8')) : readFileSync(join(op, f)));
 cpSync(connectorDir, join(out, 'connector'), { recursive: true });
 writeFileSync(join(out, 'VERSION'), `${version}\r\n`);

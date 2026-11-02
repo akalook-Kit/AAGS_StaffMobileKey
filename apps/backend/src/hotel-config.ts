@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { assertModuleLicensed } from './licence.ts';
 import { pool, one, many, type Db } from './db.ts';
 import { badRequest } from './lib/errors.ts';
 import { validateImageDataUrl, contrastRatio } from './lib/images.ts';
@@ -70,6 +71,8 @@ export const SCHEMAS = {
     staffMobileKeys: z.boolean(),
     /** While the hotel finalises mobile keys: show the module to everyone with the permission, or to administrators only. */
     mobileKeysVisibleTo: z.enum(['everyone', 'administrators']).default('everyone'),
+    /** 2.13 'visionline': everyone except hotel administrators sees only the Visionline side (cards, access, events, reports, monitoring). */
+    portalFocus: z.enum(['full', 'visionline']).default('full'),
     /** 2.8 Time & attendance. */
     timeAttendance: z.boolean().default(false),
     /** 2.11 Breakfast: in-house list and restaurant check-off. */
@@ -167,6 +170,48 @@ export const SCHEMAS = {
       /** Guests without breakfast in their rate, and rooms not on the list, can still be served and are reported as paying. */
       allowWalkIns: z.boolean().default(true),
     }).prefault({}),
+    /** 2.13 Live occupancy (muster) and emergencies. */
+    safety: z.object({
+      /** A staff member counts as on site when a door saw their card or mobile key in the last N hours (no attendance check-out). */
+      staffOnSiteHours: z.number().int().min(1).max(24).default(10),
+      /** A room counts as in use when its door was opened in the last N hours. */
+      roomActivityHours: z.number().int().min(1).max(48).default(12),
+      /** Visionline user groups that are guests or contractors, not staff (counted separately). */
+      visitorGroups: z.array(z.string().min(1).max(60)).default([]),
+      /** Mobile-key template used for emergency keys for responders (all doors). Empty = choose doors each time. */
+      emergencyTemplateId: z.string().uuid().optional().nullable(),
+      /** How long emergency keys stay valid (hours). */
+      emergencyKeyHours: z.number().int().min(1).max(24).default(4),
+      /** Floors from room numbers: the first N characters of the door name (0 = guess: all but the last 2 digits). */
+      floorDigits: z.number().int().min(0).max(4).default(0),
+    }).prefault({}),
+    /** 2.13 Staff ID card layout (CR80, 85.6 × 54 mm). */
+    idCard: z.object({
+      orientation: z.enum(['portrait', 'landscape']).default('portrait'),
+      title: z.string().max(40).default('STAFF'),
+      showDepartment: z.boolean().default(true),
+      showJobTitle: z.boolean().default(true),
+      showIdNumber: z.boolean().default(true),
+      showValidUntil: z.boolean().default(false),
+      /** Barcode (Code 128) of the ID number, for attendance scanners and canteen tills. */
+      showBarcode: z.boolean().default(true),
+      backText: z.string().max(240).default('This card is the property of the hotel. If found, please return it to reception.'),
+      /** Printer margin: most direct-to-card printers do not print the outer 0.5–1 mm; retransfer printers print edge to edge. */
+      safeMarginMm: z.number().min(0).max(4).default(1.5),
+    }).prefault({}),
+    /** 2.13 Privacy: how long personal data is kept (days; 0 = keep). The audit trail is always kept. */
+    privacy: z.object({
+      lockEventsDays: z.number().int().min(0).max(3650).default(730),
+      guestListDays: z.number().int().min(0).max(3650).default(400),
+      usageDays: z.number().int().min(0).max(3650).default(730),
+    }).prefault({}),
+    /** 2.13 Administrator protection. */
+    adminSecurity: z.object({
+      /** Hotel administrators must use two-step sign-in before they can open Settings, Operators or emergency functions. */
+      requireAdminMfa: z.boolean().default(false),
+      /** Minutes a password confirmation stays valid for sensitive actions (emergency, passwords, licence). */
+      reauthMinutes: z.number().int().min(1).max(30).default(5),
+    }).prefault({}),
     /** Phase 2 maintenance requests. */
     maintenance: z.object({
       /** Due time given to a new request by priority, in hours. */
@@ -199,12 +244,22 @@ export const SCHEMAS = {
      *  scope "staffGroups" reads the user groups listed above; "all" reads every Visionline user. */
     directorySync: z.object({
       enabled: z.boolean().default(false),
-      scope: z.enum(['staffGroups', 'all']).default('staffGroups'),
+      scope: z.enum(['staffGroups', 'groups', 'all']).default('staffGroups'),
+      /** 2.12 With scope "groups": exactly these Visionline user groups. */
+      groups: z.array(z.string().min(1).max(80)).max(200).default([]),
+      /** 2.13 Run the full read only at night (22:00-06:00 hotel time) to leave Visionline to the GRMS/PMS by day. */
+      quietHoursOnly: z.boolean().default(false),
       includeCards: z.boolean().default(true),
       includeAlarms: z.boolean().default(true),
       everyHours: z.number().int().min(1).max(168).default(24),
       maxUsers: z.number().int().min(10).max(20000).default(3000),
-    }).default({ enabled: false, scope: 'staffGroups', includeCards: true, includeAlarms: true, everyHours: 24, maxUsers: 3000 }),
+    }).default({ enabled: false, scope: 'staffGroups', groups: [], quietHoursOnly: false, includeCards: true, includeAlarms: true, everyHours: 24, maxUsers: 3000 }),
+    /** 2.12 pilot: read the keycard on a Visionline encoder (Visionline cards & people → Card lookup). */
+    encoderRead: z.object({
+      enabled: z.boolean().default(false),
+      encoders: z.array(z.string().regex(/^[\w .-]{1,40}$/)).max(20).default([]),
+      action: z.enum(['read', 'readCard']).default('read'),
+    }).default({ enabled: false, encoders: [], action: 'read' }),
   }).transform((v) => ({ ...v, userGroups: [...new Set([v.defaultUserGroup, ...v.userGroups])] })),
   credential_services: z.object({
     baseUrl: z.string().url(),
@@ -261,7 +316,7 @@ export type ConfigKind = keyof typeof SCHEMAS;
 export const CONFIG_KINDS = Object.keys(SCHEMAS) as ConfigKind[];
 
 /** Modules that exist in this release. Phase 3 modules cannot be switched on yet (spec §13.4.3). */
-const AVAILABLE_FEATURES = new Set(['staffMobileKeys', 'batteryMonitoring', 'maintenance', 'timeAttendance', 'breakfast', 'mobileKeysVisibleTo']);
+const AVAILABLE_FEATURES = new Set(['staffMobileKeys', 'batteryMonitoring', 'maintenance', 'timeAttendance', 'breakfast', 'mobileKeysVisibleTo', 'portalFocus']);
 
 export async function validateConfig(db: Db, hotelId: string, kind: ConfigKind, raw: unknown) {
   const parsed = SCHEMAS[kind].safeParse(raw);
@@ -272,6 +327,8 @@ export async function validateConfig(db: Db, hotelId: string, kind: ConfigKind, 
       throw badRequest('FEATURE_UNAVAILABLE', `${k} is not available in this release. It requires its module, licence and connector capability.`);
     // Battery monitoring needs a connector whose Visionline watch reads battery events (connector 0.5.0+).
     const before = await getConfig(db, hotelId, 'features');
+    // 2.12 A module can be switched on only when the hotel's licence (or trial) includes it.
+    for (const [k, v] of Object.entries(data)) if (v === true && !before?.[k]) await assertModuleLicensed(db, hotelId, k);
     if (data.batteryMonitoring && !before?.batteryMonitoring) {
       const c = await one(db, `SELECT 1 FROM connectors WHERE hotel_id=$1 AND status='ACTIVE' AND health->'capabilities' ? 'battery-events'`, [hotelId]);
       if (!c) throw badRequest('CONNECTOR_CAPABILITY', 'Battery monitoring needs connector 0.5.0 or newer with the Visionline watch switched on. Update the connector, then try again.');

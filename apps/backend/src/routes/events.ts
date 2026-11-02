@@ -27,6 +27,8 @@ const Filter = z.object({
     .refine((a) => !a || a.every((c) => (CATEGORIES as readonly string[]).includes(c)), 'Unknown category'),
   door: z.string().max(120).optional().transform((v) => v || null),
   q: z.string().max(100).optional().transform((v) => v?.trim() || null),
+  /** 2.12 Only lock events whose keycard is (not) known: 'unknown' finds cards that match nothing in Visionline or the platform. */
+  match: z.enum(['any', 'known', 'unknown']).default('any'),
 }).refine((f) => f.to > f.from, 'The end must be after the start').refine((f) => f.to.getTime() - f.from.getTime() <= MAX_DAYS * 86400_000, `At most ${MAX_DAYS} days at a time`);
 
 const CLASS_TITLE: Record<EventClass, string> = { all: 'Event log - all events', entrances: 'Event log - entrance events', errors: 'Event log - error events' };

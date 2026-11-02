@@ -13,7 +13,7 @@
 param(
   [string]$Url = '', [string]$User = '', [string]$AccessId = '', [string]$CaFile = '', [string]$Pin = '', [string]$ServerName = '',
   [string]$SaveCert = '', [string]$Groups = 'Housekeeping,Maintenance,Security,Management,Front Office', [int]$Uuid = 9,
-  [switch]$TlsOnly, [string]$NodePath = '', [string]$ClientUuid = ''
+  [switch]$TlsOnly, [string]$NodePath = '', [string]$ClientUuid = '', [string]$Encoder = ''
 )
 $ErrorActionPreference = 'Continue'
 $cfgFile = Join-Path $env:ProgramData 'StaffMobileKey\Connector\connector.config.json'
@@ -23,6 +23,10 @@ if (-not $Url) { $Url = $(if ($vl -and $vl.baseUrl) { $vl.baseUrl } else { 'http
 if (-not $CaFile -and $vl -and $vl.caFile) { $CaFile = $vl.caFile }
 if (-not $ServerName -and $vl -and $vl.servername) { $ServerName = $vl.servername }
 if (-not $Pin -and $vl -and $vl.pinSha256) { $Pin = $vl.pinSha256 }
+if (-not $NodePath) {
+  # The all-in-one server package brings its own Node.js; use it before looking for one installed on the PC.
+  foreach ($p in (Join-Path $env:ProgramFiles 'StaffMobileKey\Runtime\node\node.exe'), (Join-Path $PSScriptRoot '..\runtime\node\node.exe')) { if (Test-Path $p) { $NodePath = (Resolve-Path $p).Path; break } }
+}
 if (-not $NodePath) { $c = Get-Command node -ErrorAction SilentlyContinue; if (-not $c) { Write-Host 'Node.js 22 is needed (https://nodejs.org).' -ForegroundColor Red; exit 1 }; $NodePath = $c.Source }
 
 $a = @((Join-Path $PSScriptRoot 'app\probe.mjs'), '--url', $Url, '--groups', $Groups, '--uuid', "$Uuid", '--out', (Join-Path (Get-Location) 'visionline-probe-report'))
@@ -39,5 +43,6 @@ if ($Pin) { $a += @('--pin', $Pin) }
 if ($ServerName) { $a += @('--servername', $ServerName) }
 if ($SaveCert) { $a += @('--save-cert', $SaveCert) }
 if ($TlsOnly) { $a += '--tls-only' }
+if ($Encoder) { $a += @('--encoder', $Encoder) }
 & $NodePath @a
 exit $LASTEXITCODE

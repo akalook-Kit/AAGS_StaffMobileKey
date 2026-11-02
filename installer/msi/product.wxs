@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Staff Mobile Key server installer (.msi). Built by scripts/build-msi.mjs with wixl (msitools); the files come from
+     the on-premises package. The .msi copies the package to Program Files\StaffMobileKey\Setup and runs the same
+     installer as Install.cmd (install-onprem.ps1) as SYSTEM. Upgrades: install the newer .msi over the old one. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Staff Mobile Key Server" Language="1033" Version="$(var.Version)" Manufacturer="$(var.Manufacturer)"
+           UpgradeCode="6B0E3B2C-8F4A-4C61-9B2E-3D7A51C0E912">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Description="Staff Mobile Key Server $(var.Version)"
+             Comments="Visionline staff mobile keys, reports and monitoring, installed on the hotel's Visionline server." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Staff Mobile Key Server is already installed." />
+    <Media Id="1" Cabinet="smk.cab" EmbedCab="yes" />
+    <Condition Message="Staff Mobile Key Server needs a 64-bit Windows.">VersionNT64</Condition>
+    <Condition Message="Run the installation as an administrator.">Privileged</Condition>
+
+    <Property Id="ARPHELPLINK" Value="$(var.HelpLink)" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <!-- Options for install-onprem.ps1, e.g.  msiexec /i StaffMobileKey.msi SMK_OPTIONS="-LanPort 9443" -->
+    <Property Id="SMK_OPTIONS" Secure="yes" Value=" " />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="SMKROOT" Name="StaffMobileKey">
+          <Directory Id="INSTALLDIR" Name="Setup" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder" />
+    </Directory>
+
+    <DirectoryRef Id="ProgramMenuFolder">
+      <Component Id="StartMenu" Guid="4C5D2E19-0B7B-4F8E-8E54-61C7A9D20B31" Win64="yes">
+        <Shortcut Id="OpenPortal" Name="Staff Mobile Key" Description="Open the Staff Mobile Key portal on this server"
+                  Target="[INSTALLDIR]Open-StaffMobileKey.cmd" WorkingDirectory="INSTALLDIR" />
+        <RegistryValue Root="HKLM" Key="Software\StaffMobileKey\Server" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Server" Title="Staff Mobile Key Server" Level="1">
+      <ComponentGroupRef Id="PackageFiles" />
+      <ComponentRef Id="StartMenu" />
+    </Feature>
+
+    <!-- Install / upgrade: the package's own installer, as SYSTEM, after the files are in place. -->
+    <CustomAction Id="SetPowerShell" Property="SMK_PS" Value="[System64Folder]WindowsPowerShell\v1.0\powershell.exe" />
+    <CustomAction Id="RunServerInstaller" Property="SMK_PS" Execute="deferred" Impersonate="no" Return="check"
+                  ExeCommand="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLDIR]install-onprem.ps1&quot; -NoBrowser [SMK_OPTIONS]" />
+    <!-- Uninstall (not on upgrade): services and programs go, the hotel's data is kept. -->
+    <CustomAction Id="RunServerUninstaller" Property="SMK_PS" Execute="deferred" Impersonate="no" Return="ignore"
+                  ExeCommand="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLDIR]uninstall-onprem.ps1&quot;" />
+    <!-- At the end of an interactive installation: open the portal (first-run setup page on a new server). -->
+    <CustomAction Id="SetCmd" Property="SMK_CMD" Value="[System64Folder]cmd.exe" />
+    <CustomAction Id="OpenPortalNow" Property="SMK_CMD" Execute="immediate" Impersonate="yes" Return="asyncNoWait"
+                  ExeCommand="/c &quot;&quot;[INSTALLDIR]Open-StaffMobileKey.cmd&quot;&quot;" />
+
+    <InstallExecuteSequence>
+      <Custom Action="SetPowerShell" After="CostFinalize">1</Custom>
+      <Custom Action="SetCmd" After="SetPowerShell">1</Custom>
+      <Custom Action="RunServerUninstaller" Before="RemoveFiles">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="RunServerInstaller" Before="InstallFinalize">NOT REMOVE</Custom>
+      <Custom Action="OpenPortalNow" After="InstallFinalize">NOT REMOVE AND UILevel &gt;= 3</Custom>
+    </InstallExecuteSequence>
+  </Product>
+</Wix>

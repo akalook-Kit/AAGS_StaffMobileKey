@@ -73,12 +73,18 @@ Developers can also run the services directly with Node.js 22 (`npm install`, `n
 
 | Guide | For |
 |---|---|
+| [docs/USER-MANUAL.md](docs/USER-MANUAL.md) | **User manual** (also in the portal under *Help and manual*): every page, live occupancy, emergency, ID cards, administration |
+| [docs/SAFETY-AND-ID-CARDS.md](docs/SAFETY-AND-ID-CARDS.md) | Live occupancy / fire-warden screen, emergencies (two people), staff ID cards and card printers |
+| [docs/SECURITY-REVIEW-2.13.md](docs/SECURITY-REVIEW-2.13.md) | Security review of 2.12 and what 2.13 fixed |
+| [docs/SECURITY-AND-COMPLIANCE.md](docs/SECURITY-AND-COMPLIANCE.md) | Security and compliance pack for hotel-group vendor reviews (e.g. Marriott): data inventory, controls, honest gaps |
 | [docs/WINDOWS-SETUP.md](docs/WINDOWS-SETUP.md) | Installing the test environment on a Windows PC |
 | [docs/UPGRADING.md](docs/UPGRADING.md) | Installing a newer version with a backup, and going back |
 | [docs/DEPLOY-RENDER.md](docs/DEPLOY-RENDER.md) | Hosting the platform on Render (Blueprint `render.yaml`), connector and app pointed at it |
 | [docs/ON-PREMISES.md](docs/ON-PREMISES.md) | Installing everything on a hotel's Vingcard/Visionline server (any hotel): one-click `Install.cmd` with its own Node.js and PostgreSQL, first-run setup page, passwords and backups in the portal; outside access by public IP and secret path |
 | [docs/VISIONLINE-DATA.md](docs/VISIONLINE-DATA.md) | Doors, user groups, people and keycards read from Visionline by themselves; keycards made at the desk recorded within seconds; the Visionline cards & people page |
 | [docs/BREAKFAST.md](docs/BREAKFAST.md) | Breakfast at the restaurant: in-house list from the PMS (CSV), serving by room, paying and walk-in guests, day sheet and reports; Restaurant role |
+| [docs/LICENSING.md](docs/LICENSING.md) | Selling to other hotels: the .msi installer, licence keys and the offline License Manager, keeping the platform yours (or hosting it) |
+| [docs/ACCESS-HISTORY.md](docs/ACCESS-HISTORY.md) | Access history (who went where), lock events matched to keycards and who issued them, card lookup, reading a card at the encoder (pilot), choosing whose cards are read |
 | [docs/ATTENDANCE.md](docs/ATTENDANCE.md) | Time & attendance: check-in desk, timesheets, daily workers without a keycard, shifts, leave, approval and payroll exports; hiding modules from people |
 | [docs/MONITORING.md](docs/MONITORING.md) | Monitoring: doors offline, watched (VIP) doors, lock alarms, disk space and database size; alerts by e-mail and SMS; database copy tools |
 | [docs/EVENT-LOG.md](docs/EVENT-LOG.md) | Event log (all / entrance / error events), PDF-only printing with the hotel header on every page, verifying a printed PDF |

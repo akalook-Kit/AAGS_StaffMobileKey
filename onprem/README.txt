@@ -14,7 +14,25 @@ WHAT THE SERVER NEEDS
   - .NET Framework 4.8 (part of Windows)
   - 2 GB free disk space (more as the database grows; Monitoring warns below 50 GB)
 
-INSTALL
+NEW IN 2.13
+  Live occupancy and Emergency (Safety menu; role "Safety / fire warden" for the security-desk screen), staff ID
+  cards printed on CR80 keycards, dark mode, personal menus and "Visionline only" focus, a licence window when the
+  licence ends, Usage (and a signed summary for your supplier), two-step sign-in required for administrators
+  (Settings -> Administrator protection), data retention (Settings -> Privacy & retention), the user manual in the
+  portal (Help and manual). The connector (0.11.0) sends at most 2 requests at a time to Visionline so the PMS and
+  GRMS are never crowded out. Upgrading keeps data, settings and licence.
+
+INSTALL WITH THE .MSI (2.12)
+  Double-click StaffMobileKey-Server-<version>.msi on the Visionline server (administrator). It installs exactly
+  what Install.cmd installs, then opens the portal (Start menu: "Staff Mobile Key"). Silent:
+    msiexec /i StaffMobileKey-Server-<version>.msi /qn /l*v smk-install.log  [SMK_OPTIONS="-LanPort 9443"]
+  Upgrade: run the newer .msi. Uninstall (Windows Apps) keeps the hotel's data.
+
+LICENCE (2.12)
+  A new installation runs as a 60-day trial. Send your supplier the hotel name, ASSA ABLOY System ID and the
+  installation ID from Settings -> Licence; enter the licence key (.smklic) they send in the same place.
+
+INSTALL WITH THE ZIP
   1. Unzip the package, for example to C:\Vingcard Files\Onprem\
   2. Double-click Install.cmd (Windows asks for administrator rights). No questions are asked.
   3. At the end the portal opens on this server with the FIRST-RUN SETUP page and the setup code filled in.

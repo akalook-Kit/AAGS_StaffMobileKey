@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Staff Mobile Key · License Manager</title>
+<style>
+  :root { --bg:#f7f2ef; --surface:#fff; --ink:#1c1715; --ink-2:#5e524d; --ink-3:#8a7d77; --line:#e4d8d2; --line-2:#f0e8e3; --brand:#050505; --brass:#dcae99;
+    --ok:#17694a; --ok-bg:#dff0e7; --warn:#8a5a00; --warn-bg:#fbedcc; --bad:#a3271c; --bad-bg:#f9e0dc; --r:8px; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 'Segoe UI', system-ui, -apple-system, sans-serif; }
+  header.top { background:var(--brand); color:var(--brass); padding:18px 28px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  header.top h1 { font-size:19px; margin:0; font-weight:650; color:#f3e7e1; } header.top span { font-size:13px; opacity:.8; }
+  .key-state { font-size:13px; display:flex; align-items:center; gap:8px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:#8a7d77; } .dot.on { background:#3fbf7f; }
+  main { max-width:1040px; margin:0 auto; padding:22px 20px 60px; }
+  nav.tabs { display:flex; gap:2px; border-bottom:1px solid var(--line); margin-bottom:18px; overflow-x:auto; }
+  nav.tabs button { border:0; background:none; padding:10px 16px; font:inherit; color:var(--ink-2); font-weight:550; cursor:pointer; border-bottom:3px solid transparent; white-space:nowrap; }
+  nav.tabs button[aria-selected=true] { color:var(--ink); border-bottom-color:var(--brass); }
+  section[hidden] { display:none; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--r); padding:20px 22px; margin-bottom:16px; }
+  .panel h2 { font-size:17px; margin:0 0 6px; } .panel p { margin:0 0 12px; color:var(--ink-2); max-width:75ch; }
+  .cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0 16px; }
+  label.f { display:flex; flex-direction:column; gap:4px; margin-bottom:14px; font-weight:550; font-size:14px; }
+  label.f small { font-weight:400; color:var(--ink-3); }
+  input, select, textarea { font:inherit; color:inherit; border:1px solid var(--line); border-radius:6px; padding:8px 10px; background:#fff; }
+  textarea { font-family:ui-monospace,Consolas,monospace; font-size:12.5px; resize:vertical; }
+  .checks { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:6px 16px; margin:4px 0 14px; }
+  .checks label { display:flex; gap:8px; align-items:center; font-size:14px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .btn { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); background:#fff; padding:8px 16px; border-radius:6px; font:inherit; font-weight:550; cursor:pointer; color:var(--ink); }
+  .btn:hover { border-color:var(--ink-3); } .btn.primary { background:var(--brand); color:var(--brass); border-color:var(--brand); } .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .alert { border:1px solid; border-radius:6px; padding:10px 14px; margin:12px 0 0; font-size:14px; }
+  .alert.ok { background:var(--ok-bg); border-color:#b6dcc8; color:#0f4a33; } .alert.bad { background:var(--bad-bg); border-color:#efc0b9; color:#6e1a12; } .alert.warn { background:var(--warn-bg); border-color:#efd598; color:#5e3e00; }
+  code, .mono { font-family:ui-monospace,Consolas,monospace; font-size:13px; word-break:break-all; }
+  .keybox { background:#faf6f4; border:1px solid var(--line); border-radius:6px; padding:10px 12px; font-family:ui-monospace,Consolas,monospace; font-size:12.5px; word-break:break-all; max-height:160px; overflow:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th { text-align:left; font-size:13px; color:var(--ink-2); font-weight:600; padding:9px 12px; border-bottom:1px solid var(--line); background:#faf6f4; white-space:nowrap; }
+  td { padding:9px 12px; border-bottom:1px solid var(--line-2); vertical-align:top; }
+  .pill { display:inline-block; font-size:12px; font-weight:650; padding:2px 8px; border-radius:10px; background:var(--line-2); color:var(--ink-2); }
+  .pill.ok { background:var(--ok-bg); color:var(--ok); } .pill.bad { background:var(--bad-bg); color:var(--bad); } .pill.warn { background:var(--warn-bg); color:var(--warn); }
+  dl.kv { display:grid; grid-template-columns:170px 1fr; gap:6px 14px; margin:12px 0 0; font-size:14px; } dl.kv dt { color:var(--ink-2); } dl.kv dd { margin:0; }
+  .empty { text-align:center; color:var(--ink-2); padding:28px; }
+  .wrap { overflow-x:auto; }
+  @media (max-width:640px) { main { padding:16px; } dl.kv { grid-template-columns:1fr; } header.top { padding:14px 16px; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div><h1>Staff Mobile Key · License Manager</h1><span>Runs on your PC only. Nothing is sent anywhere.</span></div>
+  <div class="key-state"><i class="dot" id="keyDot"></i><span id="keyState">No signing key loaded</span></div>
+</header>
+<main>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-t="issue" aria-selected="true">Issue a licence</button>
+    <button role="tab" data-t="register" aria-selected="false">Issued licences</button>
+    <button role="tab" data-t="usage" aria-selected="false">Clients &amp; usage</button>
+    <button role="tab" data-t="check" aria-selected="false">Check a licence</button>
+    <button role="tab" data-t="key" aria-selected="false">Signing key</button>
+  </nav>
+
+  <section id="t-issue">
+    <div class="panel" id="needKey">
+      <h2>Load your signing key first</h2>
+      <p>Open the <b>Signing key</b> tab and load <code>smk-vendor-key.json</code> with its passphrase. The key stays in this browser tab until you close it.</p>
+      <button class="btn primary" onclick="tab('key')">Go to Signing key</button>
+    </div>
+    <div class="panel" id="issueForm" hidden>
+      <h2>New licence</h2>
+      <p>Ask the hotel for its name, its ASSA ABLOY System ID and (optional) the installation ID shown in the portal under Settings → Licence.</p>
+      <div class="grid">
+        <label class="f">Customer (invoice name)<input id="customer" placeholder="K Hotel Bana SARL"></label>
+        <label class="f">Hotel name<input id="hotel" placeholder="K Hotel Bana"></label>
+        <label class="f">ASSA ABLOY System ID <input id="systemId" inputmode="numeric" placeholder="3460"><small>Ties the licence to one Visionline system. Leave empty to allow any.</small></label>
+        <label class="f">Valid until <input id="expires" type="date"><small>Empty = no end date.</small></label>
+        <label class="f">Support and updates until <input id="support" type="date"><small>Shown to the hotel; informational.</small></label>
+        <label class="f">Doors covered <input id="maxDoors" inputmode="numeric"><small>Informational, e.g. 120.</small></label>
+      </div>
+      <div style="font-weight:550;font-size:14px">Modules</div>
+      <div class="checks" id="modules"></div>
+      <p style="font-size:13px">Always included: Visionline data, Insights, Event log, Monitoring, Audit trail.</p>
+      <label class="f">Note <input id="note" maxlength="200"><small>For your own records; also inside the licence.</small></label>
+      <div class="row"><button class="btn primary" onclick="issue()">Create licence</button><span id="issueErr" style="color:var(--bad);font-size:14px"></span></div>
+    </div>
+    <div class="panel" id="issued" hidden>
+      <h2>Licence created</h2>
+      <p>Send the file (or the text) to the hotel. They enter it in the portal: <b>Settings → Licence</b>.</p>
+      <div class="keybox" id="issuedKey"></div>
+      <div class="row" style="margin-top:12px"><button class="btn primary" onclick="downloadIssued()">Download .smklic</button><button class="btn" onclick="copyIssued()">Copy text</button><span id="copied" style="font-size:13px;color:var(--ok)"></span></div>
+      <dl class="kv" id="issuedFacts"></dl>
+    </div>
+  </section>
+
+  <section id="t-register" hidden>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Issued licences</h2>
+        <div class="row"><button class="btn" onclick="exportCsv()">Export CSV</button><button class="btn" onclick="exportJson()">Back up (JSON)</button><label class="btn">Restore… <input type="file" accept=".json" hidden onchange="importJson(this.files[0])"></label></div></div>
+      <p style="margin-top:8px">Kept in this browser on this PC. Back it up after issuing licences.</p>
+      <div class="wrap"><table><thead><tr><th>Licence</th><th>Hotel</th><th>System ID</th><th>Modules</th><th>Valid until</th><th>Issued</th><th></th></tr></thead><tbody id="reg"></tbody></table></div>
+    </div>
+  </section>
+
+  <section id="t-usage" hidden>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Clients and how they use the portal</h2>
+        <div class="row"><label class="btn primary">Add usage summaries… <input type="file" accept=".smkusage,.json" multiple hidden onchange="importUsage(this.files)"></label><button class="btn" onclick="exportUsageCsv()">Export CSV</button></div></div>
+      <p style="margin-top:8px">Each hotel downloads an anonymous summary in <em>Usage → Summary for the supplier</em> (counts only: no names, guests or doors) and e-mails it to you, for example with the licence renewal. The installation signs it, so an edited file shows as such. Kept in this browser on this PC.</p>
+      <div id="usageOut"></div>
+      <div class="wrap"><table><thead><tr><th>Hotel</th><th>Licence</th><th>Version</th><th>Summary</th><th>Doors / Visionline users</th><th>Active users (7 d)</th><th>Pages opened</th><th>Keys issued</th><th>Reports</th><th>Most used</th><th>Signature</th></tr></thead><tbody id="usageReg"></tbody></table></div>
+    </div>
+  </section>
+
+  <section id="t-check" hidden>
+    <div class="panel">
+      <h2>Check a licence</h2>
+      <p>Paste a licence (or choose a .smklic file) to see what it contains and whether your key signed it.</p>
+      <textarea id="checkIn" rows="5" placeholder="SMK1.…"></textarea>
+      <div class="row" style="margin-top:10px"><button class="btn primary" onclick="check()">Check</button><label class="btn">Choose file… <input type="file" accept=".smklic,.txt" hidden onchange="readInto(this.files[0],'checkIn')"></label></div>
+      <div id="checkOut"></div>
+    </div>
+  </section>
+
+  <section id="t-key" hidden>
+    <div class="cols">
+      <div class="panel">
+        <h2>Load your signing key</h2>
+        <p>The file <code>smk-vendor-key.json</code> (protected with your passphrase).</p>
+        <label class="f">Key file<input type="file" id="keyFile" accept=".json"></label>
+        <label class="f">Passphrase<input type="password" id="pass" autocomplete="current-password"></label>
+        <button class="btn primary" onclick="loadKey()">Load key</button>
+        <div id="loadOut"></div>
+      </div>
+      <div class="panel">
+        <h2>Protect a key / make a new one</h2>
+        <p>A key received <b>unprotected</b> must be protected with a passphrase once; then delete the unprotected file. A <b>new</b> key works only after its public key is built into the platform (send the public key to your developer).</p>
+        <label class="f">Unprotected key file (optional)<input type="file" id="rawFile" accept=".json"></label>
+        <label class="f">New passphrase <input type="password" id="newPass" autocomplete="new-password"><small>At least 12 characters. Without it the key cannot be used: keep it safe.</small></label>
+        <label class="f">Repeat passphrase<input type="password" id="newPass2" autocomplete="new-password"></label>
+        <div class="row"><button class="btn primary" onclick="protectKey(false)">Protect this key</button><button class="btn" onclick="protectKey(true)">Make a new key</button></div>
+        <div id="protOut"></div>
+      </div>
+    </div>
+    <div class="panel" id="pubPanel" hidden>
+      <h2>Public key</h2>
+      <p>The platform accepts licences signed with this key. It is safe to share; the private part never leaves this PC.</p>
+      <div class="keybox" id="pub"></div>
+    </div>
+  </section>
+</main>
+
+<script>/*NACL*/</script>
+<script>
+'use strict';
+const MODULES = { staffMobileKeys: 'Staff mobile keys', batteryMonitoring: 'Battery status', maintenance: 'Maintenance', timeAttendance: 'Time & attendance', breakfast: 'Breakfast' };
+let SK = null, PK = null, lastIssued = null;
+const $ = (id) => document.getElementById(id);
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64u = (u8) => btoa(String.fromCharCode(...u8)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const ub64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const note = (el, tone, text) => { $(el).innerHTML = `<div class="alert ${tone}">${text}</div>`; };
+function tab(t) { document.querySelectorAll('nav.tabs button').forEach((b) => b.setAttribute('aria-selected', b.dataset.t === t)); document.querySelectorAll('main > section').forEach((s) => (s.hidden = s.id !== 't-' + t)); if (t === 'register') renderReg(); if (t === 'usage') renderUsage(); }
+document.querySelectorAll('nav.tabs button').forEach((b) => (b.onclick = () => tab(b.dataset.t)));
+$('modules').innerHTML = Object.entries(MODULES).map(([k, l]) => `<label><input type="checkbox" value="${k}" checked> ${l}</label>`).join('');
+
+async function kdf(pass, salt) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 310000 }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+function setKey(seed) {
+  const kp = nacl.sign.keyPair.fromSeed(seed);
+  SK = kp.secretKey; PK = kp.publicKey;
+  $('keyDot').classList.add('on'); $('keyState').textContent = 'Signing key loaded · ' + b64u(PK).slice(0, 10) + '…';
+  $('needKey').hidden = true; $('issueForm').hidden = false; $('pubPanel').hidden = false; $('pub').textContent = b64u(PK);
+}
+async function loadKey() {
+  try {
+    const f = $('keyFile').files[0]; if (!f) throw new Error('Choose the key file.');
+    const j = JSON.parse(await f.text());
+    if (!j.ct) throw new Error('This key file is not protected. Use "Protect this key" on the right first.');
+    const key = await kdf($('pass').value, ub64u(j.salt));
+    let seed;
+    try { seed = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub64u(j.iv) }, key, ub64u(j.ct))); } catch { throw new Error('Wrong passphrase.'); }
+    setKey(seed); $('pass').value = '';
+    note('loadOut', 'ok', 'Key loaded. You can issue licences.');
+  } catch (e) { note('loadOut', 'bad', esc(e.message)); }
+}
+async function protectKey(makeNew) {
+  try {
+    const p1 = $('newPass').value, p2 = $('newPass2').value;
+    if (p1.length < 12) throw new Error('Use a passphrase of at least 12 characters.');
+    if (p1 !== p2) throw new Error('The passphrases differ.');
+    let seed;
+    if (makeNew) seed = crypto.getRandomValues(new Uint8Array(32));
+    else {
+      const f = $('rawFile').files[0]; if (!f) throw new Error('Choose the unprotected key file.');
+      const j = JSON.parse(await f.text()); if (!j.d) throw new Error('This file has no private key.');
+      seed = ub64u(j.d); if (seed.length !== 32) throw new Error('This is not an Ed25519 key.');
+    }
+    const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await kdf(p1, salt), seed));
+    const pub = b64u(nacl.sign.keyPair.fromSeed(seed).publicKey);
+    download('smk-vendor-key.json', JSON.stringify({ v: 1, product: 'staff-mobile-key', publicKey: pub, kdf: 'PBKDF2-SHA256-310000', salt: b64u(salt), iv: b64u(iv), ct: b64u(ct), created: new Date().toISOString() }, null, 2), 'application/json');
+    setKey(seed); $('newPass').value = $('newPass2').value = '';
+    note('protOut', makeNew ? 'warn' : 'ok', makeNew ? `New key made and saved as smk-vendor-key.json. Public key: <code>${pub}</code>. Licences from it are accepted once this public key is built into the platform.` : 'Protected copy saved as smk-vendor-key.json and loaded. Now delete the unprotected file.');
+  } catch (e) { note('protOut', 'bad', esc(e.message)); }
+}
+function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+function licenceId() { const d = new Date(); const r = b64u(crypto.getRandomValues(new Uint8Array(4))).replace(/[-_]/g, 'X').toUpperCase().slice(0, 5); return `L${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}-${r}`; }
+function issue() {
+  $('issueErr').textContent = '';
+  try {
+    const v = (id) => $(id).value.trim();
+    if (!v('customer') || !v('hotel')) throw new Error('Customer and hotel name are needed.');
+    const modules = [...document.querySelectorAll('#modules input:checked')].map((i) => i.value);
+    const sys = v('systemId'); if (sys && !/^\d+$/.test(sys)) throw new Error('The System ID is a number.');
+    const p = { v: 1, id: licenceId(), customer: v('customer'), hotel: v('hotel'), systemId: sys ? Number(sys) : null, modules,
+      maxDoors: v('maxDoors') ? Number(v('maxDoors')) : null, issued: new Date().toISOString().slice(0, 10), expires: v('expires') || null, support: v('support') || null, note: v('note') || null };
+    const head = 'SMK1.' + b64u(enc.encode(JSON.stringify(p)));
+    const key = head + '.' + b64u(nacl.sign.detached(enc.encode(head), SK));
+    lastIssued = { key, p };
+    const reg = loadReg(); reg.unshift({ ...p, key }); saveReg(reg);
+    $('issued').hidden = false; $('issuedKey').textContent = key; $('copied').textContent = '';
+    $('issuedFacts').innerHTML = facts(p);
+    $('issued').scrollIntoView({ behavior: 'smooth' });
+  } catch (e) { $('issueErr').textContent = e.message; }
+}
+const facts = (p) => `<dt>Licence</dt><dd><code>${esc(p.id)}</code></dd><dt>Customer</dt><dd>${esc(p.customer)}</dd><dt>Hotel</dt><dd>${esc(p.hotel)}</dd><dt>System ID</dt><dd>${esc(p.systemId ?? 'any')}</dd>
+  <dt>Modules</dt><dd>${p.modules.map((m) => esc(MODULES[m] ?? m)).join(', ') || 'core only'}</dd><dt>Valid until</dt><dd>${esc(p.expires ?? 'no end date')}</dd>${p.support ? `<dt>Support until</dt><dd>${esc(p.support)}</dd>` : ''}${p.note ? `<dt>Note</dt><dd>${esc(p.note)}</dd>` : ''}`;
+const fileName = (p) => `${p.hotel.replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '')}-${p.id}.smklic`;
+function downloadIssued() { if (lastIssued) download(fileName(lastIssued.p), lastIssued.key + '\n', 'text/plain'); }
+async function copyIssued() { try { await navigator.clipboard.writeText(lastIssued.key); $('copied').textContent = 'Copied'; } catch { $('copied').textContent = 'Select the text and copy it'; } }
+function loadReg() { try { return JSON.parse(localStorage.getItem('smk.licences') || '[]'); } catch { return []; } }
+function saveReg(r) { try { localStorage.setItem('smk.licences', JSON.stringify(r)); } catch { /* private window */ } }
+function renderReg() {
+  const r = loadReg();
+  $('reg').innerHTML = r.length ? r.map((p, i) => `<tr><td><code>${esc(p.id)}</code><div style="font-size:13px;color:var(--ink-3)">${esc(p.customer)}</div></td><td>${esc(p.hotel)}</td><td>${esc(p.systemId ?? '—')}</td>
+    <td style="font-size:13px">${p.modules.map((m) => esc(MODULES[m] ?? m)).join(', ')}</td><td>${p.expires ? (p.expires < new Date().toISOString().slice(0, 10) ? `<span class="pill bad">${esc(p.expires)}</span>` : esc(p.expires)) : 'no end'}</td><td>${esc(p.issued)}</td>
+    <td><button class="btn" onclick="redownload(${i})">Download</button></td></tr>`).join('') : '<tr><td colspan="7" class="empty">No licences issued on this PC yet.</td></tr>';
+}
+function redownload(i) { const p = loadReg()[i]; download(fileName(p), p.key + '\n', 'text/plain'); }
+function exportJson() { download(`smk-licences-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(loadReg(), null, 2), 'application/json'); }
+function exportCsv() {
+  const cell = (v) => { const s = String(v ?? ''); return /^[=+\-@]/.test(s) ? `"'${s.replace(/"/g, '""')}"` : `"${s.replace(/"/g, '""')}"`; };
+  const rows = loadReg().map((p) => [p.id, p.customer, p.hotel, p.systemId, p.modules.join(' '), p.expires, p.support, p.issued, p.note].map(cell).join(','));
+  download('smk-licences.csv', '﻿' + ['licence,customer,hotel,system_id,modules,valid_until,support_until,issued,note', ...rows].join('\r\n'), 'text/csv');
+}
+async function importJson(f) {
+  try { const add = JSON.parse(await f.text()); if (!Array.isArray(add)) throw 0; const cur = loadReg(); const ids = new Set(cur.map((x) => x.id)); saveReg([...cur, ...add.filter((x) => x && x.id && !ids.has(x.id))]); renderReg(); }
+  catch { alert('This is not a licence register backup.'); }
+}
+// ---- Usage summaries (.smkusage) from hotels ---------------------------------------------------------------
+const AREA = { visionline: 'Visionline', insights: 'Insights', access: 'Access history', events: 'Event log', keys: 'Mobile keys', muster: 'Live occupancy', idcards: 'ID cards', attendance: 'Attendance', breakfast: 'Breakfast', maintenance: 'Maintenance', battery: 'Battery', monitoring: 'Monitoring', overview: 'Overview', settings: 'Settings' };
+function loadUsage() { try { return JSON.parse(localStorage.getItem('smk.usage') || '{}'); } catch { return {}; } }
+function saveUsage(u) { try { localStorage.setItem('smk.usage', JSON.stringify(u)); } catch { /* private window */ } }
+async function sha256hex(t) { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(t)))].map((b) => b.toString(16).padStart(2, '0')).join(''); }
+async function importUsage(files) {
+  const all = loadUsage(); const msgs = [];
+  for (const f of files) {
+    try {
+      const d = JSON.parse(await f.text());
+      if (d.kind !== 'smk-usage' || d.v !== 1 || !d.installationId) throw new Error('not a usage summary');
+      const { sha256, signer, sig, ...body } = d;
+      const canon = JSON.stringify(body);
+      const intact = (await sha256hex(canon)) === sha256;
+      let state = 'unsigned';
+      if (sig && signer) state = intact && nacl.sign.detached.verify(enc.encode(canon), ub64u(sig), ub64u(signer)) ? 'valid' : 'edited';
+      else if (!intact) state = 'edited';
+      const prev = all[d.installationId];
+      if (state === 'valid' && prev?.signer && prev.signer !== signer) state = 'newkey';
+      all[d.installationId] = { ...body, signer: prev?.signer ?? signer ?? null, state, importedAt: new Date().toISOString(), history: [...(prev?.history ?? []).filter((h) => h.id !== body.id), { id: body.id, at: body.generatedAt, days: body.days, active: body.activity.activeLast7Days, views: body.activity.pageViews }].slice(-36) };
+      msgs.push(`${esc(f.name)}: ${esc(body.hotel ?? body.installationId)} - ${state === 'valid' ? 'signature valid' : state === 'edited' ? 'EDITED after it was signed' : state === 'newkey' ? 'signed with a different installation key (reinstalled?)' : 'not signed'}`);
+    } catch (e) { msgs.push(`${esc(f.name)}: ${esc(e.message || 'cannot be read')}`); }
+  }
+  saveUsage(all); renderUsage();
+  $('usageOut').innerHTML = `<div class="alert ok">${msgs.join('<br>')}</div>`;
+}
+function renderUsage() {
+  const u = Object.values(loadUsage()).sort((a, b) => String(a.hotel).localeCompare(String(b.hotel)));
+  const reg = loadReg(); const cust = (id) => reg.find((r) => r.id === id)?.customer;
+  const pill = { valid: '<span class="pill ok">Valid</span>', edited: '<span class="pill bad">Edited</span>', unsigned: '<span class="pill warn">Not signed</span>', newkey: '<span class="pill warn">New key</span>' };
+  $('usageReg').innerHTML = u.length ? u.map((x) => {
+    const top = Object.entries(x.activity.areas || {}).sort((a, b) => b[1].views - a[1].views).slice(0, 3).map(([k]) => esc(AREA[k] ?? k)).join(', ');
+    const reports = (x.outcomes.reportsPrinted || 0) + (x.outcomes.reportsExported || 0);
+    return `<tr><td><strong>${esc(x.hotel)}</strong><div style="font-size:12px;color:var(--ink-3)">${esc(x.installationId)} · System ${esc(x.systemId ?? '—')}</div></td>
+      <td>${esc(x.licence ?? 'trial')}<div style="font-size:12px;color:var(--ink-3)">${esc(cust(x.licence) ?? x.licenceState)}</div></td><td>${esc(x.version)}</td>
+      <td>${esc(String(x.generatedAt).slice(0, 10))}<div style="font-size:12px;color:var(--ink-3)">last ${esc(x.days)} days</div></td>
+      <td>${esc(x.size.doors)} / ${esc(x.size.visionlineUsers)}</td><td>${esc(x.activity.activeLast7Days)} of ${esc(x.size.portalUsers)}</td><td>${esc(x.activity.pageViews)}</td>
+      <td>${esc(x.outcomes.keysIssued ?? 0)}</td><td>${esc(reports)}</td><td style="font-size:13px">${top || '—'}</td><td>${pill[x.state] ?? ''}</td></tr>`;
+  }).join('') : '<tr><td colspan="11" class="empty">No usage summaries yet.</td></tr>';
+}
+function exportUsageCsv() {
+  const cell = (v) => { const s = String(v ?? ''); return /^[=+\-@]/.test(s) ? `"'${s.replace(/"/g, '""')}"` : `"${s.replace(/"/g, '""')}"`; };
+  const rows = Object.values(loadUsage()).map((x) => [x.hotel, x.installationId, x.systemId, x.licence, x.version, x.generatedAt, x.days, x.size.doors, x.size.visionlineUsers, x.size.portalUsers, x.activity.activeLast7Days, x.activity.pageViews,
+    x.outcomes.keysIssued, x.outcomes.cardReads, x.outcomes.reportsPrinted, x.outcomes.reportsExported, x.outcomes.idCardsPrinted, x.state].map(cell).join(','));
+  download('smk-usage.csv', '\ufeff' + ['hotel,installation,system_id,licence,version,summary_date,days,doors,visionline_users,portal_users,active_7d,page_views,keys_issued,card_reads,reports_printed,reports_exported,id_cards_printed,signature', ...rows].join('\r\n'), 'text/csv');
+}
+async function readInto(f, id) { if (f) $(id).value = (await f.text()).trim(); }
+function check() {
+  const raw = $('checkIn').value.replace(/\s+/g, ''); const parts = raw.split('.');
+  try {
+    if (parts.length !== 3 || parts[0] !== 'SMK1') throw new Error('Not a Staff Mobile Key licence.');
+    const p = JSON.parse(dec.decode(ub64u(parts[1])));
+    let sig = '';
+    if (PK) sig = nacl.sign.detached.verify(enc.encode(parts[0] + '.' + parts[1]), ub64u(parts[2]), PK) ? '<span class="pill ok">Signed with your loaded key</span>' : '<span class="pill bad">Not signed with your loaded key</span>';
+    else sig = '<span class="pill warn">Load your key to check the signature</span>';
+    $('checkOut').innerHTML = `<div style="margin-top:14px">${sig}</div><dl class="kv">${facts(p)}<dt>Issued</dt><dd>${esc(p.issued)}</dd></dl>`;
+  } catch (e) { note('checkOut', 'bad', esc(e.message || 'This licence cannot be read.')); }
+}
+</script>
+</body>
+</html>

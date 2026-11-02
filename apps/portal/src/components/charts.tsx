@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 /**
  * Small SVG chart kit for the Insights page. Rules (dataviz method): one axis per chart, thin marks with 4px
@@ -11,15 +11,20 @@ export const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)'] 
 export const fmtN = (n: number | null | undefined) => n == null ? '—' : Math.abs(n) >= 10_000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}K` : n.toLocaleString();
 
 function useWidth<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
-  const [w, setW] = useState(600);
-  useLayoutEffect(() => {
-    if (!ref.current) return;
-    const ro = new ResizeObserver((e) => setW(Math.max(220, Math.floor(e[0]!.contentRect.width))));
-    ro.observe(ref.current);
-    return () => ro.disconnect();
+  // A callback ref: charts that first render an empty state attach the element later, and must still be measured.
+  const ref = useRef<T | null>(null);
+  const ro = useRef<ResizeObserver | null>(null);
+  const [w, setW] = useState(0);
+  const attach = useCallback((el: T | null) => {
+    ro.current?.disconnect();
+    ref.current = el;
+    if (!el) return;
+    setW(Math.max(220, Math.floor(el.getBoundingClientRect().width)));
+    ro.current = new ResizeObserver((e) => setW(Math.max(220, Math.floor(e[0]!.contentRect.width))));
+    ro.current.observe(el);
   }, []);
-  return [ref, w] as const;
+  useEffect(() => () => ro.current?.disconnect(), []);
+  return [Object.assign(attach, { get current() { return ref.current; } }) as ((el: T | null) => void) & { readonly current: T | null }, w || 600] as const;
 }
 
 /** Clean axis ticks: 0, step, 2·step… covering max. */
@@ -215,7 +220,7 @@ function Spark({ values }: { values: number[] }) {
 
 // ---- Card with a chart/table toggle ----------------------------------------------------------------
 export function VizCard({ title, sub, chart, table, actions, span = 6, filtered }: {
-  title: string; sub?: ReactNode; chart: ReactNode; table?: ReactNode; actions?: ReactNode; span?: 4 | 6 | 8 | 12; filtered?: string[];
+  title: string; sub?: ReactNode; chart: ReactNode; table?: ReactNode; actions?: ReactNode; span?: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12; filtered?: string[];
 }) {
   const [asTable, setAsTable] = useState(false);
   useEffect(() => { if (window.matchMedia?.('(forced-colors: active)').matches) setAsTable(true); }, []);
@@ -241,5 +246,54 @@ export function DataTable({ head, rows, numeric = [] }: { head: string[]; rows: 
       <thead><tr>{head.map((h, i) => <th key={i} className={numeric.includes(i) ? 'num' : ''}>{h}</th>)}</tr></thead>
       <tbody>{rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j} className={numeric.includes(j) ? 'num' : ''}>{c ?? '—'}</td>)}</tr>)}</tbody>
     </table></div>
+  );
+}
+
+// ---- Columns over categories or time (single or stacked, one axis) ------------------------------------------------
+export function Columns({ points, series, height = 220, label, onSelect, selected }: {
+  points: { key: string; values: number[] }[]; series: { name: string; color: string }[]; height?: number; label?: (k: string) => string;
+  onSelect?: (key: string) => void; selected?: string | null;
+}) {
+  const [ref, w] = useWidth<HTMLDivElement>();
+  const [tip, setTip] = useState<Tip | null>(null);
+  if (!points.length || points.every((p) => p.values.every((v) => !v))) return <NoData text="No data for this selection yet" />;
+  const lab = label ?? ((k: string) => k);
+  const left = 38, right = 8, top = 10, bottom = 28;
+  const pw = Math.max(80, w - left - right), ph = height - top - bottom;
+  const total = (p: { values: number[] }) => p.values.reduce((a, b) => a + b, 0);
+  const tk = ticks(Math.max(1, ...points.map(total)));
+  const ymax = tk[tk.length - 1]!;
+  const slot = pw / points.length;
+  const bw = Math.max(2, Math.min(42, slot * 0.68));
+  const y = (v: number) => (v / ymax) * ph;
+  const every = Math.max(1, Math.ceil(points.length / Math.max(2, Math.floor(pw / 64))));
+  return (
+    <div ref={ref} className="viz" onMouseLeave={() => setTip(null)}>
+      <svg width={w} height={height} role="img" aria-label={`${series.map((s) => s.name).join(', ')} for ${points.length} items`}>
+        {tk.map((t) => <g key={t}><line x1={left} x2={left + pw} y1={top + ph - y(t)} y2={top + ph - y(t)} className="viz-grid" /><text x={left - 6} y={top + ph - y(t)} className="viz-tick" textAnchor="end" dominantBaseline="central">{fmtN(t)}</text></g>)}
+        {points.map((p, i) => {
+          const cx = left + slot * i + (slot - bw) / 2;
+          let base = top + ph;
+          const lastK = p.values.reduce((a, v, k) => (v > 0 ? k : a), -1);
+          const dim = selected && selected !== p.key;
+          return (
+            <g key={p.key} className={`viz-row${onSelect ? ' clickable' : ''}`} tabIndex={0} opacity={dim ? 0.35 : 1}
+              aria-label={`${lab(p.key)}: ${p.values.map((v, k) => `${series[k]!.name} ${v}`).join(', ')}`}
+              onMouseMove={() => setTip({ x: Math.min(cx + bw + 8, w - 180), y: top, title: lab(p.key), rows: [...(series.length > 1 ? [{ label: 'total', value: fmtN(total(p)) }] : []), ...p.values.map((v, k) => ({ label: series[k]!.name, value: fmtN(v), color: series[k]!.color }))] })}
+              onClick={() => onSelect?.(p.key)} onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && onSelect) { e.preventDefault(); onSelect(p.key); } }}>
+              <rect x={left + slot * i} y={top} width={slot} height={ph} className="viz-hit" />
+              {p.values.map((v, k) => {
+                if (v <= 0) return null;
+                const hgt = y(v); base -= hgt;
+                return <path key={k} d={k === lastK ? endRounded(cx, base, bw, Math.max(hgt, 2), 'up') : `M${cx},${base + 1}h${bw}v${Math.max(hgt - 1, 1)}h${-bw}Z`} fill={series[k]!.color} />;
+              })}
+              {(i % every === 0 || i === points.length - 1) && <text x={cx + bw / 2} y={height - 9} className="viz-tick" textAnchor="middle">{lab(p.key).length > 12 ? `${lab(p.key).slice(0, 11)}…` : lab(p.key)}</text>}
+            </g>
+          );
+        })}
+        <line x1={left} x2={left + pw} y1={top + ph} y2={top + ph} className="viz-axis" />
+      </svg>
+      <Tooltip tip={tip} />
+    </div>
   );
 }

@@ -77,6 +77,7 @@ async function applyResult(c: pg.PoolClient, cmd: any, result: CommandResult) {
       return;
     }
     case 'VALIDATE_SETUP': return;
+    case 'READ_CARD': return; // 2.12 pilot: the portal reads the result itself
     case 'SYNC_DIRECTORY': return onDirectorySyncResult(c, cmd, result);
     case 'SET_PROPERTY_CREDENTIALS':
       // 2.10 With a working Visionline account, read doors and groups straight away (people follow on the minute).

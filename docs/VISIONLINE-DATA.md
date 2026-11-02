@@ -38,6 +38,30 @@ once and remembers the one that works. A problem reading lock alarms no longer f
 keycards are still recorded and the alarm problem is shown as a note under **Recent reads**. Error messages now say
 which request failed (for example `GET /alarms?updatedSince=…: …`).
 
+## More in 2.12
+
+Choosing exactly which user groups are read, deadbolt-override privileges on keycards, access history, lock
+events matched to keycards, card lookup and reading a card at the encoder: see [ACCESS-HISTORY.md](ACCESS-HISTORY.md).
+
+## Sharing Visionline with the PMS and the GRMS (2.13)
+
+Visionline serves several systems at once: the PMS encodes guest cards, the GRMS checks rooms, the portal reads people
+and events. The connector makes sure the portal never crowds the others out:
+
+- **At most 2 requests at a time** to Visionline, with a short pause between them. Key work (issue, revoke, card
+  lookups, encoder reads) goes first; background reads (people, keycards, doors) wait.
+- **Backs off by itself**: when Visionline answers "busy" (503/429) or a request times out, background reads pause
+  for 30 seconds; when answers take more than 2 seconds, the connector slows to one request at a time.
+- **Night-only full reads**: *Settings → Reports & sync → Only at night (22:00–06:00)* runs the full read of people
+  and keycards at night (the first read after switching it on still runs straight away).
+- Encoder reads are limited to one every 3 seconds and 20 a minute.
+- Settings on the connector (only if the GRMS vendor asks): in `connector.config.json`,
+  `"visionline": { "maxConcurrent": 1, "minGapMs": 100 }` (or the variables `VL_MAX_CONCURRENT`, `VL_MIN_GAP_MS`),
+  then restart the *Staff Mobile Key Connector* service. *Connector health* shows the queue.
+
+The long-poll that waits for Visionline events is not counted: it holds a connection open but costs Visionline nothing
+while idle.
+
 ## Privacy and limits
 
 - Kept: Visionline user id, names, user group; card number, validity, state, doors, door groups, time schedule.

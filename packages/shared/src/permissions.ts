@@ -46,6 +46,12 @@ export const PERMISSIONS = [
   'breakfast.serve',
   /** In-house list (import from the PMS, add, check out), breakfast settings. */
   'breakfast.manage',
+  /** 2.13 Staff ID profiles: photo, name, department, ID number; print ID cards (CR80). */
+  'idcards.manage',
+  /** 2.13 Live occupancy / muster screen: people on site and rooms in use, evacuation list. */
+  'muster.read',
+  /** 2.13 Start (or confirm) an emergency, mark people safe, end the emergency. */
+  'emergency.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -61,6 +67,7 @@ export const ROLES = [
   'HR_MANAGER',
   'TIMEKEEPER',
   'RESTAURANT',
+  'SAFETY',
   'AUDITOR',
   'READ_ONLY',
 ] as const;
@@ -78,6 +85,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   HR_MANAGER: 'HR Manager (time & attendance)',
   TIMEKEEPER: 'Timekeeper (check-in desk)',
   RESTAURANT: 'Restaurant (breakfast)',
+  SAFETY: 'Safety / fire warden (muster screen)',
   AUDITOR: 'Auditor',
   READ_ONLY: 'Read Only',
 };
@@ -90,20 +98,24 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   SECURITY_MANAGER: [
     'staff.read', 'key.read', 'key.approve_broad', 'key.revoke', 'endpoint.delete',
     'resources.read', 'templates.manage', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read', 'alerts.read', 'alerts.manage',
+    'muster.read', 'emergency.manage', 'idcards.manage',
   ],
-  KEY_ISSUER: ['staff.read', 'staff.manage', 'endpoint.onboard', 'key.read', 'key.issue', 'key.revoke', 'resources.read', 'breakfast.read', 'breakfast.serve', 'breakfast.manage'],
+  KEY_ISSUER: ['idcards.manage', 'staff.read', 'staff.manage', 'endpoint.onboard', 'key.read', 'key.issue', 'key.revoke', 'resources.read', 'breakfast.read', 'breakfast.serve', 'breakfast.manage'],
   APPROVER: ['staff.read', 'key.read', 'key.approve_broad', 'resources.read'],
   // Phase 2. "work" = report, comment, attach and move a request up to Resolved; "manage" = assign, prioritise,
   // set due dates, close, cancel and reopen.
   MAINTENANCE_MANAGER: ['staff.read', 'resources.read', 'battery.read', 'battery.manage', 'maintenance.read', 'maintenance.work', 'maintenance.manage', 'connector.read', 'alerts.read'],
   TECHNICIAN: ['resources.read', 'battery.read', 'maintenance.read', 'maintenance.work'],
   // Read-only view for the general manager and department heads: every report, nothing they can change.
-  HOTEL_MANAGEMENT: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read', 'reports.read', 'audit.export', 'events.read', 'alerts.read', 'attendance.read', 'breakfast.read'],
+  HOTEL_MANAGEMENT: ['muster.read', 'staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read', 'reports.read', 'audit.export', 'events.read', 'alerts.read', 'attendance.read', 'breakfast.read'],
   // Time & attendance: HR runs it; the timekeeper only checks people in and out at the desk.
-  HR_MANAGER: ['staff.read', 'resources.read', 'attendance.read', 'attendance.clock', 'attendance.manage'],
+  HR_MANAGER: ['idcards.manage', 'staff.read', 'resources.read', 'attendance.read', 'attendance.clock', 'attendance.manage'],
   TIMEKEEPER: ['attendance.clock'],
   // Breakfast: the restaurant team marks guests as served; front office (key issuers) keeps the in-house list.
   RESTAURANT: ['breakfast.read', 'breakfast.serve'],
+  // 2.13 The fire warden / security desk screen: the live muster list only, and starting an emergency (a second
+  // person must confirm it).
+  SAFETY: ['muster.read', 'emergency.manage'],
   AUDITOR: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read', 'alerts.read', 'attendance.read', 'breakfast.read'],
   READ_ONLY: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read'],
 };
@@ -123,6 +135,8 @@ export const MODULES = {
   battery: { label: 'Battery status', permissions: ['battery.read', 'battery.manage'] },
   maintenance: { label: 'Maintenance', permissions: ['maintenance.read', 'maintenance.work', 'maintenance.manage'] },
   audit: { label: 'Audit trail', permissions: ['audit.read', 'audit.export'] },
+  idCards: { label: 'Staff ID cards (profiles and printing)', permissions: ['idcards.manage'] },
+  muster: { label: 'Live occupancy & emergency', permissions: ['muster.read', 'emergency.manage'] },
 } as const satisfies Record<string, { label: string; permissions: readonly Permission[] }>;
 export type ModuleId = keyof typeof MODULES;
 export const MODULE_IDS = Object.keys(MODULES) as ModuleId[];

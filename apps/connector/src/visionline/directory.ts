@@ -16,6 +16,8 @@ import { utcForms, withTimeForms } from './time-forms.ts';
  * Never kept or forwarded: PIN, e-mail, phone, user details, card serial numbers, sectors, track 2, metadata.
  */
 const CHUNK = 400;
+/** The people/keycard read is the lowest priority on the shared Visionline (key issuing and the GRMS go first). */
+const LOW = { priority: 'low' as const };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>, pauseMs: number): Promise<R[]> {
@@ -32,6 +34,21 @@ async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>, pause
 }
 
 const bool = (v: unknown) => v === true || v === 'true';
+/**
+ * Deadbolt override as Visionline reports it on the card: a property whose name mentions the deadbolt (on the card or
+ * on one of its door operations), or an operation named that way. null when Visionline says nothing about it.
+ */
+export function deadbolt(c: any): boolean | null {
+  let found: boolean | null = null;
+  const look = (o: any) => {
+    if (!o || typeof o !== 'object') return;
+    for (const [k, v] of Object.entries(o)) if (/dead.?bolt/i.test(k) && (typeof v === 'boolean' || v === 'true' || v === 'false')) found = found === true || v === true || v === 'true';
+    if (typeof o.operation === 'string' && /dead.?bolt/i.test(o.operation)) found = true;
+  };
+  look(c);
+  for (const o of Array.isArray(c?.doorOperations) ? c.doorOperations : []) look(o);
+  return found;
+}
 
 /** Adds the request to a Visionline error so the portal says which read failed (no secrets in paths). */
 function where(path: string, e: unknown): never {
@@ -51,11 +68,11 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
     // 2.10 A card was just issued or changed for these people: read only them (no alarms, no full snapshot).
     ids = p.userIds;
   } else if (p.userGroups === null) {
-    ids = ((await vl.request<{ id: unknown }[]>('GET', VL.paths.users)) ?? []).map((u) => firstText(u.id)).filter((x): x is string => Boolean(x));
+    ids = ((await vl.request<{ id: unknown }[]>('GET', VL.paths.users, undefined, LOW)) ?? []).map((u) => firstText(u.id)).filter((x): x is string => Boolean(x));
   } else {
     for (const g of p.userGroups) {
       try {
-        const r = await vl.request<{ id: unknown }[]>('GET', `${VL.paths.users}?userGroup=${encodeURIComponent(g)}`);
+        const r = await vl.request<{ id: unknown }[]>('GET', `${VL.paths.users}?userGroup=${encodeURIComponent(g)}`, undefined, LOW);
         ids.push(...(r ?? []).map((u) => firstText(u.id)).filter((x): x is string => Boolean(x)));
       } catch (e) {
         if (!isNotFound(e)) throw e;
@@ -81,19 +98,19 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
   let done = 0;
   await pool(ids, 2, async (id) => {
     let u: any;
-    try { u = await vl.request<any>('GET', VL.paths.user(id)); } catch (e) { if (isNotFound(e)) return; throw e; }
+    try { u = await vl.request<any>('GET', VL.paths.user(id), undefined, LOW); } catch (e) { if (isNotFound(e)) return; throw e; }
     users.push({ id, surname: firstText(u?.surname), givenName: firstText(u?.givenName), userGroup: firstText(u?.userGroup) });
     counts.users++;
     if (p.includeCards) {
       let found: { id: unknown }[] = [];
       try {
-        found = (await withTimeForms('cards.validTime', cardTimeForms, (t) => vl.request<{ id: unknown }[]>('GET', `${VL.paths.cards}?cardHolder=${encodeURIComponent(id)}&validTime=${t}`))) ?? [];
+        found = (await withTimeForms('cards.validTime', cardTimeForms, (t) => vl.request<{ id: unknown }[]>('GET', `${VL.paths.cards}?cardHolder=${encodeURIComponent(id)}&validTime=${t}`, undefined, LOW))) ?? [];
       } catch (e) { if (!isNotFound(e)) where(`${VL.paths.cards}?validTime=…`, e); }
       for (const f of found) {
         const reg = firstText(f.id);
         if (!reg) continue;
         let c: any;
-        try { c = await vl.request<any>('GET', VL.paths.card(reg)); } catch (e) { if (isNotFound(e) || (e as any)?.code === 40411) continue; throw e; }
+        try { c = await vl.request<any>('GET', VL.paths.card(reg), undefined, LOW); } catch (e) { if (isNotFound(e) || (e as any)?.code === 40411) continue; throw e; }
         const ops = Array.isArray(c?.doorOperations) ? c.doorOperations : [];
         cards.push({
           regNo: reg, cardHolder: firstText(c?.cardHolder) ?? id, format: firstText(c?.format),
@@ -103,6 +120,8 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
           doors: [...new Set(ops.flatMap((o: any) => (Array.isArray(o?.doors) ? o.doors : []).map(String)))].slice(0, 300) as string[],
           doorGroups: [...new Set(ops.flatMap((o: any) => (Array.isArray(o?.doorGroups) ? o.doorGroups : []).map(String)))].slice(0, 100) as string[],
           timeSchedule: firstText(c?.timeSchedule),
+          operations: [...new Set(ops.map((o: any) => firstText(o?.operation)).filter((x: unknown): x is string => Boolean(x)))].slice(0, 20) as string[],
+          deadboltOverride: deadbolt(c),
         });
         counts.cards++;
       }
@@ -116,16 +135,16 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
   if (p.includeAlarms && !p.userIds?.length) {
     try {
       const types = new Map<string, string>();
-      try { for (const t of (await vl.request<any[]>('GET', '/alarmTypes')) ?? []) { const k = firstText(t?.id); if (k) types.set(k, firstText(t?.name) ?? k); } } catch (e) { if (!isNotFound(e)) throw e; }
+      try { for (const t of (await vl.request<any[]>('GET', '/alarmTypes', undefined, LOW)) ?? []) { const k = firstText(t?.id); if (k) types.set(k, firstText(t?.name) ?? k); } } catch (e) { if (!isNotFound(e)) throw e; }
       const since = new Date(p.alarmsSince ?? Date.now() - 30 * 86_400_000);
       // updatedSince is UTC [§5.3.2], with the "Z" (without it Visionline answers "Time must be in UTC.").
       const list = (await withTimeForms('alarms.updatedSince', utcForms(Number.isNaN(since.getTime()) ? new Date(Date.now() - 30 * 86_400_000) : since),
-        (t) => vl.request<{ id: unknown }[]>('GET', `/alarms?updatedSince=${t}`)).catch((e) => where('/alarms?updatedSince=…', e))) ?? [];
+        (t) => vl.request<{ id: unknown }[]>('GET', `/alarms?updatedSince=${t}`, undefined, LOW)).catch((e) => where('/alarms?updatedSince=…', e))) ?? [];
       const idsA = list.map((a) => firstText(a.id)).filter((x): x is string => Boolean(x)).slice(-1500);
       if (list.length > idsA.length) notes.push(`${list.length} alarms since the last sync; the newest 1500 were read.`);
       await pool(idsA, 2, async (aid) => {
         let a: any;
-        try { a = await vl.request<any>('GET', `/alarms/${encodeURIComponent(aid)}`); } catch (e) { if (isNotFound(e)) return; throw e; }
+        try { a = await vl.request<any>('GET', `/alarms/${encodeURIComponent(aid)}`, undefined, LOW); } catch (e) { if (isNotFound(e)) return; throw e; }
         const type = firstText(a?.alarmType);
         alarms.push({
           id: aid, alarmType: type, alarmTypeName: type ? types.get(type) ?? null : null, alarmText: firstText(a?.alarmText)?.slice(0, 500) ?? null,

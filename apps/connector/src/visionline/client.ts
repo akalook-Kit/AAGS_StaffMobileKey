@@ -18,6 +18,48 @@ export class VisionlineApiError extends Error {
 }
 
 export interface VlTrust { caFile?: string; pinSha256?: string; servername?: string }
+export type VlPriority = 'high' | 'normal' | 'low';
+
+/**
+ * 2.13 Sharing Visionline politely. The hotel's GRMS, PMS interface and the Visionline desk use the same server, so
+ * the connector never floods it: at most `maxConcurrent` requests at a time (default 2), a small gap between
+ * requests, and a queue in which key issuing and revoking (high) always go before discovery (normal) and the
+ * people/keycard read (low). When Visionline answers slowly or "busy", the low lane pauses and the pace slows down.
+ * The callback long-poll is not counted: Visionline only holds it open.
+ */
+export class VisionlineLimiter {
+  private active = 0;
+  private lastStart = 0;
+  private queue: { p: VlPriority; go: () => void }[] = [];
+  private lowPausedUntil = 0;
+  private slowUntil = 0;
+  constructor(public maxConcurrent = 2, public minGapMs = 40) {}
+  private order = { high: 0, normal: 1, low: 2 } as const;
+  async acquire(p: VlPriority) {
+    await new Promise<void>((go) => { this.queue.push({ p, go }); this.queue.sort((a, b) => this.order[a.p] - this.order[b.p]); this.pump(); });
+  }
+  release(ms: number, busy: boolean) {
+    this.active--;
+    if (busy) { this.lowPausedUntil = Date.now() + 30_000; this.slowUntil = Date.now() + 120_000; }
+    else if (ms > 2_000) this.slowUntil = Date.now() + 60_000;
+    this.pump();
+  }
+  private pump() {
+    const now = Date.now();
+    const slow = now < this.slowUntil;
+    const cap = slow ? 1 : this.maxConcurrent;
+    while (this.queue.length && this.active < cap) {
+      const i = this.queue.findIndex((q) => q.p !== 'low' || now >= this.lowPausedUntil);
+      if (i < 0) { setTimeout(() => this.pump(), Math.max(50, this.lowPausedUntil - now)); return; }
+      const gap = (slow ? this.minGapMs * 5 : this.minGapMs) - (now - this.lastStart);
+      if (gap > 0) { setTimeout(() => this.pump(), gap); return; }
+      const [q] = this.queue.splice(i, 1);
+      this.active++; this.lastStart = Date.now();
+      q!.go();
+    }
+  }
+  get waiting() { return this.queue.length; }
+}
 export interface VlCredentials { username: string; password: string; accessId?: string; clientUuid: string }
 
 export class VisionlineClient {
@@ -29,6 +71,10 @@ export class VisionlineClient {
   lastSessionAt: string | null = null;
   tlsState = 'unknown';
   trustMode: 'ca' | 'exact' | 'system' = 'system';
+
+  /** One limiter for the whole connector: the property client and every personal-credential client share it. */
+  static shared = new VisionlineLimiter(Number(process.env.VL_MAX_CONCURRENT ?? 2), Number(process.env.VL_MIN_GAP_MS ?? 40));
+  limiter = VisionlineClient.shared;
 
   constructor(baseUrl: string, private trust: VlTrust, private creds: () => VlCredentials | null) {
     this.base = new URL(baseUrl.replace(/\/$/, ''));
@@ -105,7 +151,19 @@ export class VisionlineClient {
   }
 
   /** Signed request with the reference implementation's recovery loop (at most 3 sends) [§6.1]. */
-  async request<T = any>(method: string, path: string, body?: unknown, opts: { timeoutMs?: number } = {}): Promise<T> {
+  async request<T = any>(method: string, path: string, body?: unknown, opts: { timeoutMs?: number; priority?: VlPriority } = {}): Promise<T> {
+    // The callback long-poll (minutes-long timeout) is exempt: Visionline just holds it open until something happens.
+    const limited = !(opts.timeoutMs && opts.timeoutMs > 60_000);
+    if (!limited) return this.send<T>(method, path, body, opts);
+    await this.limiter.acquire(opts.priority ?? 'normal');
+    const t0 = Date.now();
+    let busy = false;
+    try { return await this.send<T>(method, path, body, opts); }
+    catch (e) { busy = e instanceof VisionlineApiError && (e.status === 503 || e.code === 50301 || e.status === 429 || /timed out/i.test(e.message)); throw e; }
+    finally { this.limiter.release(Date.now() - t0, busy); }
+  }
+
+  private async send<T>(method: string, path: string, body: unknown, opts: { timeoutMs?: number }): Promise<T> {
     let last: { status: number; json: VisionlineError } | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       await this.ensureSession();

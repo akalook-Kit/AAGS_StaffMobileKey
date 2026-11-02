@@ -137,6 +137,37 @@ The first run builds the image (5–10 minutes). When it prints **Ready.** the p
 The K Hotel branding (black and rose gold, your logo) is set in **Mobile app settings**. A logo
 uploaded there replaces it in the portal and the app immediately.
 
+### New in 2.13 — live occupancy and emergency, staff ID cards, dark mode, your own menu, usage, security fixes
+
+| Feature | Where | What to check |
+|---|---|---|
+| Live occupancy | **Safety → Live occupancy** (sign in as `safety@khb.test` for the fire-warden screen) | Staff on site, guests in house by floor, rooms opened recently; **Full screen**; **Print evacuation list** (PDF). |
+| Emergency | **Safety → Emergency** | Start a *Drill* as `safety@khb.test` (password again), confirm it as `security@khb.test`; tick rooms and people on Live occupancy; end it with a note. |
+| Staff ID cards | **People & keys → Staff ID cards** | **Create from… → Visionline people**, open a profile, **Use camera** or **Choose a picture**, tick a few people, **Print cards** (CR80). Layout: **Settings → ID card layout**. |
+| Dark mode | Bottom of the menu: **Auto / Light / Dark** | Auto follows Windows. Also in **Your account → Menu & appearance**. |
+| Your own menu | **Your account → Menu & appearance** | Untick pages you do not use; **Visionline essentials only**. Hidden pages stay reachable with **Ctrl K**. |
+| Visionline only | **Settings → Modules → Portal focus** | Hides mobile keys, attendance, breakfast, battery and maintenance from everyone except administrators. |
+| Licence window | Appears when the licence has ended | Administrators paste the key or open the `.smklic` file. |
+| Usage | **Administration → Usage** | Who uses the portal, the most used pages, what it did and the time saved; **Summary for the supplier** (signed `.smkusage`). |
+| Administrator protection | **Settings → Administrator protection** | Require two-step sign-in for administrators. |
+| Privacy | **Settings → Privacy & retention** | Days to keep lock events, guest lists and usage counts. |
+| Help | **Help and manual** (bottom of the menu) | The user manual, searchable and printable. |
+| Sharing Visionline | Automatic | The connector sends at most 2 requests at a time to Visionline and lets the PMS/GRMS go first; see [VISIONLINE-DATA.md](VISIONLINE-DATA.md). |
+
+Security fixes from the review of 2.12 are listed in [SECURITY-REVIEW-2.13.md](SECURITY-REVIEW-2.13.md).
+
+### New in 2.12 — licences and .msi installer, access history, report builder, tidier portal
+
+| Feature | Where | What to check |
+|---|---|---|
+| Report builder | **Insights → ＋ Build a report**, **My reports**, **Door activity** | Start from a ready-made report (e.g. *Keycards that override the deadbolt*), change group/split/chart, click a bar to filter, save and pin it: it appears on Insights → Summary. |
+| Access history | **Access history** (or **Ctrl K** and a name) | A person: doors used, timeline, keycards and who issued them. A door: who went through. |
+| Keycards behind lock events | **Event log** → Person / card column; filter *Keycard: No matching keycard* | Holder, group, issued by, badges *No matching keycard*, *Not valid then*, *Deadbolt override*. |
+| Card lookup | **Visionline cards & people → Card lookup** | Type `135800`. With Settings → Reports & sync → Encoders (pilot) on and `fd1` listed, place a card in the simulator (`POST http://localhost:14444/sim/encoder {"encoder":"fd1","regNo":"135800"}`) and press **Read card on fd1**. |
+| Whose cards are read | **Settings → Reports & sync** | Everyone / staff groups / chosen groups (with people per group), at most N people, deadbolt privilege. |
+| Licence | **Settings → Licence** | The test setup runs as a trial; the on-premises installer turns licence checks on. See [LICENSING.md](LICENSING.md). |
+| Look and feel | Everywhere | Grouped menu (folds away on phones), Settings sections on the left, **Worth a look** on the Overview, search with **Ctrl K**, fonts served by the platform. |
+
 ### New in 2.11 — platform off port 4000, Breakfast
 
 | Feature | Where | What to check |
@@ -270,7 +301,7 @@ Runs inside the container, so Node.js is not needed:
 .\scripts\windows\test.ps1          # full run including the 2-minute expiry check
 ```
 
-It should end with `313 passed, 0 failed` (`310 passed` with `-Fast`).
+It should end with `351 passed, 0 failed` (`348 passed` with `-Fast`).
 
 ## Step 10 — Test the staff app on your phone (optional)
 

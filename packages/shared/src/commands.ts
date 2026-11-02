@@ -81,6 +81,12 @@ export const SetPropertyCredentialsPayload = z.object({ username: z.string().min
 /** Check an operator's personal Visionline credentials by opening (and closing) a session. */
 export const VerifyOperatorCredentialsPayload = OperatorCredential;
 /** Create a user group in Visionline [§5.29 PUT /userGroups/{id}]. */
+/**
+ * 2.12 (pilot, connector 0.10.0): read the keycard lying on a Visionline encoder. The Web API document's encoder
+ * operations take the encoder as a query parameter (ASSA ABLOY's own Postman reference: POST /cards?action=encode&encoder=fd1);
+ * the read action's name is chosen per hotel until confirmed on the hotel's Visionline. Read-only: nothing is written to the card.
+ */
+export const ReadCardPayload = z.object({ encoder: z.string().regex(/^[\w .-]{1,40}$/, 'Encoder name: letters, digits, space, dot, dash'), action: z.enum(['read', 'readCard']).default('read') });
 export const CreateUserGroupPayload = z.object({ userGroup: z.string().min(1).max(60), uniformAccess: z.boolean().default(false) });
 
 /**
@@ -110,6 +116,8 @@ export const DirectoryChunk = z.object({
     startTime: z.string().max(40).nullable(), expireTime: z.string().max(40).nullable(),
     cancelled: z.boolean(), discarded: z.boolean(), overridden: z.boolean(), expired: z.boolean(), notIssued: z.boolean(),
     issuedCount: z.number().int().nullable(), doors: z.array(z.string().max(100)).max(300), doorGroups: z.array(z.string().max(100)).max(100), timeSchedule: z.string().max(100).nullable(),
+    // 2.12 (connector 0.9.1+): door operations on the card and the deadbolt-override privilege when Visionline reports it.
+    operations: z.array(z.string().max(40)).max(20).default([]), deadboltOverride: z.boolean().nullable().default(null),
   })).max(2000).default([]),
   alarms: z.array(z.object({
     id: z.string().min(1).max(64), alarmType: z.string().max(64).nullable(), alarmTypeName: z.string().max(200).nullable(), alarmText: z.string().max(500).nullable(),
@@ -120,7 +128,7 @@ export const DirectoryChunk = z.object({
 });
 export type DirectoryChunk = z.infer<typeof DirectoryChunk>;
 
-export const CommandType = z.enum(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'DISCOVER_RESOURCES', 'VALIDATE_SETUP', 'SET_PROPERTY_CREDENTIALS', 'VERIFY_OPERATOR_CREDENTIALS', 'CREATE_USER_GROUP', 'SYNC_DIRECTORY']);
+export const CommandType = z.enum(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'DISCOVER_RESOURCES', 'VALIDATE_SETUP', 'SET_PROPERTY_CREDENTIALS', 'VERIFY_OPERATOR_CREDENTIALS', 'CREATE_USER_GROUP', 'SYNC_DIRECTORY', 'READ_CARD']);
 export type CommandType = z.infer<typeof CommandType>;
 
 export const PAYLOAD_SCHEMAS = {
@@ -132,6 +140,7 @@ export const PAYLOAD_SCHEMAS = {
   VERIFY_OPERATOR_CREDENTIALS: VerifyOperatorCredentialsPayload,
   CREATE_USER_GROUP: CreateUserGroupPayload,
   SYNC_DIRECTORY: SyncDirectoryPayload,
+  READ_CARD: ReadCardPayload,
 } as const;
 
 export const CommandEnvelope = z.object({
@@ -204,6 +213,8 @@ export const ConnectorHealth = z.object({
   adapter: z.string(),
   credentialsConfigured: z.boolean(),
   visionlineReachable: z.boolean(),
+  /** 2.13 Requests waiting for their turn on the shared Visionline, and the connector's cap. */
+  visionlineQueue: z.number().int().optional(), visionlineMaxConcurrent: z.number().int().optional(),
   visionlineApiVersion: z.string().nullable(),
   tlsTrust: z.string(),
   lastSuccessfulSessionAt: z.string().nullable(),

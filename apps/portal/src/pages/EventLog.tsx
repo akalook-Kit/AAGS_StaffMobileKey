@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { auth, ApiError } from '../api';
 import { useHotel } from '../App';
 import { ErrorNote, PageHead, useApi } from '../ui';
@@ -68,7 +68,7 @@ export function EventLogPage() {
     if (preset === '24h' || !sp.get('from')) return { from: new Date(now.getTime() - 86400_000), to: now };
     return { from: fromHotelLocal(sp.get('from')!, tz), to: sp.get('to') ? fromHotelLocal(sp.get('to')!, tz) : now };
   }, [preset, sp, tz, tick]); // eslint-disable-line react-hooks/exhaustive-deps
-  const filter = { from: range.from.toISOString(), to: range.to.toISOString(), cls, ...(cats.length ? { categories: cats.join(',') } : {}), ...(door ? { door } : {}), ...(sp.get('q') ? { q: sp.get('q')! } : {}) };
+  const filter = { from: range.from.toISOString(), to: range.to.toISOString(), cls, ...(cats.length ? { categories: cats.join(',') } : {}), ...(door ? { door } : {}), ...(sp.get('q') ? { q: sp.get('q')! } : {}), ...(sp.get('match') ? { match: sp.get('match')! } : {}) };
   const qs = new URLSearchParams(filter).toString();
   const r = useApi<any>(`${base}/events?${qs}&limit=500`, [qs]);
   const data = r.data;
@@ -136,6 +136,9 @@ export function EventLogPage() {
         <label className="slicer"><span>To</span><input type="datetime-local" value={toHotelLocal(range.to, tz)} onChange={(e) => e.target.value && set({ p: null, to: e.target.value, from: sp.get('from') ?? toHotelLocal(range.from, tz) })} /></label>
         <label className="slicer"><span>Door</span>
           <select value={door} onChange={(e) => set({ door: e.target.value || null })}><option value="">All doors</option>{(data?.doors ?? []).map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+        <label className="slicer"><span>Keycard</span>
+          <select value={sp.get('match') ?? 'any'} onChange={(e) => set({ match: e.target.value === 'any' ? null : e.target.value })}>
+            <option value="any">Any</option><option value="known">Matches a known keycard</option><option value="unknown">No matching keycard</option></select></label>
         <form className="slicer" onSubmit={(e) => { e.preventDefault(); set({ q: q.trim() || null }); }}><span>Person, card or text</span>
           <input type="search" value={q} placeholder="e.g. Amina, 135800" onChange={(e) => setQ(e.target.value)} onBlur={() => set({ q: q.trim() || null })} /></form>
         <div className="slicer" style={{ flexBasis: '100%' }}><span>Event types {cats.length ? `(${cats.length} selected)` : '(all)'}</span>
@@ -150,18 +153,18 @@ export function EventLogPage() {
 
       <div className="panel" style={{ padding: 0, overflowX: 'auto' }}>
         <table className="grid ev-table">
-          <thead><tr><th>Time</th><th>Type</th><th>Event</th><th>Door</th><th>Person / card</th><th>Source</th><th>Details</th></tr></thead>
+          <thead><tr><th>Time</th><th>Type</th><th>Event</th><th>Door</th><th>Person / card</th><th>Details</th></tr></thead>
           <tbody>
             {(data?.events ?? []).map((e: any) => (
               <tr key={e.id} className={`${e.severity}${e.watched && e.category === 'entrance' ? ' vip-row' : ''}`}>
                 <td className="t">{timeFmt.format(new Date(e.at))}</td>
-                <td><span className={`ev-tag ${e.severity !== 'info' ? e.severity : e.category === 'entrance' ? 'entrance' : ''}`}>{data.categories.find((c: any) => c.id === e.category)?.label}{e.severity !== 'info' && <b>· {e.severity === 'error' ? 'Error' : 'Warning'}</b>}</span></td>
+                <td><span className={`ev-tag ${e.severity !== 'info' ? e.severity : e.category === 'entrance' ? 'entrance' : ''}`}>{data.categories.find((c: any) => c.id === e.category)?.label}{e.severity !== 'info' && <b>· {e.severity === 'error' ? 'Error' : 'Warning'}</b>}</span><span className="sub">{e.source}</span></td>
                 <td>{e.event}</td><td>{e.door ?? '—'}{e.watched && <span className="vip-tag" title={`Watched door: ${e.watched}`}>★ {e.watched}</span>}</td>
-                <td>{e.person ?? ''}{e.person && e.card ? ' · ' : ''}{e.card ? <span className="mono">{e.card}</span> : (!e.person ? '—' : '')}</td>
-                <td className="muted" style={{ whiteSpace: 'nowrap' }}>{e.source}</td><td className="muted small">{e.detail ?? ''}</td>
+                <td><PersonCell e={e} /></td>
+                <td className="muted small ev-detail">{e.detail ?? ''}</td>
               </tr>
             ))}
-            {data && !data.events.length && <tr><td colSpan={7}><NoData text="No events match this selection for now" hint="New events appear by themselves (refreshed every 30 seconds)." /></td></tr>}
+            {data && !data.events.length && <tr><td colSpan={6}><NoData text="No events match this selection for now" hint="New events appear by themselves (refreshed every 30 seconds)." /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -185,5 +188,24 @@ export function EventLogPage() {
         </div>
       </div>
     </>
+  );
+}
+
+/** Who is behind a lock event: the person, the keycard, its group, whether it was valid then, and who issued it. */
+function PersonCell({ e }: { e: any }) {
+  const m = e.match;
+  if (!e.person && !e.card) return <span className="muted">—</span>;
+  const who = e.person ?? (m?.holderId ? <span className="muted">{m.holderId}</span> : <span className="muted">Unknown holder</span>);
+  const facts = [m?.kind === 'mobile' ? 'Mobile key' : m?.kind === 'card' ? 'Keycard' : null, m?.group, m?.issuedBy ? `issued by ${m.issuedBy}` : null].filter(Boolean).join(' · ');
+  return (
+    <div className="who-cell">
+      {m?.holderId || e.person ? <Link to={`/access?${new URLSearchParams(m?.holderId ? { holder: m.holderId } : { name: e.person })}`}>{who}</Link> : who}
+      {e.card && <span className="sub"><span className="mono">{e.card}</span>{facts && ` · ${facts}`}</span>}
+      <span className="badges">
+        {m && !m.known && <span className="badge warn" title="This card number is not among the keycards read from Visionline nor the mobile keys issued here.">No matching keycard</span>}
+        {m?.known && m.validThen === false && <span className="badge bad" title="The keycard was not valid at the time of this event.">Not valid then</span>}
+        {m?.deadbolt && <span className="badge" title="This keycard may override the deadbolt.">Deadbolt override</span>}
+      </span>
+    </div>
   );
 }

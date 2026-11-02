@@ -16,6 +16,7 @@ import { VL, VL_DOC } from '@smk/shared/node';
 import { VisionlineClient, VisionlineApiError } from './visionline/client.ts';
 import { visionlineTrust } from './visionline/trust.ts';
 import { isNotFound, getMobileAccessAccounts, listUserGroupNames } from './visionline/adapter.ts';
+import { utcForms } from './visionline/time-forms.ts';
 
 type Level = 'PASS' | 'WARN' | 'FAIL' | 'INFO';
 interface Check { level: Level; area: string; message: string; detail?: unknown }
@@ -36,6 +37,7 @@ function args() {
     out: get('out') ?? 'visionline-probe-report',
     saveCert: get('save-cert'),
     tlsOnly: a.includes('--tls-only'),
+    encoder: get('encoder'),
   };
 }
 
@@ -192,6 +194,27 @@ async function main() {
       add('INFO', 'Time schedules', `${ts.length} time schedules.`, { names: ts.map((t) => t.timeSchedule ?? t.id) });
     } catch { add('INFO', 'Time schedules', 'Not available to this operator (optional).'); }
 
+    // 2.12 Time formats this Visionline accepts in queries (read-only GETs), so the connector's choice can be confirmed.
+    const now = new Date();
+    const tryForms = async (label: string, forms: string[], path: (t: string) => string) => {
+      const ok: string[] = [], bad: string[] = [];
+      for (const f of forms) { try { await vl.request('GET', path(f)); ok.push(f); } catch (e) { bad.push(`${f} → ${(e as Error).message}`); } }
+      add(ok.length ? 'PASS' : 'WARN', 'Time formats', `${label}: accepted ${ok.length ? ok.join(', ') : 'none'}${bad.length ? `; refused ${bad.join(' | ')}` : ''}`);
+    };
+    const users = (await vl.request<{ id: unknown }[]>('GET', `${VL.paths.users}`).catch(() => [])) ?? [];
+    const someone = users.map((u) => String(u.id ?? '')).find(Boolean);
+    if (someone) await tryForms('cards validTime', [localStamp(now), ...utcForms(now)], (t) => `${VL.paths.cards}?cardHolder=${encodeURIComponent(someone)}&validTime=${t}`);
+    await tryForms('alarms updatedSince', utcForms(new Date(now.getTime() - 86_400_000)), (t) => `/alarms?updatedSince=${t}`);
+    if (o.encoder) {
+      for (const action of ['read', 'readCard'] as const) {
+        try {
+          const r = await vl.request<any>('POST', `${VL.paths.cards}?action=${action}&encoder=${encodeURIComponent(o.encoder)}`, {});
+          add('PASS', 'Encoder', `action=${action} on encoder ${o.encoder} works: card ${r?.id ?? r?.registrationNumber ?? '?'}${r?.cardHolder ? ` of ${r.cardHolder}` : ''}. Use "${action}" in Settings → Reports & sync → Encoders.`);
+          break;
+        } catch (e) { add('INFO', 'Encoder', `action=${action} on encoder ${o.encoder}: ${(e as Error).message} (put a card on the encoder before running the probe)`); }
+      }
+    }
+
     add('INFO', 'Mobile Access UUID', `Expected UUID ${o.uuid}. The Web API does not expose it: confirm in Visionline Options → Mobile Access that UUID is ${o.uuid} and “Revoke mobile key when overridden” is selected, and that Settings → Visionline in the portal shows the same.`);
   } catch (e) {
     const ve = e as VisionlineApiError;
@@ -219,3 +242,6 @@ function finish(o: ReturnType<typeof args>, checks: Check[]) {
 }
 
 void main();
+
+/** Local Visionline time for the probe's own clock ("yyyyMMddTHHmm"); the connector uses the hotel time zone. */
+function localStamp(d: Date) { const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}T${p(d.getHours())}${p(d.getMinutes())}`; }

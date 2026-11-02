@@ -25,7 +25,9 @@
     "build:portal": "npm run build -w apps/portal",
     "e2e": "tsx scripts/e2e.ts",
     "package:connector": "node scripts/package-connector.mjs",
-    "package:onprem": "node scripts/package-onprem.mjs"
+    "package:onprem": "node scripts/package-onprem.mjs",
+    "package:license-manager": "node scripts/build-license-manager.mjs",
+    "package:msi": "node scripts/build-msi.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

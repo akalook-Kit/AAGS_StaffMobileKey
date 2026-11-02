@@ -6,7 +6,7 @@ import { MODULES, MODULE_IDS, ROLES, ROLE_LABELS, type ModuleId, type Role } fro
 import { pool, tx, one, many } from '../db.ts';
 import { audit, verifyAuditChain } from '../audit.ts';
 import {
-  checkThrottle, clearFailures, hashPassword, newTotpSecret, permsIn, recordFailure, requireOperator, requirePerm,
+  checkThrottle, checkIpThrottle, recordIpFailure, checkPassword, clearFailures, hashPassword, newTotpSecret, permsIn, recordFailure, requireOperator, requirePerm, requireReauth,
   signToken, verifyPassword, verifyTotp,
 } from '../auth.ts';
 import { enqueue, newCorrelationId } from '../commands.ts';
@@ -33,14 +33,16 @@ export function portalRoutes(app: FastifyInstance) {
     const b = z.object({ email: z.string().email(), password: z.string(), totp: z.string().optional() }).parse(req.body);
     const tkey = `op:${b.email.toLowerCase()}`;
     checkThrottle(tkey);
+    checkIpThrottle(req.ip);
     const op = await one(pool, 'SELECT * FROM operators WHERE lower(email)=lower($1)', [b.email]);
-    if (!op || op.status !== 'ACTIVE' || !verifyPassword(b.password, op.password_hash)) {
-      recordFailure(tkey);
+    const pwOk = await checkPassword(b.password, op?.password_hash);
+    if (!op || op.status !== 'ACTIVE' || !pwOk) {
+      recordFailure(tkey); recordIpFailure(req.ip);
       throw new ApiError(401, 'BAD_CREDENTIALS', 'Email or password is incorrect.');
     }
     if (op.mfa_enabled) {
       if (!b.totp) return { mfaRequired: true };
-      if (!verifyTotp(op.totp_secret, b.totp)) { recordFailure(tkey); throw new ApiError(401, 'BAD_TOTP', 'The authentication code is incorrect.'); }
+      if (!verifyTotp(op.totp_secret, b.totp)) { recordFailure(tkey); recordIpFailure(req.ip); throw new ApiError(401, 'BAD_TOTP', 'The authentication code is incorrect.'); }
     }
     clearFailures(tkey);
     await pool.query('UPDATE operators SET last_sign_in_at=now() WHERE id=$1', [op.id]);
@@ -50,8 +52,11 @@ export function portalRoutes(app: FastifyInstance) {
 
   app.post(`${P}/auth/mfa/setup`, async (req) => {
     const op = await requireOperator(req);
+    // 2.13 (security review): a session alone must not be able to switch two-step sign-in off by starting again.
+    const cur = await one(pool, 'SELECT mfa_enabled FROM operators WHERE id=$1', [op.id]);
+    if (cur?.mfa_enabled) throw new ApiError(409, 'MFA_ALREADY_ON', 'Two-step sign-in is already on for this account. If the phone was lost, a platform administrator resets it.');
     const secret = newTotpSecret();
-    await pool.query('UPDATE operators SET totp_secret=$2, mfa_enabled=false WHERE id=$1', [op.id, secret]);
+    await pool.query('UPDATE operators SET totp_secret=$2, mfa_enabled=false WHERE id=$1 AND NOT mfa_enabled', [op.id, secret]);
     return { secret, otpauthUrl: `otpauth://totp/StaffMobileKey:${encodeURIComponent(op.email)}?secret=${secret}&issuer=StaffMobileKey` };
   });
   app.post(`${P}/auth/mfa/enable`, async (req) => {
@@ -69,13 +74,27 @@ export function portalRoutes(app: FastifyInstance) {
     const hotels = op.isPlatformAdmin
       ? await many(pool, 'SELECT id, slug, name FROM hotels ORDER BY name')
       : await many(pool, 'SELECT id, slug, name FROM hotels WHERE id = ANY($1) ORDER BY name', [[...op.roles.keys()]]);
-    const r = await one(pool, 'SELECT mfa_enabled FROM operators WHERE id=$1', [op.id]);
+    const r = await one(pool, 'SELECT mfa_enabled, prefs FROM operators WHERE id=$1', [op.id]);
     return {
-      id: op.id, email: op.email, displayName: op.displayName, isPlatformAdmin: op.isPlatformAdmin, mfaEnabled: r.mfa_enabled,
-      hotels: hotels.map((h) => ({ ...h, roles: op.isPlatformAdmin ? ['PLATFORM_ADMIN'] : op.roles.get(h.id), permissions: [...permsIn(op, h.id)], hiddenModules: op.hidden?.get(h.id) ?? [] })),
+      id: op.id, email: op.email, displayName: op.displayName, isPlatformAdmin: op.isPlatformAdmin, mfaEnabled: r.mfa_enabled, prefs: r.prefs ?? {},
+      hotels: hotels.map((h) => {
+        const roles = op.isPlatformAdmin ? ['PLATFORM_ADMIN'] : op.roles.get(h.id) ?? [];
+        // 2.13 Administration stays closed until two-step sign-in is on, when the hotel requires it for administrators.
+        const mfaRequired = Boolean(op.mfaRequiredIn?.has(h.id) && (op.isPlatformAdmin || roles.includes('HOTEL_ADMIN')));
+        const perms = [...permsIn(op, h.id)].filter((p) => !mfaRequired || !['settings.manage', 'operators.manage', 'connector.manage', 'branding.manage'].includes(p));
+        return { ...h, roles, permissions: perms, hiddenModules: op.hidden?.get(h.id) ?? [], mfaRequired };
+      }),
       roleLabels: ROLE_LABELS,
       modules: Object.fromEntries(MODULE_IDS.map((m) => [m, MODULES[m].label])),
     };
+  });
+
+  /** 2.13 Personal preferences: menu items this person hides, appearance. Only the person's own. */
+  app.put(`${P}/me/prefs`, async (req) => {
+    const op = await requireOperator(req);
+    const b = z.object({ hiddenNav: z.array(z.string().regex(/^\/[a-z/?=&-]*$/).max(60)).max(40).default([]), theme: z.enum(['system', 'light', 'dark']).default('system') }).parse(req.body);
+    await pool.query('UPDATE operators SET prefs=$2 WHERE id=$1', [op.id, b]);
+    return b;
   });
 
   // ---- Hotels (platform administration) ----------------------------------------------------------
@@ -298,6 +317,19 @@ export function portalRoutes(app: FastifyInstance) {
         COALESCE((SELECT a.hidden_modules FROM operator_module_access a WHERE a.operator_id=o.id AND a.hotel_id=$1), '{}') AS hidden_modules
       FROM operators o JOIN memberships m ON m.operator_id=o.id WHERE m.hotel_id=$1 GROUP BY o.id ORDER BY o.display_name`, [hotelId]);
   });
+  /** 2.13 Lost phone: an administrator of the hotel turns two-step sign-in off for a member (password confirmed). */
+  app.post(`${P}/hotels/:hotelId/operators/:operatorId/mfa/reset`, async (req) => {
+    const hotelId = hid(req);
+    const op = await requirePerm(req, hotelId, 'operators.manage');
+    await requireReauth(req, op);
+    const target = z.string().uuid().parse((req.params as any).operatorId);
+    if (target === op.id) throw forbidden('Ask another administrator to reset your own two-step sign-in.');
+    const t = await one(pool, `SELECT o.id, o.email, o.is_platform_admin FROM operators o JOIN memberships m ON m.operator_id=o.id AND m.hotel_id=$1 WHERE o.id=$2 LIMIT 1`, [hotelId, target]);
+    if (!t || (t.is_platform_admin && !op.isPlatformAdmin)) throw notFound('Operator');
+    await pool.query('UPDATE operators SET mfa_enabled=false, totp_secret=NULL WHERE id=$1', [target]);
+    await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'operator.mfa_reset', targetType: 'operator', targetId: target, details: { email: t.email } });
+    return { ok: true };
+  });
   /** 2.8: hide portal modules from one person (menu and permissions). */
   app.put(`${P}/hotels/:hotelId/operators/:operatorId/modules`, async (req) => {
     const hotelId = hid(req);
@@ -374,7 +406,11 @@ export function portalRoutes(app: FastifyInstance) {
     const hotelId = hid(req);
     const kind = (req.params as any).kind as ConfigKind;
     if (!CONFIG_KINDS.includes(kind)) throw notFound('Configuration');
-    await requirePerm(req, hotelId, 'staff.read');
+    if (kind === 'branding') {
+      // Every member of the hotel sees its colours and logo (the restaurant role too).
+      const op = await requireOperator(req);
+      if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this hotel.');
+    } else await requirePerm(req, hotelId, 'staff.read');
     return getConfigWithVersion(hotelId, kind);
   });
   app.put(`${P}/hotels/:hotelId/config/:kind`, async (req) => {

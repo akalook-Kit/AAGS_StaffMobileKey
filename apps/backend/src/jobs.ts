@@ -8,6 +8,7 @@ import { runMonitoring } from './monitoring/monitor.ts';
 import { maybeDailyBackup } from './backup.ts';
 import { loadStoredSecrets } from './secret-store.ts';
 import { scheduleDiscovery } from './visionline-sync.ts';
+import { applyRetention } from './retention.ts';
 
 /**
  * Housekeeping loop: command expiry, scheduled issuance, key expiry, invitation expiry, and
@@ -153,6 +154,7 @@ export function startJobs() {
       if (n % 12 === 3) await runMonitoring(); // every minute
       if (n % 12 === 9) await maybeDailyBackup().catch((e) => console.error('[backup]', (e as Error).message));
       if (n % 60 === 30) await loadStoredSecrets();
+      if (n % 720 === 100) await applyRetention().catch((e) => console.error('[retention]', (e as Error).message)); // hourly
     } catch (e) {
       console.error('[jobs]', e);
     }

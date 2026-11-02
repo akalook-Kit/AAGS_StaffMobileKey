@@ -390,7 +390,7 @@ if (-not $hotelGiven) {
 $envLines = @(
   '# Non-secret settings of the platform service. Secrets are in platform.secrets (encrypted).',
   'HOST=127.0.0.1', "PORT=$PlatformPort", "PORTAL_DIST=$(Join-Path $InstallDir 'portal')", "SMK_MIGRATIONS_DIR=$(Join-Path $InstallDir 'migrations')",
-  "SMK_BRAND_DIR=$(Join-Path $InstallDir 'brand')", 'PROVISION_ON_START=1', 'SMK_SETUP_MODE=1', 'CS_CALLBACKS=off',
+  "SMK_BRAND_DIR=$(Join-Path $InstallDir 'brand')", 'PROVISION_ON_START=1', 'SMK_SETUP_MODE=1', 'SMK_LICENSING=on', 'CS_CALLBACKS=off',
   "PUBLIC_URL=https://$($ServerName):$LanPort", 'LOG_LEVEL=info', "CORS_ORIGINS=https://$($ServerName):$LanPort", "SMK_SERVER_NAME=$ServerName",
   "SMK_BACKUP_DIR=$(Join-Path $DataDir 'backups')", "SMK_BACKUP_LOG=$(Join-Path $DataDir 'logs\backup.log')", 'SMK_BACKUP_AT=02:30', 'SMK_BACKUP_KEEP=14',
   '# The hotel is entered in the portal (first-run setup); older installations kept it here.'
@@ -530,6 +530,8 @@ if ($installConnector) {
 }
 
 # ---- Shortcut ------------------------------------------------------------------------------------------------------
+# The local address of the portal, for Open-StaffMobileKey.cmd (Start menu, end of the .msi installation).
+try { Write-Utf8NoBom (Join-Path $DataDir 'portal-url.txt') "$platformUrl`r`n" } catch { }
 $portal = "https://$($ServerName):$LanPort/"
 try {
   $lnk = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Staff Mobile Key.url'

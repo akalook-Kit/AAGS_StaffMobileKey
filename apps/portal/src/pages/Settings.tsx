@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { LicencePanel } from '../components/Licence';
 import { ApiError, api, sealCredential } from '../api';
 import { useHotel } from '../App';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -39,6 +40,7 @@ const GENERIC: Record<string, { intro: string; fields: Field[] }> = {
     { k: 'systemId', label: 'System ID', type: 'number', hint: 'Must match the Visionline Mobile Access account (checked on Connector health).' },
   ] },
   features: { intro: 'Modules can be switched on only when they are released, licensed and supported by the connector.', fields: [
+    { k: 'portalFocus', label: 'Portal focus', type: 'select', options: [{ v: 'full', l: 'Everything switched on below' }, { v: 'visionline', l: 'Visionline only (cards, people, access history, event log, reports)' }], hint: 'Visionline only hides mobile keys, attendance, breakfast, battery and maintenance from everyone except hotel administrators. Nothing is deleted. Each person can also tidy their own menu (Your account -> Menu & appearance).' },
     { k: 'staffMobileKeys', label: 'Staff mobile keys', type: 'bool' },
     { k: 'mobileKeysVisibleTo', label: 'Mobile keys module visible to', type: 'select', options: [{ v: 'everyone', l: 'Everyone whose role allows it' }, { v: 'administrators', l: 'Hotel administrators only (while it is being finalised)' }], hint: 'Hides mobile keys, staff phones, app settings and the key settings tabs from everyone except hotel administrators. Per person: Operators -> Modules.' },
     { k: 'timeAttendance', label: 'Time & attendance', type: 'bool', hint: 'Check-in desk, timesheets, leave, payroll exports. Door entrances count when attendance doors are set (Time & attendance -> Setup).' },
@@ -51,20 +53,37 @@ const GENERIC: Record<string, { intro: string; fields: Field[] }> = {
 };
 
 const TABS = [
-  { id: 'property', label: 'Hotel details' },
-  { id: 'buildings', label: 'Building addresses' },
-  { id: 'visionline', label: 'Visionline' },
-  { id: 'templates', label: 'Access templates' },
-  { id: 'policy', label: 'Key policy' },
-  { id: 'battery', label: 'Battery & maintenance' },
-  { id: 'reports', label: 'Reports & sync' },
-  { id: 'eventlog', label: 'Event log' },
-  { id: 'alerts', label: 'Alerts & notifications' },
-  { id: 'thresholds', label: 'Alert thresholds' },
-  { id: 'credential_services', label: 'Credential Services' },
-  { id: 'features', label: 'Modules' },
-  { id: 'backups', label: 'Backups' },
+  { id: 'property', label: 'Hotel details', group: 'Hotel' },
+  { id: 'buildings', label: 'Building addresses', group: 'Hotel' },
+  { id: 'features', label: 'Modules', group: 'Hotel' },
+  { id: 'visionline', label: 'Visionline', group: 'Visionline' },
+  { id: 'reports', label: 'Reports & sync', group: 'Visionline' },
+  { id: 'eventlog', label: 'Event log', group: 'Visionline' },
+  { id: 'templates', label: 'Access templates', group: 'Mobile keys' },
+  { id: 'policy', label: 'Key policy', group: 'Mobile keys' },
+  { id: 'credential_services', label: 'Credential Services', group: 'Mobile keys' },
+  { id: 'alerts', label: 'Alerts & notifications', group: 'Alerts' },
+  { id: 'thresholds', label: 'Alert thresholds', group: 'Alerts' },
+  { id: 'battery', label: 'Battery & maintenance', group: 'Alerts' },
+  { id: 'safety', label: 'Safety & emergency', group: 'Safety & people' },
+  { id: 'idcard', label: 'ID card layout', group: 'Safety & people' },
+  { id: 'security', label: 'Administrator protection', group: 'System' },
+  { id: 'privacy', label: 'Privacy & retention', group: 'System' },
+  { id: 'backups', label: 'Backups', group: 'System' },
+  { id: 'licence', label: 'Licence', group: 'System' },
 ];
+
+/** 2.13 Words people search for, per tab (labels and field names are searched too). */
+const KEYWORDS: Record<string, string> = {
+  property: 'name address time zone timezone check-in check-out phone email website footer legal tax manager system number',
+  buildings: 'wing building address map', features: 'modules switch on off focus visionline only breakfast attendance battery maintenance mobile keys',
+  visionline: 'server url user password connector property credentials uuid revoke start time', reports: 'sync insights people keycards night quiet groups grms pms',
+  eventlog: 'events entrance codes record', templates: 'access template doors', policy: 'key validity broad approval wrong door limit',
+  credential_services: 'seos tenant system id credential', alerts: 'email sms smtp contacts notifications', thresholds: 'offline vip alarms disk monitoring',
+  battery: 'battery voltage maintenance due technicians', safety: 'muster occupancy fire evacuation emergency template responders visitors floors',
+  idcard: 'id card badge photo print printer barcode cr80 layout', security: 'two-step mfa 2fa authenticator password administrators protection re-enter',
+  backups: 'backup restore database', privacy: 'privacy retention gdpr data protection delete keep days guests events', licence: 'licence license key installation id trial',
+};
 
 /** Settings tabs that belong to the mobile keys module (hidden with it). */
 const KEY_TABS = new Set(['visionline', 'templates', 'policy', 'credential_services']);
@@ -75,25 +94,46 @@ export function SettingsPage() {
   const tabs = TABS.filter((x) => !(keysHidden && KEY_TABS.has(x.id)));
   const [tab0, setTab] = useState(() => new URLSearchParams(location.search).get('tab') ?? 'property');
   const tab = tabs.some((x) => x.id === tab0) ? tab0 : 'property';
+  const [find, setFind] = useState('');
+  const f = find.trim().toLowerCase();
+  const fieldsOf = (id: string) => (GENERIC[id]?.fields ?? []).map((x) => `${x.label} ${x.hint ?? ''}`).join(' ');
+  const shown = f ? tabs.filter((x) => `${x.label} ${x.group} ${KEYWORDS[x.id] ?? ''} ${fieldsOf(x.id)}`.toLowerCase().includes(f)) : tabs;
   return (
     <>
       <PageHead title="Settings" intro="Each save creates a new version you can roll back to." />
-      <div className="seg" role="tablist" style={{ marginBottom: 16, flexWrap: 'wrap' }}>
-        {tabs.map((x) => <button key={x.id} role="tab" aria-pressed={tab === x.id} onClick={() => setTab(x.id)}>{x.label}</button>)}
-      </div>
+      <div className="settings-layout">
+      <select className="subnav-select search" aria-label="Settings section" value={tab} onChange={(e) => setTab(e.target.value)}>
+        {[...new Set(tabs.map((x) => x.group))].map((g) => <optgroup key={g} label={g}>{tabs.filter((x) => x.group === g).map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</optgroup>)}
+      </select>
+      <nav className="subnav" aria-label="Settings sections">
+        <input className="search subnav-find" type="search" placeholder="Find a setting" value={find} onChange={(e) => setFind(e.target.value)} aria-label="Find a setting" />
+        {!shown.length && <p className="small muted" style={{ padding: '4px 8px' }}>No setting matches.</p>}
+        {[...new Set(shown.map((x) => x.group))].map((g) => (
+          <div key={g} className="subnav-group"><span>{g}</span>
+            {shown.filter((x) => x.group === g).map((x) => <button key={x.id} aria-current={tab === x.id ? 'page' : undefined} onClick={() => { setTab(x.id); try { history.replaceState(null, '', `?tab=${x.id}`); } catch { /* ignore */ } }}>{x.label}</button>)}
+          </div>))}
+      </nav>
+      <div className="settings-body">
       <ErrorBoundary key={tab} label="This settings tab">
       {tab === 'visionline' ? <VisionlineSettings />
         : tab === 'templates' ? <TemplatesSettings />
         : tab === 'reports' ? <ConfigForm key="reports" kind="visionline" intro="Insights can read people, valid keycards and lock alarms from Visionline, read-only. Each save is a new version of the Visionline settings." render={(d, set) => <ReportsSync data={d} set={set} />} aside={<SyncHistory />} />
         : tab === 'alerts' ? <ConfigForm key="alerts" kind="notifications" intro="How alerts reach people. The mail server password and the SMS key are entered under Passwords and keys below: stored encrypted on the server and never shown again." render={(d, set) => <ChannelsEditor data={d} set={set} />} aside={<><SecretsPanel areas={['email', 'sms']} /><AlertContacts /></>} />
         : tab === 'credential_services' ? <ConfigForm key="cs" kind="credential_services" intro={GENERIC.credential_services!.intro} fields={GENERIC.credential_services!.fields} aside={<SecretsPanel areas={['credential_services']} />} />
+        : tab === 'safety' ? <ConfigForm key="safety" kind="policy" intro="Live occupancy and emergencies. Part of the hotel policy; each save is a new policy version." render={(d, set) => <SafetyPolicy data={d} set={set} />} />
+        : tab === 'idcard' ? <ConfigForm key="idcard" kind="policy" intro="What is printed on staff ID cards (CR80, 85.6 × 54 mm). Part of the hotel policy." render={(d, set) => <IdCardPolicy data={d} set={set} />} />
+        : tab === 'security' ? <ConfigForm key="security" kind="policy" intro="Extra protection for the people who can change settings. Part of the hotel policy." render={(d, set) => <AdminSecurityPolicy data={d} set={set} />} />
+        : tab === 'privacy' ? <ConfigForm key="privacy" kind="policy" intro="How long personal data is kept. Older data is deleted automatically every hour, a little at a time. The audit trail is always kept." render={(d, set) => <PrivacyPolicy data={d} set={set} />} />
         : tab === 'backups' ? <BackupsPanel />
+        : tab === 'licence' ? <LicencePanel />
         : tab === 'thresholds' ? <ConfigForm key="thresholds" kind="policy" intro="When Monitoring raises an alert. Part of the hotel policy; each save is a new policy version." render={(d, set) => <ThresholdsEditor data={d} set={set} />} />
         : tab === 'eventlog' ? <ConfigForm key="eventlog" kind="policy" intro="Which lock events the connector records for the Event log. Refused entries and battery events are always recorded. Part of the hotel policy; each save is a new policy version." render={(d, set) => <EventLogPolicy data={d} set={set} />} />
         : tab === 'battery' ? <ConfigForm key="battery" kind="policy" intro="How battery alarms and maintenance requests are handled. Part of the hotel policy; each save is a new policy version." render={(d, set) => <Phase2Policy data={d} set={set} />} />
         : tab === 'buildings' ? <ConfigForm key="buildings" kind="property" intro="Extra addresses for buildings or wings. Staff see the address (and a map link) for keys that include doors from these door groups." render={(d, set) => <BuildingsEditor data={d} set={set} />} />
         : <ConfigForm key={tab} kind={tab} intro={GENERIC[tab]!.intro} fields={GENERIC[tab]!.fields} />}
       </ErrorBoundary>
+      </div>
+      </div>
     </>
   );
 }
@@ -182,7 +222,7 @@ function BuildingsEditor({ data, set }: { data: any; set: (p: any) => void }) {
       {data.address && <p className="small">Main address: <strong>{data.address}</strong> (Hotel details). It is used for doors not listed below.</p>}
       {list.length === 0 && <div className="empty" style={{ padding: 18 }}>No extra buildings. Add one if some doors are at a different address.</div>}
       {list.map((b, i) => (
-        <div key={i} className="panel" style={{ background: '#fffdfc' }}>
+        <div key={i} className="panel" style={{ background: 'var(--surface-2)' }}>
           <div className="field-row">
             <div className="field"><label htmlFor={`ba${i}`}>Address</label><input id={`ba${i}`} value={b.address} onChange={(e) => update(i, { address: e.target.value })} placeholder="e.g. Annex, Rue Joss, Bonanjo, Douala" /></div>
             <div className="field"><label htmlFor={`bm${i}`}>Map link <span className="muted small">(optional)</span></label><input id={`bm${i}`} value={b.mapUrl ?? ''} onChange={(e) => update(i, { mapUrl: e.target.value || null })} placeholder="https://maps.google.com/…" /><span className="hint">https:// only. Opens from the staff app.</span></div>
@@ -512,24 +552,59 @@ function Phase2Policy({ data, set }: { data: any; set: (patch: any) => void }) {
 
 /** Settings → Reports & sync: visionline.directorySync (read-only snapshot of people, keycards and alarms). */
 function ReportsSync({ data, set }: { data: any; set: (patch: any) => void }) {
-  const ds = { enabled: false, scope: 'staffGroups', includeCards: true, includeAlarms: true, everyHours: 24, maxUsers: 3000, ...(data.directorySync ?? {}) };
+  const { base, can } = useHotel();
+  const ds = { enabled: false, scope: 'staffGroups', groups: [] as string[], includeCards: true, includeAlarms: true, everyHours: 24, maxUsers: 3000, ...(data.directorySync ?? {}) };
   const setD = (patch: any) => set({ directorySync: { ...ds, ...patch } });
+  const er = { enabled: false, encoders: [] as string[], action: 'read', ...(data.encoderRead ?? {}) };
+  const setE = (patch: any) => set({ encoderRead: { ...er, ...patch } });
+  const [encText, setEncText] = useState((er.encoders ?? []).join(', '));
+  // Every user group known from Visionline (discovery and earlier reads), with how many people each has.
+  const known = useApi<any[]>(can('reports.read') ? `${base}/visionline/user-groups` : null);
+  const groups: { name: string; people: number }[] = (known.data ?? []).map((g: any) => ({ name: g.name, people: g.people ?? 0 }));
+  for (const g of [...(data.userGroups ?? []), ...(ds.groups ?? [])]) if (!groups.some((x) => x.name === g)) groups.push({ name: g, people: 0 });
+  groups.sort((x, y) => x.name.localeCompare(y.name));
+  const chosen = new Set<string>(ds.scope === 'groups' ? ds.groups : ds.scope === 'staffGroups' ? (data.userGroups ?? []) : groups.map((g) => g.name));
+  const toggle = (g: string) => { const n = new Set(ds.groups); n.has(g) ? n.delete(g) : n.add(g); setD({ scope: 'groups', groups: [...n] }); };
+  const people = groups.filter((g) => chosen.has(g.name)).reduce((a, g) => a + g.people, 0);
   return (
     <>
       <label className="check"><input type="checkbox" checked={ds.enabled} onChange={(e) => setD({ enabled: e.target.checked })} />
-        <span><strong>Read people and keycards from Visionline for the reports</strong>
-          <span className="hint" style={{ display: 'block' }}>The connector reads names, user groups, valid keycards (validity, doors) and lock alarms with GET requests only. It never reads or keeps PIN codes, e-mail addresses, phone numbers or card serial numbers, and changes nothing in Visionline. Switch this on only for the hotel's own Visionline.</span></span></label>
-      <div className="field-row" style={{ marginTop: 10 }}>
-        <div className="field"><label htmlFor="scope">Whose cards</label>
-          <select id="scope" value={ds.scope} onChange={(e) => setD({ scope: e.target.value })} disabled={!ds.enabled}>
-            <option value="staffGroups">Staff user groups (Settings → Visionline)</option><option value="all">Every Visionline user</option>
-          </select><span className="hint">Staff groups: {(data.userGroups ?? []).join(', ') || 'none yet'}.</span></div>
-        <div className="field"><label htmlFor="every">Read every (hours)</label><input id="every" type="number" min={1} max={168} value={ds.everyHours} disabled={!ds.enabled} onChange={(e) => setD({ everyHours: Number(e.target.value) })} />
-          <span className="hint">The read is slow on purpose (two requests at a time) so the Visionline server is not loaded.</span></div>
-        <div className="field"><label htmlFor="max">At most this many people</label><input id="max" type="number" min={10} max={20000} value={ds.maxUsers} disabled={!ds.enabled} onChange={(e) => setD({ maxUsers: Number(e.target.value) })} /></div>
+        <span><strong>Read people and keycards from Visionline</strong>
+          <span className="hint" style={{ display: 'block' }}>GET requests only: names, user groups, valid keycards (validity, doors, privileges) and lock alarms. PIN codes, e-mail addresses, phone numbers and card serial numbers are never read or kept, and nothing in Visionline changes. Only for the hotel's own Visionline.</span></span></label>
+      <fieldset className="plain" disabled={!ds.enabled}>
+        <h3 style={{ marginTop: 16 }}>Whose cards</h3>
+        <div className="seg" role="radiogroup" aria-label="Whose cards" style={{ marginBottom: 10 }}>
+          {[['staffGroups', 'Staff user groups'], ['groups', 'Chosen user groups'], ['all', 'Everyone in Visionline']].map(([v, l]) => (
+            <button key={v} type="button" role="radio" aria-checked={ds.scope === v} aria-pressed={ds.scope === v} onClick={() => setD({ scope: v, groups: v === 'groups' && !ds.groups.length ? [...(data.userGroups ?? [])] : ds.groups })}>{l}</button>))}
+        </div>
+        {groups.length > 0 ? (
+          <div className="chips" style={{ marginBottom: 6 }}>
+            {groups.map((g) => (
+              <button key={g.name} type="button" className="chip" aria-pressed={chosen.has(g.name)} disabled={ds.scope !== 'groups'} onClick={() => toggle(g.name)}>
+                {g.name}{g.people > 0 && <span className="chip-n">{g.people}</span>}</button>))}
+          </div>
+        ) : <p className="muted small">User groups appear here once the connector has read Visionline.</p>}
+        <p className="hint small">{ds.scope === 'all' ? 'Every Visionline user, whatever the group.' : ds.scope === 'groups' ? 'Click the groups to read.' : 'The staff user groups of Settings → Visionline.'}
+          {people > 0 && ` About ${people.toLocaleString()} people at the last read.`}</p>
+        <div className="field-row" style={{ marginTop: 10 }}>
+          <div className="field"><label htmlFor="max">At most this many people</label><input id="max" type="number" min={10} max={20000} value={ds.maxUsers} onChange={(e) => setD({ maxUsers: Number(e.target.value) })} /></div>
+          <div className="field"><label htmlFor="every">Read again every (hours)</label><input id="every" type="number" min={1} max={168} value={ds.everyHours} onChange={(e) => setD({ everyHours: Number(e.target.value) })} /></div>
+        </div>
+        <label className="check"><input type="checkbox" checked={Boolean(ds.quietHoursOnly)} onChange={(e) => setD({ quietHoursOnly: e.target.checked })} /><span>Only at night (22:00–06:00)<span className="hint" style={{ display: 'block' }}>Leaves Visionline to the GRMS, the PMS interface and the desk during the day. Cards made at the desk are still recorded within seconds.</span></span></label>
+        <p className="hint small">The connector shares Visionline politely: at most two requests at a time, key issuing first, and it slows down when Visionline is busy.</p>
+        <h3 style={{ marginTop: 14 }}>What to read</h3>
+        <label className="check"><input type="checkbox" checked={ds.includeCards} onChange={(e) => setD({ includeCards: e.target.checked })} /><span>Valid keycards of each person <span className="hint" style={{ display: 'block' }}>Validity, doors, door groups, time schedule and privileges such as deadbolt override (when Visionline reports them).</span></span></label>
+        <label className="check"><input type="checkbox" checked={ds.includeAlarms} onChange={(e) => setD({ includeAlarms: e.target.checked })} /><span>Lock alarms<span className="hint" style={{ display: 'block' }}>Needs the Visionline option "Web service for checking and confirming alarms". Alarms are only read, never marked completed.</span></span></label>
+      </fieldset>
+      <h3 style={{ marginTop: 22 }}>Encoders <span className="badge">pilot</span></h3>
+      <p className="hint small">Read the keycard lying on a Visionline encoder from <b>Visionline cards &amp; people → Card lookup</b>: whose card it is, its doors, who issued it and where it was used. Read-only. Needs connector 0.10.0; confirm on the hotel's Visionline before relying on it.</p>
+      <label className="check"><input type="checkbox" checked={er.enabled} onChange={(e) => setE({ enabled: e.target.checked })} /><span>Allow reading cards at these encoders</span></label>
+      <div className="field-row" style={{ marginTop: 8 }}>
+        <div className="field"><label htmlFor="encs">Encoder names in Visionline</label><input id="encs" value={encText} disabled={!er.enabled} placeholder="fd1, fd2" onChange={(e) => setEncText(e.target.value)}
+          onBlur={() => setE({ encoders: encText.split(',').map((x: string) => x.trim()).filter(Boolean).slice(0, 20) })} /><span className="hint">Separated by commas, as named in Visionline (for example fd1).</span></div>
+        <div className="field"><label htmlFor="encact">Visionline read action</label><select id="encact" value={er.action} disabled={!er.enabled} onChange={(e) => setE({ action: e.target.value })}><option value="read">read (default)</option><option value="readCard">readCard</option></select>
+          <span className="hint">Change only if Visionline answers that the action is unknown.</span></div>
       </div>
-      <label className="check"><input type="checkbox" checked={ds.includeCards} disabled={!ds.enabled} onChange={(e) => setD({ includeCards: e.target.checked })} /><span>Valid keycards of each person</span></label>
-      <label className="check"><input type="checkbox" checked={ds.includeAlarms} disabled={!ds.enabled} onChange={(e) => setD({ includeAlarms: e.target.checked })} /><span>Lock alarms<span className="hint" style={{ display: 'block' }}>Needs the Visionline option "Web service for checking and confirming alarms". Alarms are only read, never marked completed.</span></span></label>
     </>
   );
 }
@@ -805,5 +880,94 @@ function BackupsPanel() {
           <tbody>{b.data.copies.map((c: any) => <tr key={c.name}><td className="nowrap"><code>{c.name}</code></td><td>{/-manual\./.test(c.name) ? 'Back up now' : /-pre-upgrade\./.test(c.name) ? 'Before an upgrade' : /-before-restore\./.test(c.name) ? 'Before a restore' : 'Daily'}</td><td className="nowrap">{fmt.dt(c.madeAt)}</td><td className="num">{mb(c.bytes)}</td><td>{c.fingerprint ? 'Saved (.sha256)' : '—'}</td></tr>)}</tbody></table></div>
       ) : <p className="muted">No copy yet. The first daily copy is made within a few minutes after {b.data.dailyAt}; or press Back up now.</p>}
     </div>
+  );
+}
+
+/** 2.13 Live occupancy and emergencies. */
+function SafetyPolicy({ data, set }: { data: any; set: (patch: any) => void }) {
+  const { base } = useHotel();
+  const tpl = useApi<any[]>(`${base}/templates`);
+  const sf = { staffOnSiteHours: 10, roomActivityHours: 12, visitorGroups: [], emergencyTemplateId: null, emergencyKeyHours: 4, floorDigits: 0, ...(data.safety ?? {}) };
+  const setS = (patch: any) => set({ safety: { ...sf, ...patch } });
+  const [vg, setVg] = useState((sf.visitorGroups ?? []).join(', '));
+  return (
+    <>
+      <h3 className="section-title">Live occupancy</h3>
+      <div className="field-row">
+        <div className="field"><label htmlFor="soh">Staff count as on site for (hours after their last door)</label><input id="soh" type="number" min={1} max={24} value={sf.staffOnSiteHours} onChange={(e) => setS({ staffOnSiteHours: Number(e.target.value) })} />
+          <span className="hint">Locks record entries, not exits. A check-out at attendance removes the person earlier.</span></div>
+        <div className="field"><label htmlFor="rah">Rooms count as used for (hours after the door opened)</label><input id="rah" type="number" min={1} max={48} value={sf.roomActivityHours} onChange={(e) => setS({ roomActivityHours: Number(e.target.value) })} /></div>
+        <div className="field"><label htmlFor="fd">Floor = first digits of the room number</label><input id="fd" type="number" min={0} max={4} value={sf.floorDigits} onChange={(e) => setS({ floorDigits: Number(e.target.value) })} />
+          <span className="hint">0 = automatic (all but the last two digits: 1204 → floor 12).</span></div>
+      </div>
+      <div className="field"><label htmlFor="vg">Visionline user groups that are visitors or contractors</label><input id="vg" value={vg} onChange={(e) => setVg(e.target.value)} onBlur={() => setS({ visitorGroups: vg.split(',').map((x: string) => x.trim()).filter(Boolean) })} placeholder="e.g. Contractors, Visitors" />
+        <span className="hint">Counted separately from staff. Separate with commas.</span></div>
+      <h3 className="section-title">Emergency keys</h3>
+      <div className="field-row">
+        <div className="field"><label htmlFor="et">Template for emergency mobile keys</label>
+          <select id="et" value={sf.emergencyTemplateId ?? ''} onChange={(e) => setS({ emergencyTemplateId: e.target.value || null })}>
+            <option value="">Not chosen (emergency keys off)</option>
+            {(tpl.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select><span className="hint">Usually all doors, including back-of-house. Create it under Access templates.</span></div>
+        <div className="field"><label htmlFor="eh">Emergency keys valid for (hours)</label><input id="eh" type="number" min={1} max={24} value={sf.emergencyKeyHours} onChange={(e) => setS({ emergencyKeyHours: Number(e.target.value) })} /></div>
+      </div>
+    </>
+  );
+}
+
+/** 2.13 Staff ID card layout. */
+function IdCardPolicy({ data, set }: { data: any; set: (patch: any) => void }) {
+  const c = { orientation: 'portrait', title: 'STAFF', showDepartment: true, showJobTitle: true, showIdNumber: true, showValidUntil: false, showBarcode: true,
+    backText: 'This card is the property of the hotel. If found, please return it to reception.', safeMarginMm: 1.5, ...(data.idCard ?? {}) };
+  const setC = (patch: any) => set({ idCard: { ...c, ...patch } });
+  const box = (k: string, l: string) => <label className="check"><input type="checkbox" checked={Boolean(c[k])} onChange={(e) => setC({ [k]: e.target.checked })} /> {l}</label>;
+  return (
+    <>
+      <div className="field-row">
+        <div className="field"><label htmlFor="ico">Orientation</label><select id="ico" value={c.orientation} onChange={(e) => setC({ orientation: e.target.value })}><option value="portrait">Portrait (54 × 85.6 mm)</option><option value="landscape">Landscape (85.6 × 54 mm)</option></select></div>
+        <div className="field"><label htmlFor="ict">Title on the card</label><input id="ict" maxLength={40} value={c.title} onChange={(e) => setC({ title: e.target.value })} /></div>
+        <div className="field"><label htmlFor="icm">Safe margin (mm)</label><input id="icm" type="number" step={0.5} min={0} max={4} value={c.safeMarginMm} onChange={(e) => setC({ safeMarginMm: Number(e.target.value) })} />
+          <span className="hint">0 for retransfer printers (edge to edge), 1–1.5 for direct-to-card printers.</span></div>
+      </div>
+      {box('showJobTitle', 'Job title')}{box('showDepartment', 'Department')}{box('showIdNumber', 'ID number')}{box('showValidUntil', 'Valid until')}{box('showBarcode', 'Barcode of the ID number (attendance scanners)')}
+      <div className="field" style={{ marginTop: 10 }}><label htmlFor="icb">Text on the back</label><textarea id="icb" rows={3} maxLength={240} value={c.backText} onChange={(e) => setC({ backText: e.target.value })} /></div>
+      <p className="small muted">The hotel logo comes from Branding. Preview and print in Staff ID cards.</p>
+    </>
+  );
+}
+
+/** 2.13 Administrator protection. */
+function AdminSecurityPolicy({ data, set }: { data: any; set: (patch: any) => void }) {
+  const { me } = useHotel();
+  const a = { requireAdminMfa: false, reauthMinutes: 5, ...(data.adminSecurity ?? {}) };
+  return (
+    <>
+      <label className="check"><input type="checkbox" checked={a.requireAdminMfa} onChange={(e) => set({ adminSecurity: { ...a, requireAdminMfa: e.target.checked } })} />
+        <span><strong>Require two-step sign-in for administrators</strong><br /><span className="small muted">Settings, Operators, Branding and the connector stay closed to a hotel administrator until two-step sign-in is on for their account (an authenticator app such as Microsoft or Google Authenticator).</span></span></label>
+      {a.requireAdminMfa && !me.mfaEnabled && <div className="alert warn">Turn on two-step sign-in for your own account first (Your account → Two-step sign-in), or you will close Settings for yourself.</div>}
+      <ul className="small muted" style={{ marginTop: 14 }}>
+        <li>Starting or confirming an emergency always asks for the password again (and the code, when two-step sign-in is on).</li>
+        <li>Five wrong passwords lock an account for 15 minutes; thirty from one computer lock that computer out.</li>
+        <li>Every change here is a new version in the audit trail.</li>
+      </ul>
+    </>
+  );
+}
+
+/** 2.13 Data retention. */
+function PrivacyPolicy({ data, set }: { data: any; set: (patch: any) => void }) {
+  const p = { lockEventsDays: 730, guestListDays: 400, usageDays: 730, ...(data.privacy ?? {}) };
+  const f = (k: string, label: string, hint: string) => (
+    <div className="field"><label htmlFor={`pr-${k}`}>{label}</label><input id={`pr-${k}`} type="number" min={0} max={3650} value={p[k]} onChange={(e) => set({ privacy: { ...p, [k]: Number(e.target.value) } })} /><span className="hint">{hint}</span></div>
+  );
+  return (
+    <>
+      <div className="field-row">
+        {f('lockEventsDays', 'Lock events (days)', 'Entrances, refused entries, alarms read from Visionline. Access history and the event log go back this far.')}
+        {f('guestListDays', 'Guest lists and breakfast (days after departure)', 'Names on the in-house list and what was served.')}
+        {f('usageDays', 'Portal usage counts (days)', 'Pages opened per person per day.')}
+      </div>
+      <p className="small muted">0 keeps the data. Visionline keeps its own history independently. Staff ID profiles and their photos are deleted when the profile is removed.</p>
+    </>
   );
 }

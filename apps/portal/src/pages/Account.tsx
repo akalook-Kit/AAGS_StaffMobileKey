@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { api, sealCredential } from '../api';
 import { useHotel } from '../App';
-import { ErrorNote, PageHead, Status, fmt, useApi, waitForCommand } from '../ui';
+import { ErrorNote, PageHead, setThemePref, themePref, type ThemePref, Status, fmt, useApi, waitForCommand } from '../ui';
 
-type Tab = 'user' | 'visionline' | 'mfa';
+type Tab = 'user' | 'menu' | 'visionline' | 'mfa';
 
 /** Your account: user settings, personal Visionline credentials, two-step sign-in (vendor portal parity). */
 export function AccountPage() {
@@ -14,10 +14,12 @@ export function AccountPage() {
       <PageHead title="Your account" intro={me.email} />
       <div className="seg" role="tablist" style={{ marginBottom: 16 }}>
         <button role="tab" aria-pressed={tab === 'user'} onClick={() => setTab('user')}>User settings</button>
+        <button role="tab" aria-pressed={tab === 'menu'} onClick={() => setTab('menu')}>Menu &amp; appearance</button>
         <button role="tab" aria-pressed={tab === 'visionline'} onClick={() => setTab('visionline')}>Visionline credentials</button>
         <button role="tab" aria-pressed={tab === 'mfa'} onClick={() => setTab('mfa')}>Two-step sign-in</button>
       </div>
       {tab === 'user' && <UserSettings />}
+      {tab === 'menu' && <MenuAndLook />}
       {tab === 'visionline' && <PersonalVisionline />}
       {tab === 'mfa' && <TwoStep />}
     </>
@@ -123,6 +125,49 @@ function TwoStep() {
           <button className="btn primary" onClick={async () => { try { await api('/api/v1/auth/mfa/enable', { body: { code } }); setDone(true); } catch (e) { setError(e); } }}>Confirm and turn on</button>
         </>
       )}
+    </div>
+  );
+}
+
+/** 2.13 Show only the pages you use; light, dark or follow Windows. Saved to your account, so it follows you. */
+function MenuAndLook() {
+  const { me, pages, setPrefs } = useHotel();
+  const menuPages = pages.filter((p) => !p.to.includes('?') && p.to !== '/' && p.to !== '/account');
+  const [hidden, setHidden] = useState<string[]>(me.prefs?.hiddenNav ?? []);
+  const [theme, setTheme] = useState<ThemePref>(me.prefs?.theme ?? themePref());
+  const [error, setError] = useState<unknown>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const save = async (h = hidden, t = theme) => {
+    setError(null); setOk(null);
+    try { await api('/api/v1/me/prefs', { method: 'PUT', body: { hiddenNav: h, theme: t } }); setPrefs({ hiddenNav: h, theme: t }); setOk('Saved. Hidden pages stay reachable with Search (Ctrl K).'); } catch (e) { setError(e); }
+  };
+  const visionlineOnly = ['/visionline', '/access', '/events', '/insights', '/monitoring', '/settings', '/operators', '/audit', '/connector'];
+  return (
+    <div className="cols">
+      <section className="panel">
+        <h2>My menu</h2>
+        <p className="muted">Untick the pages you do not use. Nothing is switched off for the hotel; this only tidies your own menu.</p>
+        <div className="row" style={{ gap: 8, margin: '8px 0 12px' }}>
+          <button className="btn small" onClick={() => setHidden(menuPages.filter((p) => !visionlineOnly.includes(p.to)).map((p) => p.to))}>Visionline essentials only</button>
+          <button className="btn small" onClick={() => setHidden([])}>Show everything</button>
+        </div>
+        <div className="menu-picks">
+          {menuPages.map((p) => (
+            <label key={p.to} className="check"><input type="checkbox" checked={!hidden.includes(p.to)} onChange={(e) => setHidden(e.target.checked ? hidden.filter((x) => x !== p.to) : [...hidden, p.to])} /> {p.label}</label>
+          ))}
+        </div>
+        <div className="row" style={{ marginTop: 12 }}><button className="btn primary" onClick={() => save()}>Save my menu</button></div>
+      </section>
+      <section className="panel">
+        <h2>Appearance</h2>
+        <p className="muted">Automatic follows the light or dark setting of this computer.</p>
+        <div className="seg" role="radiogroup" aria-label="Appearance">
+          {(['system', 'light', 'dark'] as ThemePref[]).map((t) => (
+            <button key={t} role="radio" aria-pressed={theme === t} aria-checked={theme === t} onClick={() => { setTheme(t); setThemePref(t); void save(hidden, t); }}>{t === 'system' ? 'Automatic' : t === 'light' ? 'Light' : 'Dark'}</button>
+          ))}
+        </div>
+      </section>
+      {(ok || error) ? <div style={{ gridColumn: '1 / -1' }}>{ok && <div className="alert ok">{ok}</div>}<ErrorNote error={error} /></div> : null}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { encoderCards } from './visionline.ts';
 import { CS } from '@smk/shared';
 import { invitationCode, vlPublish, type SimState, type Card, type LockEvent, type CsCallbackReg } from './state.ts';
 import { toVisionlineLocal } from '@smk/shared/node';
@@ -188,6 +189,13 @@ export function registerCredentialServices(app: FastifyInstance, st: SimState, o
   });
   // 2.10 "Encode a keycard at the Visionline desk": a plastic staff card made outside the platform. Visionline reports it
   // through the card callback (status 1, valid) [Web API §7.14.2]; the user is created first if needed (like the desk does).
+  app.post('/sim/encoder', async (req, reply) => {
+    const b = (req.body ?? {}) as { encoder?: string; regNo?: string | null };
+    if (!b.encoder) return reply.code(400).send({ code: 'encoder required' });
+    if (b.regNo) encoderCards.set(b.encoder, String(b.regNo)); else encoderCards.delete(b.encoder);
+    opts.log(b.regNo ? `ENCODER ${b.encoder}: keycard ${b.regNo} placed` : `ENCODER ${b.encoder}: empty`);
+    return { encoder: b.encoder, regNo: b.regNo ?? null };
+  });
   app.post('/sim/desk/cards', async (req, reply) => {
     const b = (req.body ?? {}) as { userId?: string; givenName?: string; surname?: string; userGroup?: string; days?: number; doors?: string[] };
     if (!b.userId) return reply.code(400).send({ code: 'userId required' });

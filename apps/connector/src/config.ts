@@ -20,7 +20,11 @@ const Schema = z.object({
     /** Refuse every command that would change Visionline (issue, revoke, create user group). For trying the
      *  connector against a live Visionline: discovery, credential checks and the watch still work. */
     readOnly: z.boolean().default(false),
-  }).default({ baseUrl: VL.defaultBaseUrl, revokeStrategy: 'checkoutPerDoor', watch: true, readOnly: false }),
+    /** 2.13 Requests sent to Visionline at the same time (the PMS and GRMS share it). */
+    maxConcurrent: z.number().int().min(1).max(8).default(2),
+    /** 2.13 Pause between two requests (ms). */
+    minGapMs: z.number().int().min(0).max(2000).default(40),
+  }).default({ baseUrl: VL.defaultBaseUrl, revokeStrategy: 'checkoutPerDoor', watch: true, readOnly: false, maxConcurrent: 2, minGapMs: 40 }),
   heartbeatSec: z.number().int().min(5).default(15),
 });
 export type ConnectorConfig = z.infer<typeof Schema>;
@@ -46,6 +50,8 @@ export function loadConfig(): ConnectorConfig {
       ...(e.VL_REVOKE_STRATEGY ? { revokeStrategy: e.VL_REVOKE_STRATEGY } : {}),
       ...(e.VL_WATCH ? { watch: e.VL_WATCH !== 'false' } : {}),
       ...(e.VL_READ_ONLY ? { readOnly: e.VL_READ_ONLY === 'true' } : {}),
+      ...(e.VL_MAX_CONCURRENT ? { maxConcurrent: Number(e.VL_MAX_CONCURRENT) } : {}),
+      ...(e.VL_MIN_GAP_MS ? { minGapMs: Number(e.VL_MIN_GAP_MS) } : {}),
     },
   };
   const cfg = Schema.parse(merged);

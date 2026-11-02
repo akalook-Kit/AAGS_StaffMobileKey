@@ -5,6 +5,7 @@
  *   npm run e2e            (defaults: API http://localhost:4000, simulator http://localhost:8444)
  */
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { sealForConnector } from '../packages/shared/src/sealing.ts';
 
 const API = process.env.API_URL ?? 'http://localhost:4000';
@@ -823,6 +824,229 @@ async function main() {
   const end11 = await call('POST', `${H}/breakfast/stays/import`, issuer, { rows: [{ ref: `E2E-${base11}-1`, room: rA, guestName: 'Family Test', adults: 2, children: 1, arrival: today11, departure: next11 }], replace: true });
   ok(end11.status === 200 && end11.json.ended >= 1, `a full list with "replace" ends the stays it no longer contains (${end11.json.ended})`, end11.json);
   ok(!(await call('GET', `${H}/breakfast/day`, gm)).json.rooms.some((r: any) => r.room === rB && r.stays.length), `room ${rB} left the in-house list`);
+
+  console.log('\n2.12: keycard privileges, access history, lock events matched to keycards, report builder');
+  {
+    const db12 = await call('GET', `${H}/visionline/cards?deadbolt=yes&state=all`, gm);
+    ok(db12.status === 200 && db12.json.length > 0 && db12.json.every((c: any) => c.deadbolt_override === true), `keycards that override the deadbolt can be listed (${db12.json.length})`, db12.json?.[0]);
+    const nodb = await call('GET', `${H}/visionline/cards?deadbolt=no&state=all`, gm);
+    ok(nodb.json.length > 0 && nodb.json.every((c: any) => c.deadbolt_override === false), 'and those that do not');
+    const vlc = (await call('GET', `${H}/config/visionline`, admin)).json.data;
+    const grp = await call('PUT', `${H}/config/visionline`, admin, { ...vlc, directorySync: { ...vlc.directorySync, scope: 'groups', groups: ['Engineering', 'Security'], maxUsers: 500 } });
+    ok(grp.status === 200, 'the hotel chooses exactly which user groups to read, and how many people at most', grp.json);
+    await call('PUT', `${H}/config/visionline`, admin, vlc);
+    const ev12 = await call('GET', `${H}/events?from=${new Date(Date.now() - 2 * 86400_000).toISOString()}&to=${new Date().toISOString()}&limit=500`, security);
+    const withCard = ev12.json.events.filter((e: any) => e.match);
+    ok(ev12.status === 200 && withCard.length > 0 && withCard.every((e: any) => typeof e.match.known === 'boolean'), `lock events carry their keycard match (${withCard.length} with a card number)`);
+    const known = withCard.find((e: any) => e.match.known && e.match.kind === 'mobile');
+    ok(!known || known.match.issuedBy, `a mobile key used at a door shows who issued it${known ? ` (${known.match.issuedBy})` : ''}`, known);
+    const unk = await call('GET', `${H}/events?from=${new Date(Date.now() - 2 * 86400_000).toISOString()}&to=${new Date().toISOString()}&match=unknown&limit=500`, security);
+    ok(unk.status === 200 && unk.json.events.every((e: any) => e.match && !e.match.known), `"no matching keycard" filter (${unk.json.events.length})`);
+    const s12 = await call('GET', `${H}/access/search?q=Grace`, security);
+    ok(s12.status === 200 && s12.json.people.some((p: any) => /Grace/.test(p.name)), 'access history finds people by name', s12.json);
+    const holder = s12.json.people.find((p: any) => p.holder)?.holder;
+    const a12 = await call('GET', `${H}/access?holder=${encodeURIComponent(holder)}&days=30`, security);
+    ok(a12.status === 200 && a12.json.person?.name && Array.isArray(a12.json.doors) && Array.isArray(a12.json.cards), `a person's access history: ${a12.json.totals?.entrances} entrances, ${a12.json.cards?.length} keycards`, a12.json.person);
+    const doorId = ev12.json.events.find((e: any) => e.doorId && (e.category === 'refused' || e.category === 'entrance'))?.doorId;
+    if (doorId) { const d12 = await call('GET', `${H}/access?door=${encodeURIComponent(doorId)}&days=30`, security); ok(d12.status === 200 && d12.json.door?.name && d12.json.totals.entrances + d12.json.totals.refused > 0, `who went through door ${d12.json.door?.name}`); }
+    ok((await call('GET', `${H}/access?holder=x`, hr11)).status === 403, 'access history needs the event log permission');
+
+    const cat12 = await call('GET', `${H}/insights/builder/catalog`, gm);
+    ok(cat12.status === 200 && ['doorEvents', 'keycards'].every((id) => cat12.json.datasets.some((d: any) => d.id === id)), `report builder data: ${cat12.json.datasets?.map((d: any) => d.id).join(', ')}`);
+    const spec = { dataset: 'keycards', groupBy: 'userGroup', splitBy: 'deadbolt', measure: 'cards', days: 30, limit: 10, chart: 'bars', filters: [{ dim: 'state', values: ['Valid'] }] };
+    const run12 = await call('POST', `${H}/insights/builder/run`, gm, spec);
+    ok(run12.status === 200 && run12.json.rows.length > 0 && run12.json.series.includes('Overrides deadbolt'), `custom report runs: ${run12.json.rows?.length} groups × ${run12.json.series?.length} series`, run12.json);
+    const bad12 = await call('POST', `${H}/insights/builder/run`, gm, { ...spec, groupBy: "user_group; DROP TABLE staff" });
+    ok(bad12.status === 400, 'only listed fields can be used (no SQL from the browser)');
+    const ev12r = await call('POST', `${H}/insights/builder/run`, gm, { dataset: 'doorEvents', groupBy: 'hour', splitBy: 'category', measure: 'events', days: 7, limit: 24, chart: 'columns', filters: [] });
+    ok(ev12r.status === 200, `door events by hour: ${ev12r.json.total} events`);
+    const sv = await call('POST', `${H}/insights/reports`, gm, { name: 'Deadbolt by group', spec, pinned: true, shared: true });
+    ok(sv.status === 200 && sv.json.id, 'a report is saved and pinned');
+    ok((await call('GET', `${H}/insights/reports`, security)).json.some((r: any) => r.id === sv.json.id && !r.mine), 'a shared report is visible to other report readers');
+    ok((await call('DELETE', `${H}/insights/reports/${sv.json.id}`, security)).status === 404, 'only its author can delete it');
+    ok((await call('DELETE', `${H}/insights/reports/${sv.json.id}`, gm)).status === 200, 'the author deletes it');
+    const csv12 = await fetch(`${H}/insights/builder/csv`, { method: 'POST', headers: { authorization: `Bearer ${gm}`, 'content-type': 'application/json' }, body: JSON.stringify(spec) }).then((r) => r.text());
+    ok(csv12.includes('Overrides deadbolt') && csv12.split('\n').length > 1, 'a custom report exports to CSV');
+
+    // Card lookup and reading a keycard on an encoder (pilot)
+    const lk = await call('GET', `${H}/visionline/cards/${desk10.json.regNo}/lookup`, gm);
+    ok(lk.status === 200 && lk.json.known && lk.json.card.holder === 'Grace Mvogo' && lk.json.card.issuedBy === 'Visionline desk' && lk.json.card.doors.length > 0, `card lookup: ${lk.json.card?.holder}, ${lk.json.card?.group}, issued by ${lk.json.card?.issuedBy}, ${lk.json.card?.doors?.length} doors`, lk.json);
+    ok((await call('GET', `${H}/visionline/cards/999999999/lookup`, gm)).json.known === false, 'an unknown card number is said to match nothing');
+    ok((await call('POST', `${H}/visionline/encoder/read`, gm, { encoder: 'fd1' })).json.error?.code === 'ENCODER_READ_OFF', 'reading at an encoder is off until the hotel switches it on');
+    const vle = (await call('GET', `${H}/config/visionline`, admin)).json.data;
+    ok((await call('PUT', `${H}/config/visionline`, admin, { ...vle, encoderRead: { enabled: true, encoders: ['fd1'], action: 'read' } })).status === 200, 'encoder fd1 allowed (Settings → Reports & sync)');
+    await call('POST', `${SIM}/sim/encoder`, undefined, { encoder: 'fd1', regNo: String(desk10.json.regNo) });
+    const rd = await call('POST', `${H}/visionline/encoder/read`, gm, { encoder: 'fd1' });
+    const fast = await call('POST', `${H}/visionline/encoder/read`, gm, { encoder: 'fd1' });
+    ok(fast.status === 429 && fast.json.error?.code === 'TOO_FAST', 'reads at the encoder are spaced out (Visionline is shared with reception and the GRMS)', fast.json);
+    const rr = await until('card read at the encoder', () => call('GET', `${H}/visionline/encoder/read/${rd.json.commandId}`, gm), (r) => ['SUCCEEDED', 'FAILED', 'EXPIRED'].includes(r.json?.status), 40_000);
+    ok(rr.json.status === 'SUCCEEDED' && rr.json.result.regNo === String(desk10.json.regNo) && rr.json.result.cardHolder, `the card on encoder fd1 is read: ${rr.json.result?.regNo} (${rr.json.result?.cardHolder})`, rr.json);
+    ok(!JSON.stringify(rr.json.result).includes('04A1B2C3D4'), 'card serial numbers are not kept');
+    await call('POST', `${SIM}/sim/encoder`, undefined, { encoder: 'fd1', regNo: null });
+    await sleep(3500);
+    const rd2 = await call('POST', `${H}/visionline/encoder/read`, gm, { encoder: 'fd1' });
+    const rr2 = await until('empty encoder', () => call('GET', `${H}/visionline/encoder/read/${rd2.json.commandId}`, gm), (r) => ['SUCCEEDED', 'FAILED', 'EXPIRED'].includes(r.json?.status), 40_000);
+    ok(rr2.json.status === 'FAILED' && /no card/i.test(rr2.json.error?.message ?? ''), `an empty encoder says so: "${rr2.json.error?.message}"`, rr2.json);
+    ok((await call('POST', `${H}/visionline/encoder/read`, gm, { encoder: 'fd9' })).json.error?.code === 'UNKNOWN_ENCODER', 'only the listed encoders can be used');
+    await call('PUT', `${H}/config/visionline`, admin, vle);
+  }
+
+  console.log('\n2.12: licences (signed by the vendor, checked offline)');
+  {
+    const { createPrivateKey, sign } = await import('node:crypto');
+    const tk = JSON.parse(readFileSync(new URL('./e2e-licence-test-key.json', import.meta.url), 'utf8'));
+    const priv = createPrivateKey({ key: { kty: 'OKP', crv: 'Ed25519', x: tk.x, d: tk.d }, format: 'jwk' });
+    const b64u = (b: Buffer) => b.toString('base64url');
+    const lic = (p: Record<string, unknown>) => {
+      const head = `SMK1.${b64u(Buffer.from(JSON.stringify({ v: 1, id: `E2E-${Date.now() % 1e6}`, customer: 'K Hotel Bana', hotel: 'K Hotel Bana', issued: '2026-10-18', modules: ['*'], ...p })))}`;
+      return `${head}.${b64u(sign(null, Buffer.from(head), priv))}`;
+    };
+    const st12 = await call('GET', `${H}/licence`, admin);
+    ok(st12.status === 200 && (st12.json.enforced ? st12.json.state === 'trial' && st12.json.daysLeft > 50 : true) && /^[0-9A-F]{4}-/.test(st12.json.installationId),
+      `licence status: ${st12.json.enforced ? `${st12.json.state}, ${st12.json.daysLeft} days left` : 'not enforced'}, installation ID ${st12.json.installationId}`, st12.json);
+    if (st12.json.enforced) {
+      ok((await call('PUT', `${H}/licence`, admin, { key: 'SMK1.nonsense.nonsense' })).json.error?.code === 'LICENCE_INVALID', 'a made-up key is refused');
+      const good = lic({ systemId: null, modules: ['staffMobileKeys', 'batteryMonitoring', 'maintenance', 'timeAttendance'], expires: '2099-12-31' });
+      const parts = good.split('.');
+      const forged = `${parts[0]}.${b64u(Buffer.from(Buffer.from(parts[1]!, 'base64url').toString().replace('2099-12-31', '2199-12-31')))}.${parts[2]}`;
+      ok((await call('PUT', `${H}/licence`, admin, { key: forged })).json.error?.code === 'LICENCE_INVALID', 'a licence changed after signing (longer end date) is refused');
+      ok((await call('PUT', `${H}/licence`, admin, { key: lic({ systemId: 999999, expires: '2099-12-31' }) })).json.error?.code === 'LICENCE_OTHER_HOTEL', 'a licence for another ASSA ABLOY System ID is refused');
+      ok((await call('PUT', `${H}/licence`, admin, { key: lic({ expires: '2020-01-31' }) })).json.error?.code === 'LICENCE_EXPIRED', 'an ended licence is refused');
+      ok((await call('PUT', `${H}/licence`, issuer, { key: good })).status === 403, 'only administrators enter licences');
+      const inst = await call('PUT', `${H}/licence`, admin, { key: good });
+      ok(inst.status === 200 && inst.json.state === 'licensed' && inst.json.switchedOff?.includes('Breakfast') && !inst.json.modules.includes('breakfast'),
+        `licence installed; a module it does not include was switched off (${inst.json.switchedOff?.join(', ')})`, inst.json);
+      const f12 = (await call('GET', `${H}/config/features`, admin)).json.data;
+      const on = await call('PUT', `${H}/config/features`, admin, { ...f12, breakfast: true });
+      ok(on.status === 402 && on.json.error?.code === 'LICENCE_REQUIRED', 'a module outside the licence cannot be switched on', on.json);
+      ok((await call('GET', `${H}/attention`, admin)).json.breakfast === false, 'and it leaves the menu');
+      const all = await call('PUT', `${H}/licence`, admin, { key: lic({ systemId: null, modules: ['*'], expires: null }) });
+      ok(all.status === 200 && all.json.state === 'licensed' && all.json.daysLeft === null && all.json.modules.length === 5, 'a full licence without end date', all.json);
+      ok((await call('PUT', `${H}/config/features`, admin, { ...f12, breakfast: true })).status === 200, 'then the module can be switched on again (its data was kept)');
+    }
+  }
+
+  console.log('\n2.13: personal menu, focus mode, sign-in timing, administrator protection');
+  {
+    const pf = await call('PUT', `${API}/api/v1/me/prefs`, issuer, { hiddenNav: ['/insights', '/events'], theme: 'dark' });
+    const me13 = await call('GET', `${API}/api/v1/me`, issuer);
+    ok(pf.status === 200 && me13.json.prefs.theme === 'dark' && me13.json.prefs.hiddenNav.includes('/events'), 'personal menu and appearance are kept with the account');
+    ok((await call('PUT', `${API}/api/v1/me/prefs`, issuer, { hiddenNav: ['javascript:alert(1)'] })).status === 400, 'only menu addresses are accepted');
+    await call('PUT', `${API}/api/v1/me/prefs`, issuer, { hiddenNav: [], theme: 'system' });
+    const f13 = (await call('GET', `${H}/config/features`, admin)).json.data;
+    ok((await call('PUT', `${H}/config/features`, admin, { ...f13, portalFocus: 'visionline' })).status === 200, 'portal focus "Visionline only" saved');
+    const pIss = (await call('GET', `${API}/api/v1/me`, issuer)).json.hotels.find((h: any) => h.id === khb).permissions;
+    const pAdm = (await call('GET', `${API}/api/v1/me`, admin)).json.hotels.find((h: any) => h.id === khb).permissions;
+    ok(!pIss.includes('key.read') && !pIss.includes('attendance.read') && pAdm.includes('key.read'), 'focus mode hides mobile keys and attendance from everyone but administrators');
+    ok((await call('GET', `${H}/keys`, issuer)).status === 403, 'and closes them on the server too, not only in the menu');
+    await call('PUT', `${H}/config/features`, admin, f13);
+    // Sign-in takes the same time whether or not the e-mail exists (no account guessing).
+    const tm = async (email: string) => { const t0 = performance.now(); await call('POST', `${API}/api/v1/auth/login`, undefined, { email, password: 'Not-the-password-1' }); return performance.now() - t0; };
+    const kn: number[] = [], un: number[] = [];
+    for (let i = 0; i < 2; i++) { kn.push(await tm('auditor@khb.test')); un.push(await tm(`nobody-${Date.now()}-${i}@nowhere.test`)); }
+    const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
+    ok(avg(un) > avg(kn) * 0.5, `sign-in time for an unknown e-mail ${avg(un).toFixed(0)} ms vs a known one ${avg(kn).toFixed(0)} ms`);
+    ok((await call('GET', `${H}/staff/not-a-uuid`, admin)).status < 500, 'malformed ids in the address are refused, not server errors');
+    const hdr = await fetch(`${API}/api/v1/me`, { headers: { authorization: `Bearer ${admin}` } });
+    ok(hdr.headers.get('x-frame-options') === 'DENY' && /frame-ancestors 'none'/.test(hdr.headers.get('content-security-policy') ?? ''), 'every answer forbids framing and carries a content security policy');
+
+    // Two-step sign-in required for administrators.
+    const totp = async (secret: string) => {
+      const { createHmac } = await import('node:crypto');
+      const B = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = '';
+      for (const ch of secret) bits += B.indexOf(ch).toString(2).padStart(5, '0');
+      const key = Buffer.from(bits.match(/.{8}/g)!.map((b) => parseInt(b, 2)));
+      const ctr = Buffer.alloc(8); ctr.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30_000)));
+      const h = createHmac('sha1', key).update(ctr).digest(); const o = h[h.length - 1]! & 0xf;
+      return String((h.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, '0');
+    };
+    const pol13 = (await call('GET', `${H}/config/policy`, admin)).json.data;
+    ok((await call('PUT', `${H}/config/policy`, admin, { ...pol13, adminSecurity: { requireAdminMfa: true, reauthMinutes: 5 } })).status === 200, 'administrators must use two-step sign-in (Settings → Administrator protection)');
+    const locked = await call('GET', `${H}/operators`, admin);
+    ok(locked.status === 403 && locked.json.error?.code === 'MFA_REQUIRED', 'an administrator without it can no longer open Settings or Operators', locked.json);
+    ok((await call('GET', `${API}/api/v1/me`, admin)).json.hotels.find((h: any) => h.id === khb).mfaRequired === true, 'the portal is told so (banner, menu)');
+    ok((await call('GET', `${H}/events?from=${new Date(Date.now() - 86400_000).toISOString()}&to=${new Date().toISOString()}&limit=5`, admin)).status === 200, 'everything else keeps working');
+    const su = await call('POST', `${API}/api/v1/auth/mfa/setup`, admin, {});
+    ok((await call('POST', `${API}/api/v1/auth/mfa/enable`, admin, { code: await totp(su.json.secret) })).status === 200, 'the administrator turns two-step sign-in on');
+    ok((await call('GET', `${H}/operators`, admin)).status === 200, 'and Settings open again');
+    ok((await call('POST', `${API}/api/v1/auth/mfa/setup`, admin, {})).json.error?.code === 'MFA_ALREADY_ON', 'a session alone cannot switch two-step sign-in off by starting again');
+    const plat = await login('platform@smk.test');
+    ok((await call('POST', `${H}/operators/${me.json.id}/mfa/reset`, plat, {})).json.error?.code === 'REAUTH_REQUIRED', 'resetting it (lost phone) needs the password again');
+    await call('PUT', `${H}/config/policy`, admin, pol13);
+    const ra = (await call('POST', `${API}/api/v1/me/reauth`, plat, { password: PW })).json.token;
+    ok((await call('POST', `${H}/operators/${me.json.id}/mfa/reset`, plat, {}, { 'x-smk-reauth': ra })).status === 200, 'another administrator resets it');
+    ok((await call('POST', `${API}/api/v1/me/reauth`, plat, { password: 'wrong' })).status === 400, 'a wrong password is not a confirmation');
+  }
+
+  console.log('\n2.13: live occupancy, emergency (two people), roll call, emergency keys');
+  {
+    const safety = await login('safety@khb.test');
+    const m13 = await call('GET', `${H}/muster`, safety);
+    ok(m13.status === 200 && typeof m13.json.totals.staff === 'number' && m13.json.rooms.length > 0, `live occupancy: ${m13.json.totals?.staff} staff on site, ${m13.json.totals?.guests} guests, ${m13.json.rooms?.length} rooms`, m13.json.totals);
+    ok((await call('GET', `${H}/muster`, rest)).status === 403, 'the restaurant does not see it');
+    ok((await call('GET', `${API}/api/v1/hotels/${khb}/muster`, lakeAdmin)).status === 403, 'another hotel does not see it');
+    const pdf13 = await fetch(`${H}/muster/pdf`, { headers: { authorization: `Bearer ${safety}` } });
+    ok(pdf13.status === 200 && pdf13.headers.get('content-type') === 'application/pdf', 'evacuation list prints as a PDF');
+    const open0 = (await call('GET', `${H}/emergency/status`, safety)).json.open;
+    if (open0) await call('POST', `${H}/emergency/${open0.id}/end`, security, { note: 'e2e: closing an earlier one' });
+    ok((await call('POST', `${H}/emergency`, safety, { kind: 'drill', reason: 'e2e drill' })).json.error?.code === 'REAUTH_REQUIRED', 'starting an emergency needs the password again');
+    const rs = (await call('POST', `${API}/api/v1/me/reauth`, safety, { password: PW })).json.token;
+    const e13 = await call('POST', `${H}/emergency`, safety, { kind: 'fire', reason: 'e2e: smoke on floor 2' }, { 'x-smk-reauth': rs });
+    ok(e13.status === 201 && e13.json.status === 'REQUESTED', 'the fire warden starts an emergency');
+    ok((await call('POST', `${H}/emergency/${e13.json.id}/confirm`, safety, {}, { 'x-smk-reauth': rs })).status === 403, 'the same person cannot confirm it');
+    ok((await call('POST', `${H}/emergency/${e13.json.id}/confirm`, security, {}, { 'x-smk-reauth': rs })).status === 401, "another person's password confirmation does not count");
+    const rsec = (await call('POST', `${API}/api/v1/me/reauth`, security, { password: PW })).json.token;
+    ok((await call('POST', `${H}/emergency/${e13.json.id}/confirm`, security, {}, { 'x-smk-reauth': rsec })).json.status === 'ACTIVE', 'a second person confirms it');
+    ok((await call('GET', `${H}/emergency/status`, safety)).json.open?.status === 'ACTIVE', 'every portal shows it');
+    const room = m13.json.rooms[0].room;
+    const roll = await call('POST', `${H}/emergency/${e13.json.id}/roll`, safety, { key: `room:${room}`, safe: true });
+    ok(roll.status === 200 && roll.json.roll[`room:${room}`]?.safe, `room ${room} ticked as safe`);
+    ok((await call('POST', `${H}/emergency/${e13.json.id}/keys`, safety, { staffIds: [randomUUID()] })).status === 403, 'emergency keys need the right to issue keys');
+    const tpl = (await call('GET', `${H}/templates`, admin)).json[0];
+    const pol = (await call('GET', `${H}/config/policy`, admin)).json.data;
+    await call('PUT', `${H}/config/policy`, admin, { ...pol, safety: { ...(pol.safety ?? {}), emergencyTemplateId: tpl.id, emergencyKeyHours: 2 } });
+    const em = (await call('GET', `${H}/emergency`, admin)).json;
+    ok(em.readiness.template?.id === tpl.id && em.readiness.responders.length > 0 && em.readiness.remoteOpen.available === false, `readiness: template "${em.readiness.template?.name}", ${em.readiness.responders.length} responder(s), remote opening honestly not offered`);
+    const k13 = await call('POST', `${H}/emergency/${e13.json.id}/keys`, admin, { staffIds: [em.readiness.responders[0].id] });
+    ok(k13.status === 200 && k13.json.results.length === 1 && (k13.json.results[0].ok || /live key/.test(k13.json.results[0].error)), `emergency key for ${em.readiness.responders[0].name}: ${k13.json.results[0]?.ok ? k13.json.results[0].status : k13.json.results[0]?.error}`, k13.json);
+    const end = await call('POST', `${H}/emergency/${e13.json.id}/end`, security, { note: 'e2e: all clear' });
+    ok(end.json.status === 'ENDED', 'the emergency is ended with a note');
+    await call('PUT', `${H}/config/policy`, admin, pol);
+    const trail13 = await call('GET', `${H}/audit?action=emergency.activated`, auditor);
+    ok(trail13.status === 200 && trail13.json.some((a: any) => a.action === 'emergency.activated' && a.target_id === e13.json.id), 'emergencies are in the audit trail');
+  }
+
+  console.log('\n2.13: staff ID profiles, usage, supplier summary');
+  {
+    const jpg = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1, 0, 0, 0xff, 0xd9]).toString('base64')}`;
+    const idn = `E2E-${Date.now() % 1e6}`;
+    const p13 = await call('POST', `${H}/idcards/profiles`, hr11, { fullName: 'Grace Mvogo', idNumber: idn, department: 'Engineering', jobTitle: 'Technician', photo: jpg });
+    ok(p13.status === 201 && p13.json.hasPhoto, 'HR creates a staff ID profile with a photo');
+    ok((await call('POST', `${H}/idcards/profiles`, hr11, { fullName: 'Copy', idNumber: idn.toLowerCase() })).status === 409, 'ID numbers are unique');
+    ok((await call('POST', `${H}/idcards/profiles`, hr11, { fullName: 'Bad', photo: 'data:image/svg+xml;base64,PHN2Zz4=' })).status === 400, 'only JPEG photos are accepted (no SVG or scripts)');
+    ok((await call('POST', `${H}/idcards/profiles`, hr11, { fullName: 'Bad', photo: 'data:image/jpeg;base64,PHN2Zz4=' })).status === 400, 'and the photo must really be a JPEG');
+    const imp = await call('POST', `${H}/idcards/profiles/import`, hr11, { from: 'visionline' });
+    const imp2 = await call('POST', `${H}/idcards/profiles/import`, hr11, { from: 'visionline' });
+    ok(imp.status === 200 && imp.json.created > 0 && imp2.json.created === 0, `profiles created from Visionline people (${imp.json.created}), not twice`);
+    const b13 = await call('POST', `${H}/idcards/profiles/batch`, hr11, { ids: [p13.json.id] });
+    ok(b13.json[0]?.photo === jpg, 'photos come back for printing');
+    ok((await call('POST', `${H}/idcards/printed`, hr11, { ids: [p13.json.id] })).json.printed === 1, 'printing is recorded');
+    ok((await call('GET', `${API}/api/v1/hotels/${khb}/idcards/profiles`, lakeAdmin)).status === 403 && (await call('GET', `${H}/idcards/profiles`, rest)).status === 403, 'profiles are closed to other hotels and roles');
+    ok((await call('DELETE', `${H}/idcards/profiles/${p13.json.id}`, hr11)).status === 200, 'a profile is removed (and its photo deleted)');
+
+    ok((await call('POST', `${H}/usage/ping`, issuer, { area: 'visionline' })).status === 204, 'page use is counted');
+    ok((await call('POST', `${H}/usage/ping`, issuer, { area: '../../etc' })).status === 400, 'only known pages are counted');
+    const u13 = await call('GET', `${H}/usage?days=30`, admin);
+    ok(u13.status === 200 && u13.json.areas.some((a: any) => a.area === 'visionline') && u13.json.outcomes.length > 5, `usage: ${u13.json.activeLast7Days} active people, ${u13.json.outcomes?.length} outcomes`);
+    ok((await call('GET', `${H}/usage`, issuer)).status === 403, 'usage is for administrators');
+    const ex = await fetch(`${H}/usage/export`, { headers: { authorization: `Bearer ${admin}` } }).then((r) => r.json());
+    const { createPublicKey, verify, createHash } = await import('node:crypto');
+    const { sha256, signer, sig, ...body } = ex;
+    const canon = JSON.stringify(body);
+    const valid = Boolean(signer && sig) && verify(null, Buffer.from(canon), createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: signer }, format: 'jwk' }), Buffer.from(sig, 'base64url'));
+    ok(valid && createHash('sha256').update(canon).digest('hex') === sha256, 'the supplier summary is signed by this installation');
+    ok(!/@|Grace|Amina|khb-/.test(canon), 'and contains counts only (no names, e-mails or Visionline ids)');
+  }
 
   console.log('\nGate: every request is traceable without exposing secrets');
   const trail = (await call('GET', `${H}/keys/${keyId}`, issuer)).json;

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { SealedSecret } from '@smk/shared';
 import { pool, tx, one, many } from '../db.ts';
 import { audit } from '../audit.ts';
-import { hashPassword, requireOperator, requirePerm, verifyPassword } from '../auth.ts';
+import { checkPassword, checkThrottle, clearFailures, hashPassword, recordFailure, requireOperator, requirePerm, signToken, verifyTotp } from '../auth.ts';
 import { enqueue, newCorrelationId } from '../commands.ts';
 import { getConfig } from '../hotel-config.ts';
 import { requestKey } from '../keys.ts';
@@ -82,6 +82,8 @@ export function portalAdminRoutes(app: FastifyInstance) {
   app.delete(`${P}/hotels/:hotelId/me/visionline-credentials`, async (req) => {
     const hotelId = hid(req);
     const op = await requireOperator(req);
+    // 2.13 (security review): only members of this hotel; another hotel's operator could write into its audit trail.
+    if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw notFound('Hotel');
     await pool.query('DELETE FROM operator_vl_credentials WHERE operator_id=$1 AND hotel_id=$2', [op.id, hotelId]);
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'operator.visionline_credentials_removed', targetType: 'operator', targetId: op.id });
     return { ok: true };
@@ -99,10 +101,26 @@ export function portalAdminRoutes(app: FastifyInstance) {
     const op = await requireOperator(req);
     const b = z.object({ current: z.string(), next: z.string().min(10, 'Use at least 10 characters.') }).parse(req.body);
     const r = await one(pool, 'SELECT password_hash FROM operators WHERE id=$1', [op.id]);
-    if (!verifyPassword(b.current, r?.password_hash)) throw new ApiError(400, 'BAD_PASSWORD', 'Your current password is not correct.');
+    checkThrottle(`pw:${op.id}`);
+    if (!(await checkPassword(b.current, r?.password_hash))) { recordFailure(`pw:${op.id}`); throw new ApiError(400, 'BAD_PASSWORD', 'Your current password is not correct.'); }
     await pool.query('UPDATE operators SET password_hash=$2 WHERE id=$1', [op.id, hashPassword(b.next)]);
     await audit(null, { hotelId: null, actorType: 'operator', actorId: op.id, action: 'operator.password_changed' });
     return { ok: true };
+  });
+  /** 2.13 Confirm the password (and the two-step code when it is on) before a sensitive action; valid a few minutes. */
+  app.post(`${P}/me/reauth`, async (req) => {
+    const op = await requireOperator(req);
+    const b = z.object({ password: z.string().min(1).max(200), code: z.string().max(10).optional() }).parse(req.body);
+    checkThrottle(`pw:${op.id}`);
+    const r = await one(pool, 'SELECT password_hash, mfa_enabled, totp_secret FROM operators WHERE id=$1', [op.id]);
+    const ok = (await checkPassword(b.password, r?.password_hash)) && (!r?.mfa_enabled || (Boolean(b.code) && verifyTotp(r.totp_secret, b.code!)));
+    if (!ok) {
+      recordFailure(`pw:${op.id}`);
+      throw new ApiError(400, r?.mfa_enabled && !b.code ? 'CODE_REQUIRED' : 'BAD_PASSWORD', r?.mfa_enabled && !b.code ? 'Enter the code from your authenticator app as well.' : 'The password or code is not correct.');
+    }
+    clearFailures(`pw:${op.id}`);
+    const minutes = 5;
+    return { token: await signToken({ typ: 'reauth', sub: op.id }, `${minutes}m`), minutes };
   });
 
   // ---- Visionline user groups ------------------------------------------------------------------------

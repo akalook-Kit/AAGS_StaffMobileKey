@@ -33,7 +33,7 @@ export async function requestDirectorySync(hotelId: string, operatorId: string |
   const last = await one(pool, `SELECT max(updated_at) AS t FROM vl_alarms WHERE hotel_id=$1`, [hotelId]);
   const alarmsSince = last?.t ? new Date(new Date(last.t).getTime() - 3600_000).toISOString() : new Date(Date.now() - 30 * 86_400_000).toISOString();
   const payload = {
-    userGroups: ds.scope === 'all' ? null : (vl.userGroups ?? []), includeCards: ds.includeCards, includeAlarms: ds.includeAlarms && !partial, alarmsSince, maxUsers: ds.maxUsers,
+    userGroups: ds.scope === 'all' ? null : ds.scope === 'groups' ? (ds.groups ?? []) : (vl.userGroups ?? []), includeCards: ds.includeCards, includeAlarms: ds.includeAlarms && !partial, alarmsSince, maxUsers: ds.maxUsers,
     ...(partial ? { userIds: [...new Set(opts.userIds)].slice(0, 200) } : {}),
   };
   return tx(async (c) => {
@@ -67,14 +67,15 @@ export async function applyDirectoryChunk(hotelId: string, ch: DirectoryChunk) {
     }
     for (const k of ch.cards) {
       await c.query(`INSERT INTO vl_cards (hotel_id, reg_no, card_holder, format, starts_at, expires_at, cancelled, discarded, overridden, expired, not_issued, issued_count,
-          door_count, doors, door_groups, time_schedule, key_id, seen_sync, active, last_seen_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,(SELECT id FROM key_requests WHERE hotel_id=$1 AND card_reg_no=$2 ORDER BY created_at DESC LIMIT 1),$17,true,now())
+          door_count, doors, door_groups, time_schedule, key_id, seen_sync, active, last_seen_at, operations, deadbolt_override)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,(SELECT id FROM key_requests WHERE hotel_id=$1 AND card_reg_no=$2 ORDER BY created_at DESC LIMIT 1),$17,true,now(),$18,$19)
         ON CONFLICT (hotel_id, reg_no) DO UPDATE SET card_holder=EXCLUDED.card_holder, format=EXCLUDED.format, starts_at=EXCLUDED.starts_at, expires_at=EXCLUDED.expires_at,
           cancelled=EXCLUDED.cancelled, discarded=EXCLUDED.discarded, overridden=EXCLUDED.overridden, expired=EXCLUDED.expired, not_issued=EXCLUDED.not_issued,
           issued_count=EXCLUDED.issued_count, door_count=EXCLUDED.door_count, doors=EXCLUDED.doors, door_groups=EXCLUDED.door_groups, time_schedule=EXCLUDED.time_schedule,
-          key_id=COALESCE(EXCLUDED.key_id, vl_cards.key_id), seen_sync=EXCLUDED.seen_sync, active=true, last_seen_at=now(), source='sync'`,
+          key_id=COALESCE(EXCLUDED.key_id, vl_cards.key_id), seen_sync=EXCLUDED.seen_sync, active=true, last_seen_at=now(), source='sync',
+          operations=EXCLUDED.operations, deadbolt_override=EXCLUDED.deadbolt_override`,
         [hotelId, k.regNo, k.cardHolder, k.format, toUtc(k.startTime, tz), toUtc(k.expireTime, tz), k.cancelled, k.discarded, k.overridden, k.expired, k.notIssued, k.issuedCount,
-          k.doors.length, k.doors, k.doorGroups, k.timeSchedule, ch.syncId]);
+          k.doors.length, k.doors, k.doorGroups, k.timeSchedule, ch.syncId, k.operations ?? [], k.deadboltOverride ?? null]);
     }
     if (ch.alarms.length) {
       const resolve = await doorResolver(c, hotelId);
@@ -141,6 +142,13 @@ export async function scheduleDirectorySyncs() {
     // After a failure, try again within the hour rather than waiting a whole period.
     const waitMs = (last?.status === 'FAILED' ? Math.min(ds.everyHours, 1) : ds.everyHours) * 3600_000;
     if (last && Date.now() - new Date(last.started_at).getTime() < waitMs) continue;
+    // 2.13 "Quiet hours only": the full read waits for the night (22:00-06:00 hotel time), when the GRMS and the desk
+    // are least busy. The very first read and cards made at the desk are not delayed.
+    if (ds.quietHoursOnly && last) {
+      const tz = (await getConfig(pool, h.id, 'property'))?.timezone ?? 'UTC';
+      const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false }).format(new Date()));
+      if (hour >= 6 && hour < 22) continue;
+    }
     try { await requestDirectorySync(h.id, null); } catch { /* connector offline or older: try again next time */ }
   }
 }

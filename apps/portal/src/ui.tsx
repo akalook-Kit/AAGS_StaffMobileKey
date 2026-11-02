@@ -52,6 +52,8 @@ export function ErrorNote({ error, code }: { error: unknown; code?: string | nul
   );
 }
 
+/** Replaces ISO timestamps inside a sentence (from the connector) with local, readable times. */
+export const humanTimes = (text: unknown) => typeof text === 'string' ? text.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g, (iso) => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : text;
 export const fmt = {
   dt: (v?: string | null) => (v ? new Date(v).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'),
   rel: (v?: string | null) => {
@@ -112,12 +114,30 @@ export function readableAccent(hex: string): string {
   for (let i = 0; i < 40 && contrast(`#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`, '#ffffff') < 4.6; i++) [r, g, b] = [r, g, b].map((v) => Math.round(v * 0.94)) as [number, number, number];
   return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
 }
+/** Lightens a brand accent until it is readable as text on the dark theme's surfaces. */
+export function readableAccentOnDark(hex: string): string {
+  let [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
+  const h = () => `#${[r, g, b].map((v) => Math.min(255, v).toString(16).padStart(2, '0')).join('')}`;
+  for (let i = 0; i < 40 && contrast(h(), '#1c1a19') < 4.6; i++) [r, g, b] = [r, g, b].map((v) => Math.min(255, Math.round(v + (255 - v) * 0.12))) as [number, number, number];
+  return h();
+}
 export function applyBrand(b: any | null | undefined) {
   if (!b) return;
   const r = document.documentElement.style;
   r.setProperty('--brand', b.primaryColor);
   r.setProperty('--brand-ink', b.textOnPrimary ?? '#ffffff');
   r.setProperty('--brass', b.secondaryColor);
-  r.setProperty('--accent-text', readableAccent(b.secondaryColor));
-  if (b.backgroundColor) r.setProperty('--bg', b.backgroundColor);
+  r.setProperty('--accent-light', readableAccent(b.secondaryColor));
+  r.setProperty('--accent-dark', readableAccentOnDark(b.secondaryColor));
+  if (b.backgroundColor) r.setProperty('--bg-light', b.backgroundColor);
 }
+
+// ---- Light / dark appearance (2.13) ------------------------------------------------------------------------
+export type ThemePref = 'system' | 'light' | 'dark';
+export function themePref(): ThemePref { try { const v = localStorage.getItem('smk.theme'); return v === 'light' || v === 'dark' ? v : 'system'; } catch { return 'system'; } }
+export function applyTheme(pref: ThemePref = themePref()) {
+  const dark = pref === 'dark' || (pref === 'system' && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+}
+export function setThemePref(pref: ThemePref) { try { localStorage.setItem('smk.theme', pref); } catch { /* private window */ } applyTheme(pref); }
+

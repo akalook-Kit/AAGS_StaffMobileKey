@@ -106,6 +106,36 @@ for (let k = 0; k < 260; k++) {
   events++;
 }
 
+// ---- 2.12 door entrances by real keycard holders (access history, report builder) ----------------
+const holders = await many(pool, `SELECT k.reg_no, k.doors FROM vl_cards k WHERE k.hotel_id=$1 AND k.active AND NOT k.cancelled AND cardinality(k.doors) > 0 LIMIT 40`, [hotelId]);
+const byVid = new Map((await many(pool, `SELECT external_id, data->>'doorID' AS vid FROM resources WHERE hotel_id=$1 AND kind='door'`, [hotelId])).map((r) => [r.vid ?? r.external_id, r.external_id]));
+for (const [hi, hcard] of holders.entries()) {
+  const mine = (hcard.doors as string[]).map((x) => byVid.get(x) ?? x);
+  const n = 20 + Math.floor(rnd() * 60);
+  for (let k = 0; k < n; k++) {
+    const daysAgo = Math.floor(rnd() * 45);
+    const refused = rnd() < 0.06;
+    const door = refused ? pick(doors).id : pick(mine);
+    await pool.query(`INSERT INTO visionline_events (hotel_id, batch_id, source, kind, registration_number, event_code, door_id, received_at, dedupe) VALUES ($1,'demo','callback','event',$2,$3,$4,$5,$6)`,
+      [hotelId, hcard.reg_no, refused ? 320 : 64, door, at(daysAgo, 6 + Math.floor(rnd() * 15)), `demo:e${hi}:${k}`]);
+    events++;
+  }
+}
+
+// ---- 2.13 today: staff passing doors in the last hours and guest cards at room doors (live occupancy) --------
+for (const [hi, hcard] of holders.slice(0, 14).entries()) {
+  const mine = (hcard.doors as string[]).map((x) => byVid.get(x) ?? x);
+  await pool.query(`INSERT INTO visionline_events (hotel_id, batch_id, source, kind, registration_number, event_code, door_id, received_at, dedupe) VALUES ($1,'demo','callback','event',$2,64,$3,$4,$5)`,
+    [hotelId, hcard.reg_no, pick(mine), new Date(now - Math.floor(rnd() * 8 * 3600_000)), `demo:t${hi}`]);
+  events++;
+}
+const roomDoors = doors.filter((d) => /^\s*(room\s*)?\d{2,5}[A-Z]?\s*$/i.test(d.name));
+for (const [i, d] of roomDoors.filter((_, i) => i % 3 === 0).entries()) {
+  await pool.query(`INSERT INTO visionline_events (hotel_id, batch_id, source, kind, registration_number, event_code, door_id, received_at, dedupe) VALUES ($1,'demo','callback','event',$2,64,$3,$4,$5)`,
+    [hotelId, String(900000 + i), d.id, new Date(now - Math.floor(rnd() * 10 * 3600_000)), `demo:g${i}`]);
+  events++;
+}
+
 // ---- maintenance requests ---------------------------------------------------------------------
 const techs = staff.filter((s) => s.job_role === 'Maintenance');
 const cats = ['lock', 'door', 'room', 'electrical', 'plumbing', 'battery', 'other'];

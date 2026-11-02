@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useHotel } from '../App';
 import { ErrorNote, PageHead, fmt, useApi } from '../ui';
@@ -10,7 +10,7 @@ import { NoData } from '../components/charts';
  * doors and user groups every few hours, people and keycards on a schedule, and a card made at the Visionline
  * desk within seconds (live feed). Nothing here changes Visionline.
  */
-const TABS = [{ id: 'cards', l: 'Keycards' }, { id: 'people', l: 'People' }, { id: 'groups', l: 'User groups' }] as const;
+const TABS = [{ id: 'cards', l: 'Keycards' }, { id: 'lookup', l: 'Card lookup' }, { id: 'people', l: 'People' }, { id: 'groups', l: 'User groups' }] as const;
 
 export function VisionlinePage() {
   const { base, can } = useHotel();
@@ -40,7 +40,7 @@ export function VisionlinePage() {
       <div className="seg" role="tablist" style={{ margin: '4px 0 14px', flexWrap: 'wrap' }}>
         {TABS.map((x) => <button key={x.id} role="tab" aria-pressed={tab === x.id} onClick={() => setSp({ tab: x.id })}>{x.l}</button>)}
       </div>
-      {tab === 'cards' ? <Cards /> : tab === 'people' ? <People /> : <Groups />}
+      {tab === 'cards' ? <Cards /> : tab === 'lookup' ? <Lookup encoders={d?.encoders ?? []} canRead={Boolean(d?.connector?.canReadCards)} /> : tab === 'people' ? <People /> : <Groups />}
     </>
   );
 }
@@ -95,8 +95,8 @@ function Filters({ q, setQ, group, setGroup, children }: { q: string; setQ: (v: 
 
 function Cards() {
   const { base } = useHotel();
-  const [q, setQ] = useState(''); const [group, setGroup] = useState(''); const [state, setState] = useState('valid'); const [kind, setKind] = useState('all');
-  const qs = new URLSearchParams({ state, kind, ...(q.trim() ? { q: q.trim() } : {}), ...(group ? { group } : {}) });
+  const [q, setQ] = useState(''); const [group, setGroup] = useState(''); const [state, setState] = useState('valid'); const [kind, setKind] = useState('all'); const [deadbolt, setDeadbolt] = useState('any');
+  const qs = new URLSearchParams({ state, kind, deadbolt, ...(q.trim() ? { q: q.trim() } : {}), ...(group ? { group } : {}) });
   const cards = useApi<any[]>(`${base}/visionline/cards?${qs}`, [qs.toString()], 30_000);
   const sel = { border: '1px solid var(--line)', borderRadius: 'var(--radius)', padding: '7px 10px' };
   return (
@@ -105,22 +105,25 @@ function Cards() {
         <Filters q={q} setQ={setQ} group={group} setGroup={setGroup}>
           <select aria-label="State" value={state} onChange={(e) => setState(e.target.value)} style={sel}><option value="valid">Valid now</option><option value="ended">No longer valid</option><option value="all">All</option></select>
           <select aria-label="Kind" value={kind} onChange={(e) => setKind(e.target.value)} style={sel}><option value="all">Keycards and mobile keys</option><option value="card">Keycards only</option><option value="mobile">Mobile keys only</option></select>
+          <select aria-label="Deadbolt override" value={deadbolt} onChange={(e) => setDeadbolt(e.target.value)} style={sel}><option value="any">Deadbolt override: any</option><option value="yes">Overrides the deadbolt</option><option value="no">Does not override</option><option value="unknown">Not reported by Visionline</option></select>
         </Filters>
       </div>
       <ErrorNote error={cards.error} />
       {!cards.data ? null : !cards.data.length ? <div style={{ padding: 16 }}><NoData text="No keycards for now" hint="They arrive from Visionline by themselves; new cards within seconds of being made." /></div> : (
         <div style={{ overflowX: 'auto' }}>
           <table className="grid">
-            <thead><tr><th>Holder</th><th>User group</th><th>Card</th><th>Kind</th><th>Valid from</th><th>Valid until</th><th className="num">Doors</th><th>State</th><th>Recorded</th></tr></thead>
+            <thead><tr><th>Holder</th><th>User group</th><th>Card</th><th>Kind</th><th>Valid from</th><th>Valid until</th><th className="num">Doors</th><th>Deadbolt</th><th>Issued by</th><th>State</th><th>Recorded</th></tr></thead>
             <tbody>{cards.data.map((k) => (
               <tr key={k.reg_no}>
-                <td>{k.holder_name ?? <span className="muted">{k.card_holder ?? '—'}</span>}{k.holder_name && k.card_holder && <span className="sub">{k.card_holder}</span>}</td>
+                <td>{k.card_holder ? <Link to={`/access?holder=${encodeURIComponent(k.card_holder)}`}>{k.holder_name ?? k.card_holder}</Link> : <span className="muted">—</span>}{k.holder_name && k.card_holder && <span className="sub">{k.card_holder}</span>}</td>
                 <td>{k.user_group ?? '—'}</td>
                 <td className="nowrap"><code>{k.reg_no}</code></td>
                 <td>{k.mobile_key ? 'Mobile key' : 'Keycard'}</td>
                 <td className="nowrap">{k.starts_at ? fmt.dt(k.starts_at) : '—'}</td>
                 <td className="nowrap">{k.expires_at ? fmt.dt(k.expires_at) : '—'}</td>
                 <td className="num">{k.door_count || (k.door_groups?.length ? `${k.door_groups.length} groups` : '—')}</td>
+                <td>{k.deadbolt_override === null || k.deadbolt_override === undefined ? <span className="muted">—</span> : k.deadbolt_override ? <span className="badge warn">Override</span> : 'No'}</td>
+                <td>{k.issued_by ?? (k.mobile_key ? '—' : <span className="muted">Visionline desk</span>)}</td>
                 <td>{STATE(k)}</td>
                 <td className="nowrap">{fmt.rel(k.first_seen_at)}{k.source === 'live' && <span className="sub">live from Visionline</span>}</td>
               </tr>
@@ -187,5 +190,76 @@ function Groups() {
         </div>
       )}
     </div>
+  );
+}
+
+/** 2.12 Card lookup: type (or read at an encoder) a card number; see whose it is, validity, doors, who issued it, last uses. */
+function Lookup({ encoders, canRead }: { encoders: string[]; canRead: boolean }) {
+  const { base } = useHotel();
+  const [sp, setSp] = useSearchParams();
+  const [q, setQ] = useState(sp.get('card') ?? '');
+  const reg = sp.get('card');
+  const r = useApi<any>(reg ? `${base}/visionline/cards/${encodeURIComponent(reg)}/lookup` : null, [reg]);
+  const [enc, setEnc] = useState(encoders[0] ?? '');
+  const [reading, setReading] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const show = (v: string) => { const n = new URLSearchParams(sp); n.set('tab', 'lookup'); n.set('card', v.trim()); setSp(n, { replace: true }); };
+  const readAtEncoder = async () => {
+    setReading(true); setError(null);
+    try {
+      const { commandId } = await api<any>(`${base}/visionline/encoder/read`, { body: { encoder: enc || encoders[0] } });
+      const end = Date.now() + 45_000;
+      for (;;) {
+        await new Promise((res) => setTimeout(res, 1200));
+        const c = await api<any>(`${base}/visionline/encoder/read/${commandId}`);
+        if (c.status === 'SUCCEEDED') { const no = c.result?.regNo; if (!no) throw new Error('Visionline answered without a card number.'); setQ(String(no)); show(String(no)); break; }
+        if (c.status === 'FAILED' || c.status === 'EXPIRED') throw new Error(c.error?.message ?? 'The card could not be read.');
+        if (Date.now() > end) throw new Error('The connector did not answer in time.');
+      }
+    } catch (e) { setError(e); } finally { setReading(false); }
+  };
+  const x = r.data;
+  return (
+    <>
+      <div className="panel lookup-bar">
+        <form className="row" style={{ flex: '1 1 340px' }} onSubmit={(e) => { e.preventDefault(); if (q.trim()) show(q); }}>
+          <input className="search" style={{ flex: 1 }} inputMode="numeric" placeholder="Card number (registration number)…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Card number" />
+          <button className="btn primary" disabled={!q.trim()}>Look up</button>
+        </form>
+        {encoders.length > 0 && (
+          <div className="row">
+            {encoders.length > 1 && <select className="search" style={{ minWidth: 140 }} value={enc} onChange={(e) => setEnc(e.target.value)} aria-label="Encoder">{encoders.map((e) => <option key={e}>{e}</option>)}</select>}
+            <button className="btn" onClick={readAtEncoder} disabled={reading || !canRead} title={canRead ? 'Put the card on the encoder first' : 'Needs connector 0.10.0'}>{reading ? 'Reading the card…' : `Read card on ${encoders.length > 1 ? 'encoder' : encoders[0]}`}</button>
+            <span className="badge" title="Pilot: confirm on the hotel's Visionline before relying on it.">pilot</span>
+          </div>
+        )}
+      </div>
+      <ErrorNote error={error ?? r.error} />
+      {!reg && <div className="panel"><NoData text="Type a card number to see whose card it is" hint="Holder, user group, validity, doors, deadbolt override, who issued it and where it was last used." /></div>}
+      {reg && x && !x.known && <div className="alert warn">Card {x.regNo} matches no keycard read from Visionline and no mobile key issued here. If it was made recently, it appears after the next read; if it shows up at doors, check it in Visionline.</div>}
+      {x?.known && (
+        <div className="cols">
+          <div className="panel">
+            <div className="row" style={{ justifyContent: 'space-between' }}><h2 style={{ margin: 0 }}>{x.card.kind} <span className="mono">{x.regNo}</span></h2>{x.card.valid ? <span className="pill ok">Valid</span> : <span className="pill bad">Not valid</span>}</div>
+            <dl className="kv" style={{ marginTop: 12 }}>
+              <dt>Holder</dt><dd>{x.card.holderId ? <Link to={`/access?holder=${encodeURIComponent(x.card.holderId)}`}>{x.card.holder}</Link> : x.card.holder ?? '—'}</dd>
+              <dt>User group</dt><dd>{x.card.group ?? '—'}</dd>
+              <dt>Valid</dt><dd>{x.card.startsAt ? `${fmt.dt(x.card.startsAt)} → ` : 'until '}{x.card.expiresAt ? fmt.dt(x.card.expiresAt) : 'no end'}</dd>
+              <dt>Issued by</dt><dd>{x.card.issuedBy ?? '—'}</dd>
+              <dt>Deadbolt override</dt><dd>{x.card.deadbolt == null ? <span className="muted">not reported by Visionline</span> : x.card.deadbolt ? <span className="badge warn">Yes</span> : 'No'}</dd>
+              {x.card.timeSchedule && <><dt>Time schedule</dt><dd>{x.card.timeSchedule}</dd></>}
+              {x.card.cancelled && <><dt>State</dt><dd className="bad-text">Cancelled in Visionline</dd></>}
+            </dl>
+            <h3 style={{ marginTop: 16 }}>Doors ({x.card.doors.length || x.card.doorCount || 0}){x.card.doorGroups?.length ? ` · ${x.card.doorGroups.length} door groups` : ''}</h3>
+            <div className="chips">{x.card.doors.slice(0, 60).map((d: string) => <span key={d} className="chip" style={{ cursor: 'default' }}>{d}</span>)}{x.card.doorGroups?.map((g: string) => <span key={g} className="chip" style={{ cursor: 'default' }}>▦ {g}</span>)}</div>
+          </div>
+          <div className="panel">
+            <h2>Last uses at doors (90 days)</h2>
+            {!x.uses.length ? <NoData text="Not seen at a door yet" hint="Entrances appear as the locks report them." /> : (
+              <ul className="tl wide">{x.uses.map((u: any, i: number) => <li key={i} className={u.category}><time>{fmt.dt(u.at)}</time><span className="tl-what">{u.category === 'entrance' ? 'Entered' : 'Refused at'} <b>{u.door ?? 'a door'}</b></span></li>)}</ul>)}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

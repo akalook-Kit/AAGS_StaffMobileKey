@@ -14,7 +14,7 @@ import { readDirectory } from './visionline/directory.ts';
 /** Commands that change Visionline; refused in read-only mode. */
 const WRITES = new Set(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'CREATE_USER_GROUP']);
 
-export const CONNECTOR_VERSION = '0.9.1';
+export const CONNECTOR_VERSION = '0.11.0';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -49,6 +49,8 @@ export class Connector {
       const k = generateSealingKey();
       secrets.set({ sealPrivateKey: k.privateKeyPem, sealPublicKey: k.publicKeyPem, sealKeyId: k.keyId });
     }
+    VisionlineClient.shared.maxConcurrent = cfg.visionline.maxConcurrent;
+    VisionlineClient.shared.minGapMs = cfg.visionline.minGapMs;
     this.vl = new VisionlineClient(cfg.visionline.baseUrl, cfg.visionline, () => {
       const u = secrets.get('vlUsername'); const p = secrets.get('vlPassword');
       return u && p ? { username: u, password: p, accessId: secrets.get('vlAccessId'), clientUuid: installationUuid } : null;
@@ -81,7 +83,7 @@ export class Connector {
     const status = !credentialsConfigured || !this.visionlineReachable ? (this.lastError ? 'ERROR' : 'DEGRADED') : 'OK';
     return {
       connectorVersion: CONNECTOR_VERSION, contractVersion: CONTRACT_VERSION, status, adapter: ADAPTER_VERSION,
-      credentialsConfigured, visionlineReachable: this.visionlineReachable, visionlineApiVersion: this.apiVersion,
+      credentialsConfigured, visionlineReachable: this.visionlineReachable, visionlineQueue: this.vl.limiter.waiting, visionlineMaxConcurrent: this.vl.limiter.maxConcurrent, visionlineApiVersion: this.apiVersion,
       tlsTrust: this.vl.tlsState, lastSuccessfulSessionAt: this.vl.lastSessionAt, lastError: this.lastError,
       queueDepth: this.journal.depth(), inFlight: this.journal.inFlight(), clockOffsetMs: this.vl.skewMs,
       callbackHealth: this.cfg.visionline.watch ? `Visionline watch: ${this.watch.status}` : 'Visionline watch switched off',
@@ -92,7 +94,7 @@ export class Connector {
       visionlineWatch: this.watch.status,
       readOnly: this.cfg.visionline.readOnly,
       // Battery alarms ride on the Visionline watch; without the watch there are none to report.
-      capabilities: [...(this.cfg.visionline.watch ? ['battery-events', 'entrance-events', 'directory-sync', 'directory-sync-users'] : [])],
+      capabilities: ['encoder-read', ...(this.cfg.visionline.watch ? ['battery-events', 'entrance-events', 'directory-sync', 'directory-sync-users'] : [])],
       directorySync: this.directorySync,
       ...(this.disk ? { disk: this.disk } : {}),
     };
@@ -189,6 +191,9 @@ export class Connector {
           break;
         case 'VALIDATE_SETUP':
           result = { status: 'SUCCEEDED', result: await this.adapter.validate() };
+          break;
+        case 'READ_CARD':
+          result = { status: 'SUCCEEDED', result: await this.adapter.readCardAtEncoder(payload.encoder, payload.action) };
           break;
       }
       this.visionlineReachable = true;

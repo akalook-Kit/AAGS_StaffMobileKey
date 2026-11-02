@@ -3,6 +3,7 @@ import { ROLES, ROLE_PERMISSIONS, type Role } from '@smk/shared';
 import { api } from '../api';
 import { useHotel } from '../App';
 import { Drawer, ErrorNote, PageHead, fmt, useApi } from '../ui';
+import { useReauth } from '../components/Reauth';
 
 const ASSIGNABLE = ROLES.filter((r) => r !== 'PLATFORM_ADMIN');
 
@@ -12,8 +13,13 @@ export function OperatorsPage() {
   const [edit, setEdit] = useState<any>(null);
   const [adding, setAdding] = useState(false);
   const [modules, setModules] = useState<any>(null);
+  const [withReauth, reauthDialog] = useReauth();
+  const [msg, setMsg] = useState<unknown>(null);
+  const resetMfa = (o: any) => { if (confirm(`Turn two-step sign-in off for ${o.display_name} (lost phone)? They can turn it on again with a new phone.`)) withReauth((t) => api(`${base}/operators/${o.id}/mfa/reset`, { body: {}, headers: { 'x-smk-reauth': t } }).then(() => ops.reload())).catch(setMsg); };
   return (
     <>
+      {reauthDialog}
+      <ErrorNote error={msg} />
       <PageHead title="Operators" intro="People who use this portal, and what each of them is allowed to do.">
         <button className="btn primary" onClick={() => setAdding(true)}>Add operator</button>
       </PageHead>
@@ -29,7 +35,7 @@ export function OperatorsPage() {
                 <td className="small">{(o.hidden_modules ?? []).length ? (o.hidden_modules as string[]).map((m) => (me.modules?.[m] ?? m).split(' (')[0]).join(', ') : <span className="muted">none</span>}</td>
                 <td className="small">{o.idp_subject ? 'Hotel identity provider' : 'Local account'}{o.mfa_enabled ? ' · two-step on' : ' · two-step off'}</td>
                 <td className="small">{fmt.rel(o.last_sign_in_at)}</td>
-                <td style={{ textAlign: 'right' }}>{o.id !== me.id && <><button className="btn small" onClick={() => setEdit(o)}>Change roles</button> <button className="btn small" onClick={() => setModules(o)}>Modules</button></>}</td>
+                <td style={{ textAlign: 'right' }}>{o.id !== me.id && <div className="row end"><button className="btn small" onClick={() => setEdit(o)}>Change roles</button><button className="btn small" onClick={() => setModules(o)}>Modules</button>{o.mfa_enabled && <button className="btn small" onClick={() => resetMfa(o)} title="Lost phone">Reset two-step</button>}</div>}</td>
               </tr>
             ))}
           </tbody>
@@ -96,6 +102,10 @@ function ModulesForm({ op, onClose, onSaved }: { op: any; onClose: () => void; o
     <Drawer title={`Modules for ${op.display_name}`} onClose={onClose} footer={<><span /><div className="row"><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" onClick={save}>Save</button></div></>}>
       <ErrorNote error={error} />
       <p className="small muted">Tick a module to hide it from this person. It disappears from their menu and they lose its rights, even if a role would allow it. Untick to show it again. Their roles do not change.</p>
+      <div className="row" style={{ marginBottom: 10 }}>
+        <button className="btn small" onClick={() => setHidden(all.map(([id]) => id).filter((id) => ['mobileKeys', 'attendance', 'breakfast', 'battery', 'maintenance', 'idCards'].includes(id)))}>Visionline only</button>
+        <button className="btn small" onClick={() => setHidden([])}>Show everything</button>
+      </div>
       {all.map(([id, label]) => (
         <label key={id} className="check"><input type="checkbox" checked={hidden.includes(id)} onChange={() => setHidden(hidden.includes(id) ? hidden.filter((x) => x !== id) : [...hidden, id])} /><span>Hide <strong>{label}</strong></span></label>
       ))}

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { useHotel } from '../App';
-import { ErrorNote, PageHead, Status, fmt, useApi, waitForCommand } from '../ui';
+import { ErrorNote, PageHead, Status, fmt, humanTimes, useApi, waitForCommand } from '../ui';
 
 /** Connector health and the guided Visionline readiness checklist (spec §12.1.1, §13.4.5). */
 export function ConnectorPage() {
@@ -45,7 +45,7 @@ export function ConnectorPage() {
             <h2>Readiness · {okCount} of {checks.length} ready</h2>
             <ul className="checklist">
               {checks.map((c: any) => (
-                <li key={c.id}><span className={`dot ${c.ok ? 'ok' : ''}`} aria-label={c.ok ? 'Ready' : 'Not ready'} /><div><strong>{c.label}</strong><div className="small muted">{c.detail}</div></div></li>
+                <li key={c.id}><span className={`dot ${c.ok ? 'ok' : ''}`} aria-label={c.ok ? 'Ready' : 'Not ready'} /><div><strong>{c.label}</strong><div className="small muted">{humanTimes(c.detail) as string}</div></div></li>
               ))}
             </ul>
           </div>
@@ -90,7 +90,7 @@ export function ConnectorPage() {
                   <dt>Last session</dt><dd>{fmt.rel(c.health.lastSuccessfulSessionAt)}</dd>
                   <dt>Queue</dt><dd>{c.health.queueDepth} waiting, {c.health.inFlight} in progress</dd>
                   <dt>Clock offset</dt><dd>{Math.round(c.health.clockOffsetMs / 1000)} s</dd>
-                  <dt>Visionline watch</dt><dd>{c.health.visionlineWatch ?? 'Not available (update the connector)'}</dd>
+                  <dt>Visionline watch</dt><dd>{(humanTimes(c.health.visionlineWatch) as string) ?? 'Not available (update the connector)'}</dd>
                   <dt>Battery events</dt><dd>{(c.health.capabilities ?? []).includes('battery-events') ? 'Read with the watch' : 'No (connector 0.5.0+ with the watch on)'}</dd>
                   {c.health.readOnly && <><dt>Mode</dt><dd><Status s="QUEUED" label="Read-only: will not issue or revoke" /></dd></>}
                   <dt>Version</dt><dd>{c.health.connectorVersion}</dd>

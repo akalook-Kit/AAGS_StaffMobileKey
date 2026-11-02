@@ -7,6 +7,8 @@ import { utcForms, withTimeForms } from './time-forms.ts';
  * Versioned Visionline adapter (spec §4.2, §13.1). Translates platform commands into the documented
  * Web API operations. Everything vendor-specific stays behind this interface.
  */
+/** Key issuing, revoking and card reads at the encoder go first on the shared Visionline (2.13). */
+const HIGH = { priority: 'high' as const };
 export const ADAPTER_VERSION = `visionline-webapi-v1 (${VL_DOC})`;
 
 /** Visionline answers "not found" with 40404 for user groups in the document, and 40401 on some installations. */
@@ -66,6 +68,8 @@ export interface VisionlineAdapter {
   pollWatch(id: string): Promise<{ cards: any[]; events: any[] }>;
   /** [§5.9.3] Cards cancelled since a moment (catch-up after downtime), with their details [§5.10.2]. */
   cancelledSince(since: Date): Promise<any[]>;
+  /** 2.12 pilot: the card on an encoder, read-only. */
+  readCardAtEncoder(encoder: string, action: 'read' | 'readCard'): Promise<Record<string, unknown>>;
 }
 
 export class WebApiAdapter implements VisionlineAdapter {
@@ -124,6 +128,22 @@ export class WebApiAdapter implements VisionlineAdapter {
     return { id: String(g.id ?? name), uniformAccess: Boolean(g.uniformAccess), doorOperations: g.doorOperations ?? [] };
   }
 
+  async readCardAtEncoder(encoder: string, action: 'read' | 'readCard') {
+    const r = await this.vl.request<any>('POST', `${VL.paths.cards}?action=${action}&encoder=${encodeURIComponent(encoder)}`, {}, HIGH);
+    const id = firstText(r?.id, r?.registrationNumber, r?.cardID);
+    // Details of the card as Visionline knows it (validity, holder, doors). Serial numbers, PINs and tracks are never kept.
+    let d: any = r;
+    if (id) { try { d = { ...r, ...(await this.vl.request<any>('GET', VL.paths.card(id), undefined, HIGH)) }; } catch { /* the read itself is enough */ } }
+    const ops = Array.isArray(d?.doorOperations) ? d.doorOperations : [];
+    return {
+      regNo: id ?? null, cardHolder: firstText(d?.cardHolder), format: firstText(d?.format), startTime: firstText(d?.startTime), expireTime: firstText(d?.expireTime),
+      cancelled: d?.cancelled === true, expired: d?.expired === true, overridden: d?.overridden === true, timeSchedule: firstText(d?.timeSchedule),
+      doors: [...new Set(ops.flatMap((o: any) => (Array.isArray(o?.doors) ? o.doors : []).map(String)))].slice(0, 300),
+      doorGroups: [...new Set(ops.flatMap((o: any) => (Array.isArray(o?.doorGroups) ? o.doorGroups : []).map(String)))].slice(0, 100),
+      encoder, readAt: new Date().toISOString(),
+    };
+  }
+
   async validate() {
     const resources = ((await this.vl.request<{ id: string }[]>('GET', VL.paths.resources)) ?? []).map((r) => r.id);
     const accounts = await getMobileAccessAccounts(this.vl);
@@ -133,13 +153,13 @@ export class WebApiAdapter implements VisionlineAdapter {
   /** Ensure the card holder exists in the right user group [§5.31, spec §12.3 step 1]. Idempotent. */
   private async ensureUser(p: IssueStaffKeyPayload) {
     try {
-      const u = await this.vl.request<any>('GET', VL.paths.user(p.cardHolder));
-      if (u.userGroup !== p.user.userGroup) await this.vl.request('POST', VL.paths.user(p.cardHolder), { [VL.fields.userGroup]: p.user.userGroup });
+      const u = await this.vl.request<any>('GET', VL.paths.user(p.cardHolder), undefined, HIGH);
+      if (u.userGroup !== p.user.userGroup) await this.vl.request('POST', VL.paths.user(p.cardHolder), { [VL.fields.userGroup]: p.user.userGroup }, HIGH);
     } catch (e) {
       if (!(e instanceof VisionlineApiError && e.status === 404)) throw e;
       await this.vl.request('PUT', VL.paths.user(p.cardHolder), {
         [VL.fields.surname]: p.user.surname, [VL.fields.givenName]: p.user.givenName, [VL.fields.userGroup]: p.user.userGroup, autoDelete: false,
-      });
+      }, HIGH);
     }
   }
 
@@ -165,7 +185,7 @@ export class WebApiAdapter implements VisionlineAdapter {
     // override=true replaces the holder's current staff card (Visionline 40902 says to use it); with
     // "Revoke mobile key when overridden" in Visionline Options, the old key is removed from the phone.
     const query = `${VL.query.action}=${VL.query.mobileAccess}${p.override ? `&${VL.query.override}=true` : ''}`;
-    const r = await this.vl.request<any>('POST', `${VL.paths.cards}?${query}`, body);
+    const r = await this.vl.request<any>('POST', `${VL.paths.cards}?${query}`, body, HIGH);
     if (r?.[F.credentialId] === undefined) throw new VisionlineApiError(500, undefined, 'Visionline did not return a credentialID');
     // The credentialID identifies the mobile key; the card's registration number (used by /cards/{id}, card
     // callbacks and lock events, §5.10.2, §7.14) is different. Look it up now; failure here is not fatal.
@@ -181,7 +201,7 @@ export class WebApiAdapter implements VisionlineAdapter {
     const failed: { door: string; code?: number; message: string }[] = [];
     for (const door of p.doorIds) {
       try {
-        await this.vl.request('POST', VL.paths.door(door), { [VL.fields.checkedOut]: true, [VL.fields.credentialId]: Number(p.credentialId) });
+        await this.vl.request('POST', VL.paths.door(door), { [VL.fields.checkedOut]: true, [VL.fields.credentialId]: Number(p.credentialId) }, HIGH);
         ok.push(door);
       } catch (e) {
         const ve = e as VisionlineApiError;
@@ -204,23 +224,23 @@ export class WebApiAdapter implements VisionlineAdapter {
     // Without a stored reg. no., use the holder's only valid card (Visionline allows one staff card per user, §7.6.4).
     const regNo = p.cardRegNo ?? await this.onlyValidCard(p.cardHolder);
     let card: any;
-    try { card = await this.vl.request<any>('GET', VL.paths.card(regNo)); } catch (e) {
+    try { card = await this.vl.request<any>('GET', VL.paths.card(regNo), undefined, HIGH); } catch (e) {
       if (e instanceof VisionlineApiError && e.status === 404) throw new VisionlineApiError(404, 40411, `Visionline has no card with reg. no. ${regNo}`);
       throw e;
     }
     if (card?.cardHolder && card.cardHolder !== p.cardHolder) throw new VisionlineApiError(409, undefined, `Card ${regNo} belongs to ${card.cardHolder}, not ${p.cardHolder}; not cancelled`);
     if (card?.cancelled === true) return { strategy: 'cancelCard', regNo, alreadyCancelled: true };
-    await this.vl.request('POST', VL.paths.card(regNo), { cancelled: true });
+    await this.vl.request('POST', VL.paths.card(regNo), { cancelled: true }, HIGH);
     return { strategy: 'cancelCard', regNo };
   }
 
   /** [§5.9.3] The holder's cards valid in the key's period; the newest one not cancelled is the key just created. */
   private async findCardRegNo(cardHolder: string, startLocal: string | undefined, expireLocal: string): Promise<string | null> {
     const from = startLocal ?? toVisionlineLocal(new Date(Date.now() - 60_000), this.timeZone());
-    const list = await this.vl.request<{ id: string | number }[]>('GET', `${VL.paths.cards}?cardHolder=${encodeURIComponent(cardHolder)}&startTime=${from}&expireTime=${expireLocal}`);
+    const list = await this.vl.request<{ id: string | number }[]>('GET', `${VL.paths.cards}?cardHolder=${encodeURIComponent(cardHolder)}&startTime=${from}&expireTime=${expireLocal}`, undefined, HIGH);
     let best: { id: string; created: string } | null = null;
     for (const c of list ?? []) {
-      const d = await this.vl.request<any>('GET', VL.paths.card(String(c.id)));
+      const d = await this.vl.request<any>('GET', VL.paths.card(String(c.id)), undefined, HIGH);
       if (d?.cancelled === true || (d?.cardHolder && d.cardHolder !== cardHolder)) continue;
       const created = String(d?.created ?? '');
       if (!best || created > best.created) best = { id: String(d?.id ?? c.id), created };
@@ -231,7 +251,7 @@ export class WebApiAdapter implements VisionlineAdapter {
   private async onlyValidCard(cardHolder: string): Promise<string> {
     const d = new Date();
     const list = await withTimeForms('cards.validTime', [toVisionlineLocal(d, this.timeZone()), ...utcForms(d)],
-      (t) => this.vl.request<{ id: string | number }[]>('GET', `${VL.paths.cards}?cardHolder=${encodeURIComponent(cardHolder)}&validTime=${t}`));
+      (t) => this.vl.request<{ id: string | number }[]>('GET', `${VL.paths.cards}?cardHolder=${encodeURIComponent(cardHolder)}&validTime=${t}`, undefined, HIGH));
     if (!list?.length) throw new VisionlineApiError(404, 40411, `Visionline has no valid card for ${cardHolder}`);
     if (list.length > 1) throw new VisionlineApiError(409, undefined, `${cardHolder} has ${list.length} valid cards in Visionline; cannot tell which one is the mobile key. Use check-out instead.`);
     return String(list[0]!.id);

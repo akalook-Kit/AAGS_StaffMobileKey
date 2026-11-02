@@ -4,6 +4,7 @@ import { api, download } from '../api';
 import { useHotel } from '../App';
 import { Drawer, ErrorNote, fmt, useApi } from '../ui';
 import { PrintFrame } from '../components/PrintFrame';
+import { Builder, MyReports, PinnedReports, ReportVisual, type Spec } from '../components/ReportBuilder';
 import { DataTable, NoData, HBars, Kpi, Legend, Lines, SERIES, StatusBar, VizCard, fmtN, type BarRow } from '../components/charts';
 
 /**
@@ -13,9 +14,10 @@ import { DataTable, NoData, HBars, Kpi, Legend, Lines, SERIES, StatusBar, VizCar
  */
 const PERIODS = [{ d: 1, l: 'Today' }, { d: 7, l: '7 days' }, { d: 30, l: '30 days' }, { d: 90, l: '90 days' }, { d: 180, l: '6 months' }, { d: 365, l: '12 months' }];
 const PAGES = [
-  { id: 'summary', l: 'Summary' }, { id: 'keycards', l: 'Keycards & people' }, { id: 'locks', l: 'Locks & batteries' }, { id: 'maintenance', l: 'Maintenance' }, { id: 'cards', l: 'Valid keycards' },
+  { id: 'summary', l: 'Summary' }, { id: 'access', l: 'Door activity' }, { id: 'keycards', l: 'Keycards & people' }, { id: 'locks', l: 'Locks & batteries' }, { id: 'maintenance', l: 'Maintenance' }, { id: 'cards', l: 'Valid keycards' },
+  { id: 'mine', l: 'My reports' },
 ] as const;
-type Page = (typeof PAGES)[number]['id'];
+type Page = (typeof PAGES)[number]['id'] | 'build';
 const SOURCE_LABEL: Record<string, string> = { expired: 'Expired at end time', operator: 'Revoked in the portal', visionline: 'Cancelled in Visionline', wrong_door: 'Wrong-door limit', replaced: 'Doors changed', other: 'Other' };
 const CAT_LABEL: Record<string, string> = { battery: 'Lock battery', lock: 'Lock', door: 'Door', room: 'Room', electrical: 'Electrical', plumbing: 'Plumbing', other: 'Other' };
 const STATUS_LABEL: Record<string, string> = { OPEN: 'Open', ACKNOWLEDGED: 'Acknowledged', IN_PROGRESS: 'In progress', ON_HOLD: 'On hold' };
@@ -32,6 +34,8 @@ export function InsightsPage() {
   const qs = new URLSearchParams({ days: String(days), ...(group ? { group } : {}), ...(floor ? { floor } : {}) }).toString();
   const d = useApi<any>(`${base}/insights?${qs}`, [qs], 60_000);
   const [drill, setDrill] = useState<string | null>(null);
+  const [editing, setEditing] = useState<any>(null);
+  const [startSpec, setStartSpec] = useState<Spec | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [syncing, setSyncing] = useState(false);
   const data = d.data;
@@ -65,21 +69,22 @@ export function InsightsPage() {
         <div className="row no-print">
           {data?.modules?.directorySync && can('resources.discover') && <button className="btn" onClick={sync} disabled={syncing}>{syncing ? 'Reading Visionline…' : 'Read Visionline now'}</button>}
           <button className="btn" onClick={() => window.print()}>Print / PDF</button>
+          <button className="btn primary" onClick={() => { setEditing(null); setStartSpec(null); set('page', 'build'); }}>＋ Build a report</button>
         </div>
       </div>
 
       {/* Slicers: one row above everything they scope. */}
-      <div className="slicers no-print" role="group" aria-label="Filters">
+      {page !== 'build' && page !== 'mine' && <div className="slicers no-print" role="group" aria-label="Filters">
         <div className="seg" role="group" aria-label="Period">{PERIODS.map((p) => <button key={p.d} aria-pressed={days === p.d} onClick={() => set('days', String(p.d))}>{p.l}</button>)}</div>
         <label className="slicer"><span>User group</span>
           <select value={group} onChange={(e) => set('group', e.target.value || null)}><option value="">All</option>{(data?.filters?.userGroups ?? []).map((g: string) => <option key={g}>{g}</option>)}</select></label>
         <label className="slicer"><span>Floor / door group</span>
           <select value={floor} onChange={(e) => set('floor', e.target.value || null)}><option value="">All</option>{(data?.filters?.floors ?? []).map((g: string) => <option key={g}>{g}</option>)}</select></label>
         {filtersOn.length > 0 && <button className="btn small ghost" onClick={() => { const n = new URLSearchParams(sp); n.delete('group'); n.delete('floor'); setSp(n, { replace: true }); }}>Clear filters</button>}
-      </div>
+      </div>}
       <ErrorNote error={error ?? d.error} />
 
-      {k && (
+      {k && page !== 'build' && page !== 'mine' && (
         <div className={`kpis${d.loading ? ' stale' : ''}`}>
           <Kpi label="Valid keycards (Visionline)" value={k.validCards == null ? '—' : fmtN(k.validCards)}
             sub={k.validCards == null ? (data.modules.directorySync ? 'not read yet' : 'switch on in Settings → Reports & sync') : `${fmtN(k.validMobile)} are mobile keys`} onClick={() => set('page', 'cards')} />
@@ -96,11 +101,15 @@ export function InsightsPage() {
       )}
 
       <nav className="pages no-print" aria-label="Report pages">
-        {PAGES.map((p) => <button key={p.id} aria-current={page === p.id ? 'page' : undefined} onClick={() => set('page', p.id)}>{p.l}</button>)}
+        {PAGES.map((p) => <button key={p.id} aria-current={page === p.id || (page === 'build' && p.id === 'mine') ? 'page' : undefined} onClick={() => set('page', p.id)}>{p.l}</button>)}
       </nav>
+      {page === 'build' && <Builder key={editing?.id ?? JSON.stringify(startSpec)} initial={editing?.spec ?? startSpec ?? undefined} savedId={editing?.id} savedName={editing?.name}
+        savedFlags={editing ? { pinned: editing.pinned, shared: editing.shared } : undefined} onSaved={() => { setEditing(null); set('page', 'mine'); }} onCancel={() => { setEditing(null); set('page', 'mine'); }} />}
+      {page === 'mine' && <MyReports onEdit={(r) => { setEditing(r); set('page', 'build'); }} onNew={(sp0) => { setEditing(null); setStartSpec(sp0 ?? null); set('page', 'build'); }} />}
 
-      {data && (
+      {data && page !== 'build' && page !== 'mine' && (
         <div className={`canvas${d.loading ? ' stale' : ''}`}>
+          {page === 'access' && <DoorActivity days={days} group={group} />}
           {page === 'summary' && <Summary data={data} dayLabel={dayLabel} onGroup={setDrill} exp={exp} gf={gf} ff={ff} />}
           {page === 'keycards' && <Keycards data={data} dayLabel={dayLabel} onGroup={setDrill} exp={exp} gf={gf} />}
           {page === 'locks' && <Locks data={data} dayLabel={dayLabel} exp={exp} ff={ff} />}
@@ -132,6 +141,7 @@ function Summary({ data, dayLabel, onGroup, exp, gf, ff }: any) {
         table={data.cards && <GroupTable rows={data.cards.byGroup} />} />
       <VizCard span={6} title="Busiest locks" sub="Alarms, refused entries and battery events per door" filtered={ff} actions={<button className="btn small ghost" onClick={() => exp('lock-activity')}>CSV</button>}
         chart={<><Legend series={lockSeries} /><HBars rows={lockRows} series={lockSeries} /></>} table={<LockTable rows={data.locks.byDoor} />} />
+      <PinnedReports />
     </div>
   );
 }
@@ -310,5 +320,23 @@ function GroupDrill({ group, onClose }: { group: string; onClose: () => void }) 
           x.cards.length ? x.cards.map((c: any) => `${c.mobile ? 'Mobile key' : 'Card'} ${c.regNo} (${c.doors} ${c.doors === 1 ? "door" : "doors"})`).join(', ') : <span key="c" className="muted">none</span>,
           x.cards.length ? fmt.dt(x.cards[x.cards.length - 1].until) : '—'])} />
     </Drawer>
+  );
+}
+
+/** Door activity: when and where people go, built from the lock events (same engine as "Build a report"). */
+function DoorActivity({ days, group }: { days: number; group: string }) {
+  const { can } = useHotel();
+  if (!can('events.read')) return <div className="panel"><p className="muted">Door activity needs the Event log permission.</p></div>;
+  const f = group ? [{ dim: 'userGroup', values: [group] }] : [];
+  const sp = (x: Partial<Spec>): Spec => ({ dataset: 'doorEvents', groupBy: 'door', measure: 'events', days, limit: 15, chart: 'bars', filters: f, splitBy: null, ...x });
+  return (
+    <div className="grid12">
+      <ReportVisual span={8} title="Entrances by hour of the day" sub="Refused entries in red" spec={sp({ groupBy: 'hour', splitBy: 'category', limit: 24, chart: 'columns' })} />
+      <ReportVisual span={4} title="By day of the week" spec={sp({ groupBy: 'weekday', splitBy: 'category', limit: 7, chart: 'columns' })} />
+      <ReportVisual span={6} title="Busiest doors" spec={sp({ groupBy: 'door', splitBy: 'category' })} />
+      <ReportVisual span={6} title="Most active people" sub="Different doors each person opened" spec={sp({ groupBy: 'person', measure: 'doors', filters: [...f, { dim: 'category', values: ['Entrance'] }] })} />
+      <ReportVisual span={6} title="Keycards and mobile keys at the doors" spec={sp({ groupBy: 'cardKind', splitBy: 'category', limit: 5, chart: 'bars' })} />
+      <ReportVisual span={6} title="Who issued the cards used" spec={sp({ groupBy: 'issuedBy', splitBy: 'cardKind', limit: 10 })} />
+    </div>
   );
 }

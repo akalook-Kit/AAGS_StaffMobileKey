@@ -1,8 +1,11 @@
 import { createContext, useContext, useEffect, useState, type FormEvent } from 'react';
+import { CommandPalette } from './components/CommandPalette';
+import { AccessPage } from './pages/Access';
+import { LicenceBanner } from './components/Licence';
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import type { Permission } from '@smk/shared';
 import { api, auth } from './api';
-import { ErrorNote, applyBrand, useApi } from './ui';
+import { ErrorNote, applyBrand, useApi , setThemePref, themePref, type ThemePref } from './ui';
 import { Overview } from './pages/Overview';
 import { StaffPage } from './pages/Staff';
 import { KeysPage } from './pages/Keys';
@@ -22,14 +25,20 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { SetupPage } from './pages/Setup';
 import { VisionlinePage } from './pages/Visionline';
 import { BreakfastPage } from './pages/Breakfast';
+import { MusterPage } from './pages/Muster';
+import { EmergencyPage } from './pages/Emergency';
+import { IdCardsPage } from './pages/IdCards';
+import { UsagePage } from './pages/Usage';
+import { HelpPage } from './pages/Help';
 
 export interface Me {
   id: string; email: string; displayName: string; isPlatformAdmin: boolean; mfaEnabled: boolean;
-  hotels: { id: string; slug: string; name: string; roles: string[]; permissions: Permission[]; hiddenModules?: string[] }[];
+  hotels: { id: string; slug: string; name: string; roles: string[]; permissions: Permission[]; hiddenModules?: string[]; mfaRequired?: boolean }[];
   modules?: Record<string, string>;
   roleLabels: Record<string, string>;
+  prefs?: { hiddenNav?: string[]; theme?: 'system' | 'light' | 'dark' };
 }
-interface Ctx { me: Me; hotel: Me['hotels'][number]; can: (p: Permission) => boolean; branding: any; reloadBranding: () => void; base: string }
+interface Ctx { me: Me; hotel: Me['hotels'][number]; can: (p: Permission) => boolean; branding: any; reloadBranding: () => void; base: string; pages: { to: string; label: string }[]; setPrefs: (p: NonNullable<Me['prefs']>) => void }
 const HotelCtx = createContext<Ctx | null>(null);
 export const useHotel = () => useContext(HotelCtx)!;
 
@@ -55,9 +64,21 @@ export function App() {
 
 function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const loc = useLocation();
+  const [menu, setMenu] = useState(false);
+  const [prefs, setPrefs] = useState(me.prefs ?? {});
+  // A person's appearance follows them to any computer (unless this computer already has a choice).
+  useEffect(() => { try { if (me.prefs?.theme && !localStorage.getItem('smk.theme')) setThemePref(me.prefs.theme); } catch { /* ignore */ } }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const vis = (to: string) => !(prefs.hiddenNav ?? []).includes(to);
+  useEffect(() => setMenu(false), [loc.pathname, loc.search]);
   const [hotelId, setHotelId] = useState(() => { try { return localStorage.getItem('smk.hotel') ?? me.hotels[0]!.id; } catch { return me.hotels[0]!.id; } });
   const hotel = me.hotels.find((h) => h.id === hotelId) ?? me.hotels[0]!;
   const base = `/api/v1/hotels/${hotel.id}`;
+  // 2.13 Usage: which pages are opened (counted on this server, once a minute per page and person).
+  useEffect(() => {
+    const area = loc.pathname === '/' ? 'overview' : loc.pathname.split('/')[1];
+    if (area) void api(`${base}/usage/ping`, { body: { area } }).catch(() => undefined);
+  }, [loc.pathname, base]);
+  const emergency = useApi<any>(hotel.permissions.includes('muster.read') ? `${base}/emergency/status` : null, [hotel.id], 30_000);
   const branding = useApi<any>(`${base}/config/branding`, [hotel.id]);
   const pending = useApi<any[]>(hotel.permissions.includes('key.approve_broad') ? `${base}/keys?status=PENDING_APPROVAL` : null, [hotel.id], 15_000);
   // Phase 2 modules appear only when the hotel has them switched on and the role allows them.
@@ -73,11 +94,22 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const can = (p: Permission) => hotel.permissions.includes(p);
   const initials = hotel.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 3).toUpperCase();
   const pendingCount = pending.data?.length ?? 0;
+  const pageList = ([
+    ['/', 'Overview', true], ['/insights', 'Insights', can('reports.read')], ['/insights?page=mine', 'My reports', can('reports.read')], ['/insights?page=build', 'Build a report', can('reports.read')],
+    ['/access', 'Access history', can('events.read')], ['/events', 'Event log', can('events.read')], ['/monitoring', 'Monitoring', can('alerts.read')],
+    ['/muster', 'Live occupancy', can('muster.read')], ['/emergency', 'Emergency', can('muster.read')],
+    ['/visionline', 'Visionline cards & people', can('reports.read')], ['/visionline?tab=lookup', 'Card lookup', can('reports.read')], ['/idcards', 'Staff ID cards', can('idcards.manage')], ['/staff', 'Staff', can('staff.read')], ['/keys', 'Mobile keys', can('key.read')],
+    ['/attendance', 'Time & attendance', can('attendance.clock')], ['/breakfast', 'Breakfast', can('breakfast.read') && Boolean(attention.data?.breakfast)],
+    ['/battery', 'Battery status', can('battery.read') && Boolean(attention.data?.batteryMonitoring)], ['/maintenance', 'Maintenance', can('maintenance.read') && Boolean(attention.data?.maintenance)],
+    ['/operators', 'Operators', can('operators.manage')], ['/connector', 'Connector health', can('connector.read')], ['/branding', 'Branding and logo', can('branding.manage')],
+    ['/settings', 'Settings', can('settings.manage')], ['/settings?tab=licence', 'Licence', can('settings.manage')], ['/audit', 'Audit trail', can('audit.read')], ['/usage', 'Usage', can('settings.manage')], ['/help', 'Help and manual', true], ['/account', 'My account', true],
+  ] as [string, string, boolean][]).filter((x) => x[2]).map(([to, label]) => ({ to, label }));
 
   return (
-    <HotelCtx.Provider value={{ me, hotel, can, branding: b, reloadBranding: branding.reload, base }}>
+    <HotelCtx.Provider value={{ me: { ...me, prefs }, hotel, can, branding: b, reloadBranding: branding.reload, base, pages: pageList, setPrefs }}>
       <div className="shell">
-        <aside className="rail">
+        <aside className={`rail${menu ? ' open' : ''}`}>
+          <button className="menu-btn" aria-expanded={menu} aria-label="Menu" onClick={() => setMenu(!menu)}>{menu ? '✕' : '☰'}</button>
           {b?.logo ? (
             <div className="hotel has-logo"><img src={b.logo} alt={hotel.name} style={{ width: ({ small: 120, medium: 168, large: 210 } as Record<string, number>)[b.logoSize?.portal ?? 'medium'] ?? 168 }} /><span>{hotel.name} · Staff access</span></div>
           ) : (
@@ -91,37 +123,51 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
               {me.hotels.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
             </select>
           )}
+          <CommandPalette pages={pageList} />
           <nav aria-label="Main">
-            <NavLink to="/" end>Overview</NavLink>
-            {can('reports.read') && <NavLink to="/insights">Insights</NavLink>}
-            {can('reports.read') && <NavLink to="/visionline">Visionline cards & people</NavLink>}
-            {can('staff.read') && <NavLink to="/staff">Staff</NavLink>}
-            {can('key.read') && <NavLink to="/keys">Mobile keys {pendingCount > 0 && <span className="count" title="Awaiting approval">{pendingCount}</span>}</NavLink>}
-            {can('operators.manage') && <NavLink to="/operators">Operators</NavLink>}
-            {can('connector.read') && <NavLink to="/connector">Connector health</NavLink>}
-            {can('branding.manage') && <NavLink to="/branding">Branding and logo</NavLink>}
-            {can('settings.manage') && <NavLink to="/settings">Settings</NavLink>}
-            {can('alerts.read') && <NavLink to="/monitoring">Monitoring {(mon.data?.alerts?.critical ?? 0) > 0 && <span className="count bad" title="Critical alerts">{mon.data.alerts.critical}</span>}</NavLink>}
-            {can('events.read') && <NavLink to="/events">Event log</NavLink>}
-            {can('attendance.clock') && <NavLink to="/attendance">Time & attendance</NavLink>}
-            {can('breakfast.read') && attention.data?.breakfast && <NavLink to="/breakfast">Breakfast</NavLink>}
-            {can('audit.read') && <NavLink to="/audit">Audit trail</NavLink>}
-            {can('battery.read') && attention.data?.batteryMonitoring && <NavLink to="/battery">Battery status {(attention.data.battery?.critical ?? 0) > 0 && <span className="count" title="Critical lock batteries">{attention.data.battery.critical}</span>}</NavLink>}
-            {can('maintenance.read') && attention.data?.maintenance && <NavLink to="/maintenance">Maintenance {(attention.data.maintenance?.open ?? 0) > 0 && <span className="count" title="Open requests">{attention.data.maintenance.open}</span>}</NavLink>}
+            {(can('resources.read') || can('reports.read') || !can('muster.read')) && <NavLink to="/" end>Overview</NavLink>}
+            {vis('/insights') && can('reports.read') && <NavLink to="/insights">Insights</NavLink>}
+            {vis('/access') && can('events.read') && <NavLink to="/access">Access history</NavLink>}
+            {vis('/events') && can('events.read') && <NavLink to="/events">Event log</NavLink>}
+            {vis('/monitoring') && can('alerts.read') && <NavLink to="/monitoring">Monitoring {(mon.data?.alerts?.critical ?? 0) > 0 && <span className="count bad" title="Critical alerts">{mon.data.alerts.critical}</span>}</NavLink>}
+            {can('muster.read') && (vis('/muster') || vis('/emergency')) && <div className="group">Safety</div>}
+            {vis('/muster') && can('muster.read') && <NavLink to="/muster">Live occupancy {emergency.data?.open && <span className="count bad" title="Emergency open">!</span>}</NavLink>}
+            {vis('/emergency') && can('muster.read') && <NavLink to="/emergency">Emergency</NavLink>}
+            {(can('reports.read') || can('staff.read') || can('key.read') || can('attendance.clock') || can('breakfast.read') || can('idcards.manage')) && <div className="group">People &amp; keys</div>}
+            {vis('/visionline') && can('reports.read') && <NavLink to="/visionline">Visionline cards & people</NavLink>}
+            {vis('/idcards') && can('idcards.manage') && <NavLink to="/idcards">Staff ID cards</NavLink>}
+            {vis('/staff') && can('staff.read') && <NavLink to="/staff">Staff</NavLink>}
+            {vis('/keys') && can('key.read') && <NavLink to="/keys">Mobile keys {pendingCount > 0 && <span className="count" title="Awaiting approval">{pendingCount}</span>}</NavLink>}
+            {vis('/attendance') && can('attendance.clock') && <NavLink to="/attendance">Time & attendance</NavLink>}
+            {vis('/breakfast') && can('breakfast.read') && attention.data?.breakfast && <NavLink to="/breakfast">Breakfast</NavLink>}
+            {((can('battery.read') && attention.data?.batteryMonitoring) || (can('maintenance.read') && attention.data?.maintenance)) && <div className="group">Building</div>}
+            {vis('/battery') && can('battery.read') && attention.data?.batteryMonitoring && <NavLink to="/battery">Battery status {(attention.data.battery?.critical ?? 0) > 0 && <span className="count" title="Critical lock batteries">{attention.data.battery.critical}</span>}</NavLink>}
+            {vis('/maintenance') && can('maintenance.read') && attention.data?.maintenance && <NavLink to="/maintenance">Maintenance {(attention.data.maintenance?.open ?? 0) > 0 && <span className="count" title="Open requests">{attention.data.maintenance.open}</span>}</NavLink>}
+            {(can('operators.manage') || can('connector.read') || can('branding.manage') || can('settings.manage') || can('audit.read')) && <div className="group">Administration</div>}
+            {vis('/operators') && can('operators.manage') && <NavLink to="/operators">Operators</NavLink>}
+            {vis('/connector') && can('connector.read') && <NavLink to="/connector">Connector health</NavLink>}
+            {vis('/branding') && can('branding.manage') && <NavLink to="/branding">Branding and logo</NavLink>}
+            {vis('/settings') && can('settings.manage') && <NavLink to="/settings">Settings</NavLink>}
+            {vis('/audit') && can('audit.read') && <NavLink to="/audit">Audit trail</NavLink>}
+            {vis('/usage') && can('settings.manage') && <NavLink to="/usage">Usage</NavLink>}
           </nav>
           <div className="foot">
             <div><NavLink to="/account" style={{ color: 'inherit' }}>{me.displayName}</NavLink></div>
             <div style={{ opacity: 0.7 }}>{hotel.roles.map((r) => me.roleLabels[r] ?? r).join(', ')}</div>
+            <NavLink to="/help" className="help-link">Help and manual</NavLink>
+            <ThemeSwitch />
             <button onClick={onSignOut}>Sign out</button>
           </div>
         </aside>
         <main className="content" key={hotel.id}>
+          <LicenceBanner />
+          {hotel.mfaRequired && <div className="sys-banner no-print" role="alert"><strong>Two-step sign-in is required for administrators.</strong><span>Settings, Operators and Branding open once it is on.</span><NavLink to="/account?tab=mfa">Turn it on →</NavLink></div>}
           {(banner.data ?? []).map((a) => (
             <div key={a.id} className="sys-banner no-print" role="alert"><strong>{a.title}</strong><span>{a.detail}</span><NavLink to="/monitoring?tab=system">Monitoring →</NavLink></div>
           ))}
           <ErrorBoundary key={loc.pathname} label="This page">
           <Routes>
-            <Route path="/" element={!can('resources.read') && can('breakfast.read') ? <Navigate to="/breakfast" replace /> : <Overview />} />
+            <Route path="/" element={!can('resources.read') && can('breakfast.read') ? <Navigate to="/breakfast" replace /> : !can('resources.read') && !can('reports.read') && can('muster.read') ? <Navigate to="/muster" replace /> : <Overview />} />
             <Route path="/staff" element={<StaffPage />} />
             <Route path="/keys" element={<KeysPage />} />
             <Route path="/keys/:keyId" element={<KeysPage />} />
@@ -140,7 +186,13 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <Route path="/maintenance/:ticketId" element={<MaintenancePage />} />
             <Route path="/attendance" element={<AttendancePage />} />
             <Route path="/visionline" element={<VisionlinePage />} />
+            <Route path="/access" element={<AccessPage />} />
             <Route path="/breakfast" element={<BreakfastPage />} />
+            <Route path="/muster" element={<MusterPage />} />
+            <Route path="/emergency" element={<EmergencyPage />} />
+            <Route path="/idcards" element={<IdCardsPage />} />
+            <Route path="/usage" element={<UsagePage />} />
+            <Route path="/help" element={<HelpPage />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
           </ErrorBoundary>
@@ -194,6 +246,22 @@ function Login({ onSignedIn }: { onSignedIn: (t: string) => void }) {
         )}
         <button className="btn primary" disabled={busy} style={{ width: '100%', justifyContent: 'center', padding: 10 }}>{busy ? 'Signing in…' : needTotp ? 'Verify' : 'Sign in'}</button>
       </form>
+    </div>
+  );
+}
+
+/** Appearance: follow the computer (System), or always Light / Dark. Remembered on this computer. */
+function ThemeSwitch() {
+  const { me, setPrefs } = useHotel();
+  const [pref, setPref] = useState<ThemePref>(themePref());
+  const choose = (p: ThemePref) => {
+    setThemePref(p); setPref(p);
+    const next = { hiddenNav: me.prefs?.hiddenNav ?? [], theme: p };
+    setPrefs(next); void api('/api/v1/me/prefs', { method: 'PUT', body: next }).catch(() => undefined);
+  };
+  return (
+    <div className="theme-switch" role="group" aria-label="Appearance">
+      {(['system', 'light', 'dark'] as const).map((p) => <button key={p} aria-pressed={pref === p} onClick={() => choose(p)} title={p === 'system' ? 'Follow this computer' : undefined}>{p === 'system' ? 'Auto' : p === 'light' ? 'Light' : 'Dark'}</button>)}
     </div>
   );
 }
