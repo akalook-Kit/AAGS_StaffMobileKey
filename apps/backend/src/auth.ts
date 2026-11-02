@@ -66,7 +66,17 @@ export function totp(secret: string, t = Date.now(), step = 30): string {
   return code;
 }
 export function verifyTotp(secret: string, code: string): boolean {
-  return [-1, 0, 1].some((w) => totp(secret, Date.now() + w * 30_000) === code.trim());
+  return totpStep(secret, code) != null;
+}
+/** 2.20 The time step the code belongs to (to refuse a code used before), or null. Constant-time comparison. */
+export function totpStep(secret: string, code: string, step = 30): number | null {
+  const c = Buffer.from(code.trim());
+  for (const w of [-1, 0, 1]) {
+    const t = Date.now() + w * step * 1000;
+    const want = Buffer.from(totp(secret, t, step));
+    if (want.length === c.length && timingSafeEqual(want, c)) return Math.floor(t / 1000 / step);
+  }
+  return null;
 }
 
 // ---- Brute-force throttling ----------------------------------------------------------------------
@@ -86,11 +96,16 @@ export const clearFailures = (key: string) => failures.delete(key);
 // ---- Tokens ------------------------------------------------------------------------------------
 const key = new TextEncoder().encode(config.jwtSecret);
 export type TokenClaims =
-  | { typ: 'op'; sub: string; mfa: boolean }
+  | { typ: 'op'; sub: string; mfa: boolean; ver?: number }
   | { typ: 'staff'; sub: string; hid: string }
   /** 2.13 Proof that the operator re-entered the password a few minutes ago (sensitive actions). */
   | { typ: 'reauth'; sub: string };
 
+/** 2.20 An operator session carrying the account's current session version. */
+export async function operatorToken(operatorId: string, mfa: boolean) {
+  const r = await one(pool, 'SELECT token_version FROM operators WHERE id=$1', [operatorId]);
+  return signToken({ typ: 'op', sub: operatorId, mfa, ver: r?.token_version ?? 0 });
+}
 export async function signToken(claims: TokenClaims, ttl = '8h') {
   return new SignJWT({ ...claims }).setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(ttl).setIssuer('smk').sign(key);
 }
@@ -120,8 +135,10 @@ export async function requireOperator(req: FastifyRequest): Promise<OperatorCtx>
   if ((req as any).operator) return (req as any).operator;
   const t = await readToken(req);
   if (t.typ !== 'op') throw new ApiError(401, 'UNAUTHENTICATED', 'Operator sign-in required.');
-  const op = await one(pool, 'SELECT id, email, display_name, is_platform_admin, status, mfa_enabled FROM operators WHERE id=$1', [t.sub]);
+  const op = await one(pool, 'SELECT id, email, display_name, is_platform_admin, status, mfa_enabled, token_version FROM operators WHERE id=$1', [t.sub]);
   if (!op || op.status !== 'ACTIVE') throw new ApiError(401, 'UNAUTHENTICATED', 'Account is disabled.');
+  // 2.20 A session from before the last password change / password link / two-step reset is no longer valid.
+  if ((t.ver ?? 0) !== (op.token_version ?? 0)) throw new ApiError(401, 'UNAUTHENTICATED', 'Session ended (password or two-step sign-in changed). Sign in again.');
   const roles = new Map<string, Role[]>();
   for (const m of await many(pool, 'SELECT hotel_id, role FROM memberships WHERE operator_id=$1', [op.id])) {
     roles.set(m.hotel_id, [...(roles.get(m.hotel_id) ?? []), m.role]);

@@ -1,4 +1,4 @@
-# Access Monitoring Tool — quick start (2.19)
+# Access Monitoring Tool — quick start (2.20)
 
 ## What it is and what you need
 
@@ -8,7 +8,7 @@ requests, watches lock batteries and supports emergencies. It works for a hotel 
 hospital, a school). Staff mobile keys are an optional module, off by default.
 
 It has two parts: the **portal** (with its database) and the **connector**, which talks to Visionline. One file
-installs either or both: `AccessMonitoringTool-Server-2.19.0.msi`.
+installs either or both: `AccessMonitoringTool-Server-2.20.0.msi`.
 
 | | A. One computer | B. Two computers |
 |---|---|---|
@@ -68,6 +68,8 @@ leaves.
 | Check lock batteries; "new batteries, still alarming" | Battery status |
 | Find out why an offline lock drains its batteries or misbehaves | Lock troubleshooting |
 | See which online locks and gateways are offline, with their EEIDs (alarms close by themselves when they are back) | Online locks & gateways |
+| Read the latest from Visionline (after uploading lock data or refreshing resources there) | Refresh from Visionline (Visionline cards & people, Battery status, Setup report) |
+| Reach the portal from outside without a public IP | EXTERNAL-ACCESS.md (Cloudflare Tunnel) |
 | Handle an emergency | Emergency, Live occupancy |
 | Know what needs me now | Overview → To do now |
 

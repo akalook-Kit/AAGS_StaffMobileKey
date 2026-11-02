@@ -289,7 +289,7 @@ accounts: **maint@khb.test** (Maintenance Manager) and **tech@khb.test** (Techni
 | Battery alarms | Lock simulator → **Lock batteries** → *Low* / *Critical* / *Exchanged* next to a door | Within seconds the door changes colour on **Battery status**. A critical alarm opens a maintenance request automatically. *Exchanged* resolves the alert and its request. |
 | Duplicate alarms | Press *Low* twice for the same door | One alert with "2 reports"; the maintenance team is told once. |
 | Acknowledge / resolve | **Battery status** → a door | As **maint@khb.test**: *Acknowledge*, *Open maintenance request*, *Mark resolved* (battery replaced). |
-| Thresholds and "No battery report available" | **Settings → Battery & maintenance** | Voltage thresholds for "below X volts" events, days without a report before "No battery report available", automatic requests, due times, which job roles are told. |
+| Thresholds and "stale" | **Settings → Battery & maintenance** | Voltage thresholds for "below X volts" events, days without a report before "stale", automatic requests, due times, which job roles are told. |
 | Maintenance requests | **Maintenance** → **New request** | Assign to **Peter Otieno**; set priority; comment; attach a photo; resolve; close; export CSV. |
 | Tasks in the staff app | Phone, signed in as **peter@khb.test** | New **Tasks** tab: acknowledge, start, put on hold, mark done (a note is required). Any staff member can **Report a problem**. |
 

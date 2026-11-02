@@ -137,6 +137,8 @@ export async function scheduleDirectorySyncs() {
     const ds = vl?.directorySync;
     if (!ds?.enabled) continue;
     if (!(await readyConnector(pool, h.id))) continue; // no connector online with a Visionline account yet
+    // 2.20 On request (default): only the very first read by itself; then only when someone presses Refresh.
+    if ((vl?.readMode ?? 'onRequest') === 'onRequest' && (await one(pool, `SELECT 1 FROM directory_syncs WHERE hotel_id=$1 AND NOT partial AND status='SUCCEEDED' LIMIT 1`, [h.id]))) continue;
     await pool.query(`UPDATE directory_syncs SET status='FAILED', finished_at=now(), error='No answer from the connector in time' WHERE hotel_id=$1 AND status='RUNNING' AND started_at < now() - make_interval(secs => $2)`, [h.id, SYNC_TTL_SEC]);
     const last = await one(pool, `SELECT started_at, status FROM directory_syncs WHERE hotel_id=$1 AND NOT partial ORDER BY started_at DESC LIMIT 1`, [h.id]);
     // After a failure, try again within the hour rather than waiting a whole period.

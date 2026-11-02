@@ -4,7 +4,7 @@ import { one, tx, lockHotel, pool } from './db.ts';
 import { audit } from './audit.ts';
 import { getConfig } from './hotel-config.ts';
 import { enqueueRevoke, notify } from './keys.ts';
-import { applyBatteryEvent, batteryContext, isBatteryEvent, type BatteryContext } from './battery.ts';
+import { applyBatteryEvent, batteryContext, isBatteryEvent, onCardAccepted, type BatteryContext } from './battery.ts';
 import { onLockEvent } from './monitoring/monitor.ts';
 import { recordDoorEntrance } from './attendance/service.ts';
 import { fromVisionlineLocal } from '@smk/shared/node';
@@ -99,6 +99,10 @@ export async function processVisionlineBatch(hotelId: string, b: VisionlineEvent
         // Phase 2: battery alarms and readings (only while the hotel has battery monitoring switched on).
         if (battery === undefined) battery = await batteryContext(c, hotelId);
         if (battery) { await applyBatteryEvent(c, hotelId, battery, ev, Number(row.id)); summary.battery++; }
+      } else {
+        // 2.20 A card accepted without the low-battery flag counts towards closing a low-battery alarm.
+        if (battery === undefined) battery = await batteryContext(c, hotelId);
+        if (battery && (battery.policy.battery.cardAcceptedCodes ?? [64, 67]).includes(ev.eventCode)) await onCardAccepted(c, hotelId, battery, ev);
       }
       if (!reg || reg === '0') continue; // not caused by a card [§7.14.1 note]
       const key = await keyByRegNo(c, hotelId, reg);

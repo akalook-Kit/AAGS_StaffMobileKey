@@ -4,7 +4,7 @@ import { pool, tx, one, many, lockHotel } from '../db.ts';
 import { audit } from '../audit.ts';
 import { permsIn, requirePerm, requireStaff, type OperatorCtx } from '../auth.ts';
 import { getConfig } from '../hotel-config.ts';
-import { acknowledgeAlert, batteryEventName, resolveAlertManually } from '../battery.ts';
+import { acknowledgeAlert, batteryEventName, batterySets, doorBatterySets, resolveAlertManually } from '../battery.ts';
 import {
   CATEGORIES, PRIORITIES, TICKET_STATUSES, OPEN_STATUSES, TICKET_SELECT, assignTicket, changeStatus, checkAttachment, commentTicket, createTicket,
   lockTicket, maintenancePolicy, ticketDetail, ticketView, activity, type Actor,
@@ -105,6 +105,13 @@ export function phase2Routes(app: FastifyInstance) {
       LEFT JOIN maintenance_tickets rt ON rt.id=s.reprogram_ticket_id
       ORDER BY d.door_group NULLS LAST, d.name`, [hotelId]);
     const staleBefore = Date.now() - p.battery.staleAfterDays * 86_400_000;
+    // 2.20 How long the batteries have been in, and how long the previous set lasted.
+    const chRows = await many(pool, 'SELECT door_id, at, source FROM battery_changes WHERE hotel_id=$1 ORDER BY door_id, at', [hotelId]);
+    const lowRows = await many(pool, `SELECT door_id, reported_at FROM battery_readings WHERE hotel_id=$1 AND state IN ('LOW','CRITICAL')`, [hotelId]);
+    const chBy = new Map<string, { at: Date; source: string }[]>(), lowBy = new Map<string, Date[]>();
+    for (const r of chRows) { const l = chBy.get(r.door_id) ?? []; l.push({ at: new Date(r.at), source: r.source }); chBy.set(r.door_id, l); }
+    for (const r of lowRows) { const l = lowBy.get(r.door_id) ?? []; l.push(new Date(r.reported_at)); lowBy.set(r.door_id, l); }
+    const setsOf = (d: string) => batterySets(chBy.get(d) ?? [], lowBy.get(d) ?? []);
     const doors = rows.map((r) => ({
       doorId: r.door_id, name: r.name, doorGroup: r.door_group, online: r.online, known: r.known,
       state: r.state ?? 'NEVER', stale: Boolean(r.reported_at && new Date(r.reported_at).getTime() < staleBefore),
@@ -116,6 +123,18 @@ export function phase2Routes(app: FastifyInstance) {
       lastChange: r.last_change_at ? { at: r.last_change_at, source: r.last_change_source, detail: r.last_change_detail } : null,
       /** 2.15 Batteries changed but the lock still alarms: program the lock and upload its firmware. */
       reprogram: r.rp_id ? { at: r.reprogram_at, ticketId: r.rp_id, number: r.rp_number, status: r.rp_status } : null,
+      ...(() => {
+        const sets = setsOf(r.door_id);
+        const done = sets.filter((x) => !x.current);
+        return {
+          /** 2.20 Days the batteries now in the lock have been in. */
+          currentSetDays: sets.find((x) => x.current)?.days ?? null,
+          /** 2.20 Days the previous set lasted (change to change), and the average of all finished sets. */
+          lastSetDays: done.length ? done[done.length - 1]!.days : null,
+          avgSetDays: done.length ? Math.round((done.reduce((s2, x) => s2 + x.days, 0) / done.length) * 10) / 10 : null,
+          setsCounted: done.length,
+        };
+      })(),
     }));
     const count = (pred: (d: (typeof doors)[number]) => boolean) => doors.filter(pred).length;
     return {
@@ -135,6 +154,7 @@ export function phase2Routes(app: FastifyInstance) {
     const alerts = await many(pool, `SELECT a.id, a.severity, a.status, a.opened_at, a.last_seen_at, a.occurrences, a.resolved_at, a.resolved_reason, t.number AS ticket_number
       FROM battery_alerts a LEFT JOIN maintenance_tickets t ON t.id=a.ticket_id WHERE a.hotel_id=$1 AND a.door_id=$2 ORDER BY a.opened_at DESC LIMIT 20`, [hotelId, doorId]);
     return {
+      sets: (await doorBatterySets(pool, hotelId, doorId)).reverse(),
       readings: readings.map((r) => ({ code: r.event_code, event: batteryEventName(r.event_code), state: r.state, voltsBelow: r.volts_below != null ? Number(r.volts_below) : null, reportedAt: r.reported_at, receivedAt: r.received_at, changeInferred: r.change_inferred })),
       alerts: alerts.map((a) => ({ id: a.id, severity: a.severity, status: a.status, openedAt: a.opened_at, lastSeenAt: a.last_seen_at, occurrences: a.occurrences, resolvedAt: a.resolved_at, resolvedReason: a.resolved_reason, ticketNumber: a.ticket_number })),
     };

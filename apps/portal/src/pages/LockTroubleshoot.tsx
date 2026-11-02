@@ -27,7 +27,7 @@ interface Analysis {
   service: { readouts: number; parametersRead?: number; timeSet: number; programDownloads: number; initialisations: number; lastReadout?: string | null; lastTimeSet?: string | null; lastProgram?: string | null };
   online?: { pings: number; lastPing: string | null; longestGapHours: number | null };
   battery: { readings: { t: string; volts: number }[]; ignoredReadings: number; alarms: { t: string; code: number; name: string }[]; exchanges: { t: string; how: string }[]; periods: Period[]; avgDropPer30Days: number | null; estimatedDaysPerSet: number | null; scale: string; alarmLevel: number;
-    confirmLevel?: number; firmwareDays?: number; lastReading?: { t: string; volts: number } | null; firmwareAlarms?: { t: string; code: number; name: string; changedAt: string }[] };
+    confirmLevel?: number; firmwareDays?: number; lasted?: { sets: { from: string; to: string; days: number }[]; avgDays: number | null; currentDays: number | null }; lastReading?: { t: string; volts: number } | null; firmwareAlarms?: { t: string; code: number; name: string; changedAt: string }[] };
   steps?: Step[]; weekly?: Week[]; daily: { day: string; openings: number }[]; findings: Finding[]; eventTypes: { code: number; name: string; n: number; last?: string | null; meaning?: string | null; internal?: boolean }[];
 }
 interface ReportRow { id: string; doorId: string; doorName: string; lockModel?: string | null; stepsLeft?: number; problemsFound?: number; fileName: string; from: string | null; to: string | null; events: number; uploadedAt: string; uploadedBy: string | null; avgDropPer30Days: number | null; perDay: number | null; high: number; medium: number; top: string | null }
@@ -228,7 +228,11 @@ function ReportView({ id }: { id: string }) {
       <div className="kpis">
         <Kpi label="Openings a day" value={String(x.usage.perDay)} sub={`${x.usage.staffCards} staff · ${x.usage.guestCards} guest card · ${x.usage.openedFromInside} from inside`} />
         <Kpi label="Battery use" value={b.avgDropPer30Days != null ? `${b.avgDropPer30Days.toFixed(2)} V` : '—'} sub={b.avgDropPer30Days != null ? 'per 30 days (average of the battery periods)' : 'not enough readings in the report'} tone={b.estimatedDaysPerSet != null && b.estimatedDaysPerSet < 90 ? 'bad' : undefined} />
-        <Kpi label="A set lasts about" value={b.estimatedDaysPerSet != null ? `${b.estimatedDaysPerSet} days` : '—'} sub={`rough estimate, from new to ${b.alarmLevel.toFixed(1)} V at this rate`} tone={b.estimatedDaysPerSet != null && b.estimatedDaysPerSet < 90 ? 'bad' : undefined} />
+        {b.lasted && (b.lasted.sets.length > 0 || b.lasted.currentDays != null)
+          ? <Kpi label={b.lasted.sets.length ? 'Sets lasted' : 'Batteries in for'} value={b.lasted.sets.length ? `${b.lasted.sets.map((x) => Math.round(x.days)).join(' · ')} days` : `${Math.round(b.lasted.currentDays!)} days`}
+              sub={b.lasted.sets.length ? `change to change${b.lasted.avgDays != null && b.lasted.sets.length > 1 ? `, average ${Math.round(b.lasted.avgDays)} days` : ''}${b.lasted.currentDays != null ? `; current set in for ${Math.round(b.lasted.currentDays)} days` : ''}` : 'since the last change in the report'}
+              tone={b.lasted.avgDays != null && b.lasted.avgDays < 90 ? 'bad' : undefined} />
+          : <Kpi label="A set lasts about" value={b.estimatedDaysPerSet != null ? `${b.estimatedDaysPerSet} days` : '—'} sub={`rough estimate, from new to ${b.alarmLevel.toFixed(1)} V at this rate`} tone={b.estimatedDaysPerSet != null && b.estimatedDaysPerSet < 90 ? 'bad' : undefined} />}
         <Kpi label="Last battery reading" value={b.lastReading ? `below ${b.lastReading.volts.toFixed(1)} V` : '—'} sub={b.lastReading ? lt(b.lastReading.t) : 'no reading in the report'} tone={b.lastReading && b.lastReading.volts <= (b.confirmLevel ?? 4.2) ? 'warn' : undefined} />
         <Kpi label="Lock faults" value={String(x.faults.internal + x.faults.cardReading + x.faults.ble + x.faults.restarts)} sub={`${x.faults.internal} internal · ${x.faults.cardReading} card reading · ${x.faults.restarts} restarts`} tone={x.faults.internal >= 5 ? 'warn' : undefined} />
       </div>
@@ -250,7 +254,7 @@ function ReportView({ id }: { id: string }) {
           chart={<VoltChart a={x} />}
           table={<DataTable head={['Lock time', 'Below (V)']} numeric={[1]} rows={[...b.readings].reverse().map((p) => [lt(p.t), p.volts.toFixed(1)])} />} />
         <VizCard span={12} title="Battery periods" sub={<>From one battery change to the next. Consumption = drop from the first to the lowest reading of the period.{(b.firmwareAlarms ?? []).length > 0 && <> {b.firmwareAlarms!.length} battery alarm(s) came within {b.firmwareDays ?? 14} days after new batteries while the readings stayed above {(b.confirmLevel ?? 3.6).toFixed(1)} V: a firmware fault, not counted as battery alarms.</>}</>}
-          chart={<DataTable head={['From', 'Started by', 'Days', 'First (V)', 'Lowest (V)', ...(b.periods[0]?.reached ?? []).map((r) => `Days to ${r.volts.toFixed(1)} V`), 'V / 30 days', 'Openings', 'V / 1,000 openings', 'Battery alarms', 'Alarms from firmware']}
+          chart={<DataTable head={['From', 'Started by', 'Days in the lock', 'First (V)', 'Lowest (V)', ...(b.periods[0]?.reached ?? []).map((r) => `Days to ${r.volts.toFixed(1)} V`), 'V / 30 days', 'Openings', 'V / 1,000 openings', 'Battery alarms', 'Alarms from firmware']}
             numeric={[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]}
             rows={b.periods.map((p) => [lt(p.from, false), p.startedBy === 'exchange' ? 'Battery exchanged' : p.startedBy === 'reading' ? 'Reading back at the top' : 'Start of the report', p.days, p.firstVolts?.toFixed(1) ?? null, p.lowestVolts?.toFixed(1) ?? null,
               ...(p.reached ?? []).map((r) => (p.startedBy === 'report' ? '—' : r.days ?? 'not reached')), p.dropPer30Days?.toFixed(2) ?? null, p.openings, p.dropPer1000Openings?.toFixed(2) ?? null, p.alarms, p.firmwareAlarms ?? 0])} />} />

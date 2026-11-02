@@ -15,7 +15,7 @@ export function OperatorsPage() {
   const [adding, setAdding] = useState(false);
   const [inviting, setInviting] = useState(false);
   const [linking, setLinking] = useState<any>(null);
-  const [link, setLink] = useState<{ name: string; url: string; emailed?: boolean; emailError?: string } | null>(null);
+  const [link, setLink] = useState<{ name: string; url: string; outside?: string; emailed?: boolean; emailError?: string } | null>(null);
   const [modules, setModules] = useState<any>(null);
   const [withReauth, reauthDialog] = useReauth();
   const [msg, setMsg] = useState<unknown>(null);
@@ -24,7 +24,7 @@ export function OperatorsPage() {
     setMsg(null);
     const go = (t?: string) => api(`${base}/operators/${o.id}/invite`, { body: { sendEmail: true, portalUrl }, headers: t ? { 'x-smk-reauth': t } : {} });
     if (o.status === 'ACTIVE' && !confirm(`Make a link with which ${o.display_name} chooses a new password (forgotten password)? Their current password stops working once they use it.`)) return;
-    try { const r: any = o.status === 'ACTIVE' ? await new Promise((res, rej) => { withReauth((t) => go(t).then(res, rej)).catch(rej); }) : await go(); setLink({ name: o.display_name, url: `${portalUrl}/invite#${r.token}`, emailed: r.emailed, emailError: r.emailError }); void ops.reload(); } catch (e) { setMsg(e); }
+    try { const r: any = o.status === 'ACTIVE' ? await new Promise((res, rej) => { withReauth((t) => go(t).then(res, rej)).catch(rej); }) : await go(); setLink({ name: o.display_name, url: `${portalUrl}/invite#${r.token}`, outside: r.outsideLink ?? undefined, emailed: r.emailed, emailError: r.emailError }); void ops.reload(); } catch (e) { setMsg(e); }
   };
   const remove = async (o: any) => {
     if (!confirm(`Remove ${o.display_name}'s access? They can no longer sign in here. You can invite them again later.`)) return;
@@ -134,7 +134,7 @@ function ModulesForm({ op, onClose, onSaved }: { op: any; onClose: () => void; o
 }
 
 /** 2.16 Invite someone: name, e-mail and what they do (a profile), or chosen roles. */
-function InviteForm({ onClose, onDone }: { onClose: () => void; onDone: (l: { name: string; url: string; emailed?: boolean; emailError?: string }) => void }) {
+function InviteForm({ onClose, onDone }: { onClose: () => void; onDone: (l: { name: string; url: string; outside?: string; emailed?: boolean; emailError?: string }) => void }) {
   const { base, me } = useHotel();
   const profiles = useApi<{ id: string; label: string; hint: string }[]>(`${base}/operators/profiles`);
   const [name, setName] = useState('');
@@ -149,7 +149,7 @@ function InviteForm({ onClose, onDone }: { onClose: () => void; onDone: (l: { na
     setBusy(true); setError(null);
     try {
       const r = await api(`${base}/operators/invite`, { body: { email, displayName: name, ...(custom ? { roles } : { profile }), sendEmail: mail, portalUrl: location.origin } });
-      onDone(r.existing ? { name, url: '' } : { name, url: `${location.origin}/invite#${r.token}`, emailed: r.emailed, emailError: r.emailError });
+      onDone(r.existing ? { name, url: '' } : { name, url: `${location.origin}/invite#${r.token}`, outside: r.outsideLink ?? undefined, emailed: r.emailed, emailError: r.emailError });
     } catch (e) { setError(e); } finally { setBusy(false); }
   };
   const ok = name.trim().length >= 2 && /.+@.+\..+/.test(email) && (custom ? roles.length > 0 : Boolean(profile));
@@ -175,8 +175,9 @@ function InviteForm({ onClose, onDone }: { onClose: () => void; onDone: (l: { na
   );
 }
 
-function InviteLink({ name, url, emailed, emailError, onClose }: { name: string; url: string; emailed?: boolean; emailError?: string; onClose: () => void }) {
+function InviteLink({ name, url, outside, emailed, emailError, onClose }: { name: string; url: string; outside?: string; emailed?: boolean; emailError?: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [copiedOut, setCopiedOut] = useState(false);
   if (!url) return <div className="alert ok">{name} already had an account here; their new roles apply at their next sign-in. <button className="btn small" onClick={onClose}>OK</button></div>;
   return (
     <div className="panel">
@@ -188,6 +189,12 @@ function InviteLink({ name, url, emailed, emailError, onClose }: { name: string;
         <button className="btn small" onClick={onClose}>Done</button>
       </div>
       <p className="small muted" style={{ marginTop: 8 }}>The link opens the portal at this address ({location.host}); make sure {name}'s computer or phone is on a network that reaches it.</p>
+      {outside && outside !== url && <>
+        <h3 style={{ marginTop: 14 }}>From outside the hotel</h3>
+        <div className="token-box">{outside}</div>
+        <div className="row" style={{ marginTop: 8 }}><button className="btn small" onClick={() => { void navigator.clipboard?.writeText(outside); setCopiedOut(true); }}>{copiedOut ? 'Copied' : 'Copy outside link'}</button></div>
+        <p className="small muted" style={{ marginTop: 6 }}>Through Cloudflare Tunnel. It contains the secret part of the outside address: send it only to {name}.</p>
+      </>}
     </div>
   );
 }

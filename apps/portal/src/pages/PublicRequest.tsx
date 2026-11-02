@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { ErrorNote } from '../ui';
-import { RequestFields } from './Keycards';
+import { RequestFields, endOfDay } from './Keycards';
 
 /** 2.14 The page behind the QR code: managers ask for a staff keycard (or its cancellation) without signing in. */
 export function PublicRequestPage({ token }: { token: string }) {
@@ -12,7 +12,7 @@ export function PublicRequestPage({ token }: { token: string }) {
   useEffect(() => { api(`/api/v1/public/keycard-requests/${token}`).then(setInfo).catch(setError); }, [token]);
   const send = async () => {
     setError(null);
-    try { setDone(await api(`/api/v1/public/keycard-requests/${token}`, { body: { ...v, jobTitle: v.jobTitle || null, employeeNo: v.employeeNo || null, cardLabel: v.cardLabel || null, hrEmail: v.hrEmail || null } })); } catch (e) { setError(e); }
+    try { setDone(await api(`/api/v1/public/keycard-requests/${token}`, { body: { ...v, validUntilDate: undefined, validUntil: v.validUntilDate ? endOfDay(v.validUntilDate) : null, jobTitle: v.jobTitle || null, employeeNo: v.employeeNo || null, cardLabel: v.cardLabel || null, hrEmail: v.hrEmail || null } })); } catch (e) { setError(e); }
   };
   return (
     <div className="setup"><div className="setup-card" style={{ maxWidth: 680 }}>

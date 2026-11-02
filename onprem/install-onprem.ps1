@@ -446,6 +446,11 @@ if ($ExternalPort -gt 0) {
   $allowList = @($AllowExternal.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
   $listeners += [ordered]@{ name = 'external'; host = '0.0.0.0'; port = $ExternalPort; tls = [ordered]@{ pfx = $pfx; passphraseEnv = 'GATEWAY_PFX_PASSPHRASE' }; allow = $allowList; requireSecretPath = $true }
 }
+# 2.20 The Cloudflare Tunnel entrance (set-tunnel-access.ps1) is kept on upgrade.
+$oldTun = if ($oldGw) { @($oldGw.listeners | Where-Object { $_.name -eq 'tunnel' })[0] } else { $null }
+if ($oldTun) {
+  $listeners += [ordered]@{ name = 'tunnel'; host = '127.0.0.1'; port = [int]$oldTun.port; allow = @('127.0.0.1', '::1'); requireSecretPath = [bool]$oldTun.requireSecretPath; clientIpHeader = 'cf-connecting-ip'; publicHttps = $true }
+}
 $gw = [ordered]@{ upstream = $platformUrl; secretPath = $secretPath; cookieKeyEnv = 'GATEWAY_COOKIE_KEY'; passHours = 12; banAfter = 20; banMinutes = 30
   logFile = (Join-Path $DataDir 'logs\gateway-access.log'); listeners = $listeners }
 Write-Utf8NoBom $gwCfgFile ($gw | ConvertTo-Json -Depth 6)

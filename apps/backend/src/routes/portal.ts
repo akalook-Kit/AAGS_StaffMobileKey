@@ -7,7 +7,7 @@ import { pool, tx, one, many } from '../db.ts';
 import { audit, verifyAuditChain } from '../audit.ts';
 import {
   checkThrottle, checkIpThrottle, recordIpFailure, checkPassword, clearFailures, hashPassword, newTotpSecret, permsIn, recordFailure, requireOperator, requirePerm, requireReauth,
-  signToken, verifyPassword, verifyTotp,
+  operatorToken, signToken, totpStep, verifyPassword, verifyTotp,
 } from '../auth.ts';
 import { enqueue, newCorrelationId } from '../commands.ts';
 import { csForHotel } from '../credential-services.ts';
@@ -42,12 +42,16 @@ export function portalRoutes(app: FastifyInstance) {
     }
     if (op.mfa_enabled) {
       if (!b.totp) return { mfaRequired: true };
-      if (!verifyTotp(op.totp_secret, b.totp)) { recordFailure(tkey); recordIpFailure(req.ip); throw new ApiError(401, 'BAD_TOTP', 'The authentication code is incorrect.'); }
+      const st = totpStep(op.totp_secret, b.totp);
+      if (st == null) { recordFailure(tkey); recordIpFailure(req.ip); throw new ApiError(401, 'BAD_TOTP', 'The authentication code is incorrect.'); }
+      // 2.20 Each code works once: a code seen over someone's shoulder cannot be used again.
+      const used = await one(pool, 'UPDATE operators SET totp_last_step=$2 WHERE id=$1 AND (totp_last_step IS NULL OR totp_last_step < $2) RETURNING id', [op.id, st]);
+      if (!used) { recordFailure(tkey); recordIpFailure(req.ip); throw new ApiError(401, 'BAD_TOTP', 'This code was already used. Wait for the next code.'); }
     }
     clearFailures(tkey);
     await pool.query('UPDATE operators SET last_sign_in_at=now() WHERE id=$1', [op.id]);
     await audit(null, { hotelId: null, actorType: 'operator', actorId: op.id, action: 'operator.signed_in', details: { mfa: op.mfa_enabled } });
-    return { token: await signToken({ typ: 'op', sub: op.id, mfa: op.mfa_enabled }), mfaEnabled: op.mfa_enabled };
+    return { token: await operatorToken(op.id, op.mfa_enabled), mfaEnabled: op.mfa_enabled };
   });
 
   app.post(`${P}/auth/mfa/setup`, async (req) => {
@@ -341,7 +345,7 @@ export function portalRoutes(app: FastifyInstance) {
     if (target === op.id) throw forbidden('Ask another administrator to reset your own two-step sign-in.');
     const t = await one(pool, `SELECT o.id, o.email, o.is_platform_admin FROM operators o JOIN memberships m ON m.operator_id=o.id AND m.hotel_id=$1 WHERE o.id=$2 LIMIT 1`, [hotelId, target]);
     if (!t || (t.is_platform_admin && !op.isPlatformAdmin)) throw notFound('Operator');
-    await pool.query('UPDATE operators SET mfa_enabled=false, totp_secret=NULL WHERE id=$1', [target]);
+    await pool.query('UPDATE operators SET mfa_enabled=false, totp_secret=NULL, totp_last_step=NULL, token_version=token_version+1 WHERE id=$1', [target]);
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'operator.mfa_reset', targetType: 'operator', targetId: target, details: { email: t.email } });
     return { ok: true };
   });
@@ -517,7 +521,8 @@ export function portalRoutes(app: FastifyInstance) {
     const op = await requirePerm(req, hotelId, 'audit.export');
     const rows = await many(pool, `SELECT seq, at, actor_type, actor_id, action, target_type, target_id, correlation_id, details, prev_hash, hash FROM audit_log WHERE hotel_id=$1 ORDER BY seq`, [hotelId]);
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'audit.exported', details: { records: rows.length } });
-    const esc = (v: unknown) => { const s = typeof v === 'string' ? v : v == null ? '' : v instanceof Date ? v.toISOString() : JSON.stringify(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    // 2.20 Cells that start with = + - @ are prefixed with ' so a spreadsheet does not run them as formulas (door names, ids from Visionline).
+    const esc = (v: unknown) => { let s = typeof v === 'string' ? v : v == null ? '' : v instanceof Date ? v.toISOString() : JSON.stringify(v); if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const head = 'seq,at,actor_type,actor_id,action,target_type,target_id,correlation_id,details,prev_hash,hash';
     reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="audit-${hotelId}.csv"`);
     return [head, ...rows.map((r) => [r.seq, r.at, r.actor_type, r.actor_id, r.action, r.target_type, r.target_id, r.correlation_id, r.details, r.prev_hash, r.hash].map(esc).join(','))].join('\n');

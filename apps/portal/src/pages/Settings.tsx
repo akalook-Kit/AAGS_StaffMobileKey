@@ -534,7 +534,7 @@ function Phase2Policy({ data, set }: { data: any; set: (patch: any) => void }) {
     <>
       <h3 className="section-title">Battery alarms</h3>
       <div className="field-row">
-        <div className="field"><label htmlFor="stale">Show “No battery report available” after (days without a report)</label><input id="stale" type="number" min={1} max={365} value={b.staleAfterDays} onChange={(e) => setB({ staleAfterDays: Number(e.target.value) })} />
+        <div className="field"><label htmlFor="stale">A reading is stale after (days without a report)</label><input id="stale" type="number" min={1} max={365} value={b.staleAfterDays} onChange={(e) => setB({ staleAfterDays: Number(e.target.value) })} />
           <span className="hint">Locks report only when their events reach Visionline.</span></div>
         <div className="field"><label htmlFor="auto">Open a maintenance request automatically for</label>
           <select id="auto" value={b.autoTicket} onChange={(e) => setB({ autoTicket: e.target.value })}>
@@ -587,8 +587,17 @@ function ReportsSync({ data, set }: { data: any; set: (patch: any) => void }) {
   const chosen = new Set<string>(ds.scope === 'groups' ? ds.groups : ds.scope === 'staffGroups' ? (data.userGroups ?? []) : groups.map((g) => g.name));
   const toggle = (g: string) => { const n = new Set(ds.groups); n.has(g) ? n.delete(g) : n.add(g); setD({ scope: 'groups', groups: [...n] }); };
   const people = groups.filter((g) => chosen.has(g.name)).reduce((a, g) => a + g.people, 0);
+  const mode = data.readMode ?? 'onRequest';
   return (
     <>
+      <h3 style={{ marginTop: 0 }}>When to read Visionline</h3>
+      <div className="seg" role="radiogroup" aria-label="When to read Visionline" style={{ marginBottom: 6 }}>
+        <button type="button" role="radio" aria-checked={mode === 'onRequest'} aria-pressed={mode === 'onRequest'} onClick={() => set({ readMode: 'onRequest' })}>On request (recommended)</button>
+        <button type="button" role="radio" aria-checked={mode === 'scheduled'} aria-pressed={mode === 'scheduled'} onClick={() => set({ readMode: 'scheduled' })}>On a schedule</button>
+      </div>
+      <p className="hint small" style={{ marginBottom: 16 }}>{mode === 'onRequest'
+        ? 'Doors, user groups, people and keycards are read only when someone presses "Refresh from Visionline" (for example after lock data was uploaded to Visionline or its resources were refreshed), at most once every 5 minutes. Visionline is not loaded with regular reads. Cards used at doors and battery reports still arrive as they happen.'
+        : `Doors and user groups every ${data.discoveryEveryHours ?? 6} hours, people and keycards every ${ds.everyHours} hours (below), plus "Refresh from Visionline" at any time.`}</p>
       <label className="check"><input type="checkbox" checked={ds.enabled} onChange={(e) => setD({ enabled: e.target.checked })} />
         <span><strong>Read people and keycards from Visionline</strong>
           <span className="hint" style={{ display: 'block' }}>GET requests only: names, user groups, valid keycards (validity, doors, privileges) and lock alarms. PIN codes, e-mail addresses, phone numbers and card serial numbers are never read or kept, and nothing in Visionline changes. Only for your own Visionline.</span></span></label>
@@ -609,9 +618,9 @@ function ReportsSync({ data, set }: { data: any; set: (patch: any) => void }) {
           {people > 0 && ` About ${people.toLocaleString()} people at the last read.`}</p>
         <div className="field-row" style={{ marginTop: 10 }}>
           <div className="field"><label htmlFor="max">At most this many people</label><input id="max" type="number" min={10} max={20000} value={ds.maxUsers} onChange={(e) => setD({ maxUsers: Number(e.target.value) })} /></div>
-          <div className="field"><label htmlFor="every">Read again every (hours)</label><input id="every" type="number" min={1} max={168} value={ds.everyHours} onChange={(e) => setD({ everyHours: Number(e.target.value) })} /></div>
+          {mode === 'scheduled' && <div className="field"><label htmlFor="every">Read again every (hours)</label><input id="every" type="number" min={1} max={168} value={ds.everyHours} onChange={(e) => setD({ everyHours: Number(e.target.value) })} /></div>}
         </div>
-        <label className="check"><input type="checkbox" checked={Boolean(ds.quietHoursOnly)} onChange={(e) => setD({ quietHoursOnly: e.target.checked })} /><span>Only at night (22:00–06:00)<span className="hint" style={{ display: 'block' }}>Leaves Visionline to the GRMS, the PMS interface and the desk during the day. Cards made at the desk are still recorded within seconds.</span></span></label>
+        {mode === 'scheduled' && <label className="check"><input type="checkbox" checked={Boolean(ds.quietHoursOnly)} onChange={(e) => setD({ quietHoursOnly: e.target.checked })} /><span>Only at night (22:00–06:00)<span className="hint" style={{ display: 'block' }}>Leaves Visionline to the GRMS, the PMS interface and the desk during the day. Cards made at the desk are still recorded within seconds.</span></span></label>}
         <p className="hint small">The connector shares Visionline politely: at most two requests at a time, key issuing first, and it slows down when Visionline is busy.</p>
         <h3 style={{ marginTop: 14 }}>What to read</h3>
         <label className="check"><input type="checkbox" checked={ds.includeCards} onChange={(e) => setD({ includeCards: e.target.checked })} /><span>Valid keycards of each person <span className="hint" style={{ display: 'block' }}>Validity, doors, door groups, time schedule and privileges such as deadbolt override (when Visionline reports them).</span></span></label>

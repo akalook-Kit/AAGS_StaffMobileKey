@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useHotel } from '../App';
 import { api } from '../api';
 import { ErrorNote, PageHead, fmt, useApi } from '../ui';
+import { RefreshVisionline } from '../components/RefreshVisionline';
 
 /** 2.14 System setup report, laid out like the Visionline "System Setup Report": one section per page, printable. */
 export function SetupReportPage() {
@@ -22,9 +23,10 @@ export function SetupReportPage() {
   const kv = (rows: [string, ReactNode][]) => <dl className="ssr-kv">{rows.map(([k, v]) => <div key={k}><dt>{k}:</dt><dd>{v}</dd></div>)}</dl>;
   return (
     <>
-      <PageHead title="System setup report" intro="Your set-up in one printable document: locks, user groups, door groups, keycard types, who has access to what (portal and Visionline) and the main parameters.">
+      <PageHead title="System setup report" intro="Your set-up in one printable document: what to look at first, every room and the user groups that open it, user groups, door groups, keycard types, who has access to what (portal and Visionline) and the system parameters.">
         <button className="btn primary" onClick={() => window.print()}>Print / PDF</button>
       </PageHead>
+      <div className="no-print"><RefreshVisionline onDone={() => setTimeout(() => void r.reload(), 4000)} /></div>
       <ImportPanel reload={r.reload} imported={x.visionline} />
       <div className="ssr">
         <Sec title="Property">{kv([['Property name', x.property.name], ['System ID', x.property.systemId ?? '—'], ['Time zone', x.property.timezone], ['Version', x.property.version],
@@ -32,6 +34,12 @@ export function SetupReportPage() {
           ['Encoders', x.property.encoders.join(', ') || '—'], ['People in Visionline', x.property.visionlineUsers], ['Valid keycards', x.property.validKeycards],
           ['Connector', x.property.connector ? `${x.property.connector.name} ${x.property.connector.version ?? ''}, last seen ${fmt.dt(x.property.connector.lastSeen)}` : 'not connected'],
           ['Licence', x.property.licence ? `${x.property.licence.id}${x.property.licence.expires ? ` until ${x.property.licence.expires}` : ''}` : 'trial']])}</Sec>
+        {(x.insights ?? []).length > 0 && (
+          <Sec title="Worth a Look">
+            <ul className="ssr-insights">{x.insights.map((i: any, k: number) => <li key={k} className={i.level === 'warn' ? 'ssr-warn' : ''}>{i.text}</li>)}</ul>
+          </Sec>
+        )}
+        {x.roomMatrix && <Sec title="User Groups vs. Rooms"><RoomMatrix m={x.roomMatrix} /></Sec>}
         <Sec title="Keycard Types"><table className="ssr-t"><thead><tr><th>Name</th><th>Description</th></tr></thead><tbody>{x.keycardTypes.map(([n, d]: string[]) => <tr key={n}><td>{n}</td><td>{d}</td></tr>)}</tbody></table></Sec>
         <Sec title="User Groups"><table className="ssr-t"><thead><tr><th>Name</th><th>Uniform access</th><th>Override deadbolt</th><th>Override privacy</th><th>Cards with override</th><th>Time schedule</th><th>Doors / door groups</th></tr></thead>
           <tbody>{x.userGroups.map((g: any) => <tr key={g.name}><td>{g.name}</td><td>{g.uniformAccess ? 'Yes' : 'No'}</td><td>{yn(g.overrideDeadbolt)}</td><td>{yn(g.overridePrivacy)}</td><td>{g.cardsWithOverride || '—'}</td><td>{g.timeSchedule ?? 'All week'}</td><td>{g.doors.join(', ') || '—'}</td></tr>)}</tbody></table>
@@ -66,8 +74,48 @@ export function SetupReportPage() {
         </Sec>
         <Sec title="Access by Person"><ByPerson rows={x.accessByPerson ?? []} /></Sec>
         <Sec title="System Access (portal operators)"><table className="ssr-t"><thead><tr><th>Name</th><th>E-mail</th><th>Roles</th><th>Two-step</th><th>Last sign-in</th></tr></thead><tbody>{x.access.map((a: any) => <tr key={a.email}><td>{a.name}</td><td>{a.email}</td><td>{a.roles.join(', ')}</td><td>{a.mfa ? 'Yes' : 'No'}</td><td>{a.lastSignIn ? fmt.dt(a.lastSignIn) : 'never'}</td></tr>)}</tbody></table></Sec>
-        <Sec title="System Parameters">{kv(x.parameters.map(([k, v]: string[]) => [k, v]))}</Sec>
+        <Sec title="System Parameters">
+          {x.visionline?.systemSettings ? <>
+            <p className="small muted">Visionline, from the System settings report "{x.visionline.systemSettings.file}", imported {fmt.dt(x.visionline.systemSettings.importedAt)}.</p>
+            {(x.visionline.systemSettings.sections ?? []).filter((sec: any) => !/^(components|internal events)$/i.test(sec.name)).map((sec: any) => (
+              <div key={sec.name} className="ssr-param"><h4>{sec.name}</h4>
+                {sec.name.toLowerCase() === 'events'
+                  ? <ul className="ssr-cols">{(x.visionline.systemSettings.events ?? []).flatMap((g: any) => g.items.map((it: any) => <li key={`${g.group}-${it.code}`}>{it.on ? '☑' : '☐'} ({it.code}) {it.name}</li>))}</ul>
+                  : <ul className="ssr-lines">{sec.lines.map((l: string, i: number) => <li key={i}>{l.trim()}</li>)}</ul>}
+              </div>))}
+          </> : <p className="ssr-warn">The Visionline system parameters come from the Visionline System settings report: import it above (Visionline reports).</p>}
+          <h4>Access Monitoring Tool</h4>
+          {kv(x.parameters.map(([k, v]: string[]) => [k, v]))}
+        </Sec>
       </div>
+    </>
+  );
+}
+
+/** 2.20 Every room against every user group: D = the group opens the door itself, G = through its door group. */
+function RoomMatrix({ m }: { m: { groups: string[]; rooms: { name: string; group: string | null; category: string | null; online: boolean | null; access: string[]; groups: number; people: number }[] } }) {
+  const [q, setQ] = useState(''); const [dg, setDg] = useState(''); const [ug, setUg] = useState(''); const [only, setOnly] = useState(false);
+  const doorGroups = useMemo(() => [...new Set(m.rooms.map((r) => r.group).filter(Boolean) as string[])].sort(), [m]);
+  const gi = ug ? m.groups.indexOf(ug) : -1;
+  const t = q.trim().toLowerCase();
+  const shown = m.rooms.filter((r) => (!dg || r.group === dg) && (!t || r.name.toLowerCase().includes(t)) && (!only || r.groups === 0) && (gi < 0 || r.access[gi]));
+  const cols = gi >= 0 ? [gi] : m.groups.map((_, i) => i);
+  return (
+    <>
+      <div className="row no-print" style={{ gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <input className="search" placeholder="Room" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Room" />
+        <select className="search" value={dg} onChange={(e) => setDg(e.target.value)} aria-label="Door group"><option value="">All door groups</option>{doorGroups.map((x) => <option key={x}>{x}</option>)}</select>
+        <select className="search" value={ug} onChange={(e) => setUg(e.target.value)} aria-label="User group"><option value="">All user groups</option>{m.groups.map((x) => <option key={x}>{x}</option>)}</select>
+        <label className="check" style={{ margin: 0 }}><input type="checkbox" checked={only} onChange={(e) => setOnly(e.target.checked)} /> Only rooms no user group opens</label>
+        <span className="small muted">{shown.length} of {m.rooms.length} rooms</span>
+      </div>
+      <p className="small muted">✓ = the user group opens the room itself · ◐ = through its door group · People = holders of a valid staff keycard that opens it. Every room read from Visionline is listed.</p>
+      <div className="ssr-matrix-wrap"><table className="ssr-t ssr-matrix">
+        <thead><tr><th>Room</th><th>Door group</th>{cols.map((i) => <th key={i} className="rot"><span>{m.groups[i]}</span></th>)}<th>Groups</th><th>People</th></tr></thead>
+        <tbody>{shown.map((r) => <tr key={r.name} className={r.groups ? '' : 'none'}><td>{r.name}</td><td>{r.group ?? '—'}</td>
+          {cols.map((i) => <td key={i} className="c">{r.access[i] === 'D' ? '✓' : r.access[i] === 'G' ? '◐' : ''}</td>)}<td className="c">{r.groups}</td><td className="c">{r.people}</td></tr>)}</tbody>
+      </table></div>
+      {!m.rooms.length && <p>No rooms read from Visionline yet: press Refresh from Visionline.</p>}
     </>
   );
 }

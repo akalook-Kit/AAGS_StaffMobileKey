@@ -14,10 +14,18 @@ WHAT THE SERVER NEEDS
   - .NET Framework 4.8 (part of Windows)
   - 2 GB free disk space (more as the database grows; Monitoring warns below 50 GB)
 
+NEW IN 2.20
+  "Stale" is back. Days each battery set lasted (Battery status and Lock troubleshooting). A battery alarm closes by
+  itself after 3 cards accepted without the low flag. Visionline is read on request (Refresh from Visionline, at most
+  every 5 minutes) instead of every few hours. Staff keycard expiry is a date. Keycards in generic names are flagged to
+  the administrators. Setup report: worth a look, user groups vs. rooms (every room), system parameters from the
+  Visionline System settings report. Outside access without a public IP: set-tunnel-access.ps1 (Cloudflare Tunnel,
+  docs\EXTERNAL-ACCESS.md). Security review fixes (sessions end on password change, one-time two-step codes).
+
 NEW IN 2.19
   A battery alarm after new batteries (within 14 days), not confirmed by a low reading, is a firmware fault: no
   battery alarm, the portal asks to "Program the lock and upload firmware". 3-4.8 V locks are critical at 3.6 V.
-  "No battery report available" for locks not heard from. Lock troubleshooting asks for the lock model (Signature
+  "No battery report available" for locks not heard from (2.20: "stale" again). Lock troubleshooting asks for the lock model (Signature
   RFID, Essence, Classic RFID, Allure), remembered per door, and guides the technician through the causes step by step
   (elimination method). New page Online locks & gateways: online locks in contact or offline, gateways with their EEID
   (added or imported), offline alarms that close by themselves when the lock or gateway is back.

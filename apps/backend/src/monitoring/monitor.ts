@@ -5,6 +5,7 @@ import { audit } from '../audit.ts';
 import { getConfig, SCHEMAS } from '../hotel-config.ts';
 import { isOnline } from '../routes/portal.ts';
 import { classifyGateway, gatewayFacts, setGatewayState } from '../gateways.ts';
+import { genericCards } from '../generic-cards.ts';
 import { classifyDoor, type DoorFacts } from './doors.ts';
 import { maskRecipient, sendEmail, sendSms, type Channels } from './channels.ts';
 
@@ -22,7 +23,7 @@ export const CATEGORIES = ['doors', 'vip', 'locks', 'system'] as const;
 export type Category = (typeof CATEGORIES)[number];
 export const CATEGORY_LABELS: Record<Category, string> = { doors: 'Doors and gateways offline', vip: 'Watched doors (VIP)', locks: 'Lock alarms and batteries', system: 'System (server, disk, database, connector)' };
 const KIND_CATEGORY: Record<string, Category> = {
-  door_offline: 'doors', gateway_offline: 'doors', vip_entrance: 'vip', lock_alarm: 'locks', battery_critical: 'locks',
+  door_offline: 'doors', gateway_offline: 'doors', vip_entrance: 'vip', lock_alarm: 'locks', battery_critical: 'locks', generic_keycards: 'locks',
   connector_offline: 'system', visionline_unreachable: 'system', disk_low: 'system', db_large: 'system', test: 'system',
 };
 export const categoryOf = (kind: string): Category => KIND_CATEGORY[kind] ?? 'system';
@@ -205,6 +206,7 @@ export async function checkHotel(hotelId: string, now = new Date()) {
   if (pol.doorOffline.enabled) await checkDoors(hotelId, pol, conns, now);
   else await clearOthers(hotelId, 'door_offline', []);
   await checkGateways(hotelId);
+  await checkGenericCards(hotelId);
 
   // Lock alarms (Visionline) and critical batteries
   const alarms = await many(pool, `SELECT alarm_id, COALESCE(type_name, alarm_type, 'Alarm') AS t, alarm_text, COALESCE(door_id, door_raw) AS door FROM vl_alarms
@@ -275,6 +277,14 @@ async function checkDoors(hotelId: string, pol: Awaited<ReturnType<typeof monito
   }
   // Doors with an open alert but no facts any more (e.g. alarm completed and no events): resolve.
   await clearOthers(hotelId, 'door_offline', offline.concat([...facts.entries()].filter(([, f]) => classifyDoor(f, d, now, watchRunning).state === 'unknown').map(([k]) => k)));
+}
+
+/** 2.20 Staff keycards held under a generic name (not a person): one alert while any exist, closed when none are left. */
+async function checkGenericCards(hotelId: string) {
+  const g = await genericCards(hotelId);
+  if (g.length) await raise(hotelId, { kind: 'generic_keycards', subject: 'all', severity: 'warning', title: `${g.length} staff keycard${g.length === 1 ? '' : 's'} in a generic name`,
+    detail: `Held under names that are not a person (e.g. ${[...new Set(g.map((x) => x.name || '(no name)'))].slice(0, 4).join(', ')}): nobody can tell who used them. Staff keycards → Keycards in a generic name.`, data: { count: g.length } });
+  else await clear(hotelId, 'generic_keycards', 'all', 'Every valid staff keycard is now in a person\'s name.');
 }
 
 /** 2.19 Gateways: offline from a Visionline alarm or when all their locks are offline; the alert closes by itself. */

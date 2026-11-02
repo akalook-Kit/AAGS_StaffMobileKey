@@ -59,6 +59,33 @@ Every lock event received from Visionline (entrances, refused entries, alarms, b
 system events, with filters (period, type, door, person, known/unknown card). **Print** makes a PDF with a
 fingerprint (SHA-256) that can be checked later under *Verify a PDF*: any change to the file shows.
 
+### 5d. New in 2.20
+
+- **"Stale" is back** on Battery status for a lock not heard from for the number of days set in Settings.
+- **How long each set of batteries lasted.** Battery status shows, per lock, how many days the batteries now in it have
+  been in, how long the previous set lasted and the average over all sets; the lock's page lists every set (put in,
+  taken out, days, days to the first low report). Lock troubleshooting shows the same from an uploaded report ("Sets
+  lasted 5, 10 days").
+- **A battery alarm clears itself after cards work normally.** When the lock accepts 3 cards in a row (staff or guest)
+  without logging the low-battery flag again, the alarm and its request close by themselves — unless a voltage reading
+  says the battery is at or below your threshold. Settings → Battery & maintenance (3 by default; 0 = off).
+- **Visionline is read on request.** Doors, user groups, people and keycards are read when someone presses **Refresh
+  from Visionline** (Visionline cards & people, Battery status, System setup report) — for example after lock data was
+  uploaded to Visionline or its resources were refreshed — at most once every 5 minutes. Cards used at doors and battery
+  reports still arrive as they happen. Settings → Reports & sync → *On a schedule* brings back regular reads.
+- **Staff keycard expiry is a date.** The request form, the QR request page and the issue form have an **Expiry
+  date**; the card works until the end of that day. Empty: the period set in Settings.
+- **Keycards in a generic name** ("Staff", "HK 2", "Spare", a number…): listed under Staff keycards and announced to
+  the administrators in Monitoring while any exist, because nobody can tell who used them.
+- **System setup report:** *Worth a look* (rooms no user group opens, groups that open every room, deadbolt overrides,
+  guest rooms opened by staff groups, generic keycards…), **User Groups vs. Rooms** (every room against every user
+  group: ✓ directly, ◐ through a door group, and how many people can open it; filters on screen, everything on paper),
+  and **System Parameters** taken from the Visionline System settings report.
+- **Outside access without a public IP** through Cloudflare Tunnel and your own domain: see EXTERNAL-ACCESS.md.
+  Invitations then come with an outside link too.
+- **Security:** other sessions end when a password changes or two-step sign-in is reset; each two-step code works
+  once; own passwords need 12 characters. See SECURITY-REVIEW-2.20.md.
+
 ### 5c. New in 2.19
 
 - **A battery alarm after new batteries is a firmware fault.** If a lock raises a battery alarm (even once) within 14
@@ -67,7 +94,7 @@ fingerprint (SHA-256) that can be checked later under *Verify a PDF*: any change
   opens **Program the lock and upload firmware** instead, and notes it in the audit trail (`battery.firmware_suspected`).
 - **3.6 V threshold.** On 3–4.8 V locks a reading of 3.6 V or lower is critical: a battery alarm and a "replace
   battery" request. Change it in Settings → Battery & maintenance.
-- **"No battery report available"** is shown for a lock that has not reported for the number of days set in Settings.
+- *(2.20 brought back the word "stale"; see 5d.)*
 - **Lock troubleshooting** now asks which lock it is: the door (suggested from the file) and the **lock model**
   (VingCard Signature RFID, Essence, Classic RFID, Allure, or other), remembered for the door. The report says which
   door and model it is about, and warns when the file is about another room.

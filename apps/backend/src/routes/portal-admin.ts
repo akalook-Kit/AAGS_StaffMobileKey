@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { SealedSecret } from '@smk/shared';
 import { pool, tx, one, many } from '../db.ts';
 import { audit } from '../audit.ts';
-import { checkPassword, checkThrottle, clearFailures, hashPassword, recordFailure, requireOperator, requirePerm, signToken, verifyTotp } from '../auth.ts';
+import { checkPassword, checkThrottle, clearFailures, hashPassword, operatorToken, recordFailure, requireOperator, requirePerm, signToken, verifyTotp } from '../auth.ts';
 import { enqueue, newCorrelationId } from '../commands.ts';
 import { getConfig } from '../hotel-config.ts';
 import { requestKey } from '../keys.ts';
@@ -99,13 +99,14 @@ export function portalAdminRoutes(app: FastifyInstance) {
   });
   app.post(`${P}/me/password`, async (req) => {
     const op = await requireOperator(req);
-    const b = z.object({ current: z.string(), next: z.string().min(10, 'Use at least 10 characters.') }).parse(req.body);
+    const b = z.object({ current: z.string(), next: z.string().min(12, 'Use at least 12 characters.').max(200) }).parse(req.body);
     const r = await one(pool, 'SELECT password_hash FROM operators WHERE id=$1', [op.id]);
     checkThrottle(`pw:${op.id}`);
     if (!(await checkPassword(b.current, r?.password_hash))) { recordFailure(`pw:${op.id}`); throw new ApiError(400, 'BAD_PASSWORD', 'Your current password is not correct.'); }
-    await pool.query('UPDATE operators SET password_hash=$2 WHERE id=$1', [op.id, hashPassword(b.next)]);
+    await pool.query('UPDATE operators SET password_hash=$2, token_version=token_version+1 WHERE id=$1', [op.id, hashPassword(b.next)]);
     await audit(null, { hotelId: null, actorType: 'operator', actorId: op.id, action: 'operator.password_changed' });
-    return { ok: true };
+    // 2.20 Other sessions of this account end; this one continues with a new token.
+    return { ok: true, token: await operatorToken(op.id, Boolean(op.mfa)) };
   });
   /** 2.13 Confirm the password (and the two-step code when it is on) before a sensitive action; valid a few minutes. */
   app.post(`${P}/me/reauth`, async (req) => {

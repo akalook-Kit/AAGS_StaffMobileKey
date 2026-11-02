@@ -51,7 +51,7 @@ async function onboard(staffToken: string, device: string) {
 
 async function main() {
   console.log(`E2E against ${API} and simulator ${SIM}\n`);
-  const admin = await login('admin@khb.test');
+  let admin = await login('admin@khb.test');
   const issuer = await login('issuer@khb.test');
   const security = await login('security@khb.test');
   const auditor = await login('auditor@khb.test');
@@ -975,6 +975,9 @@ async function main() {
     await call('PUT', `${H}/config/policy`, admin, pol13);
     const ra = (await call('POST', `${API}/api/v1/me/reauth`, plat, { password: PW })).json.token;
     ok((await call('POST', `${H}/operators/${me.json.id}/mfa/reset`, plat, {}, { 'x-smk-reauth': ra })).status === 200, 'another administrator resets it');
+    // 2.20 The reset ends the person's sessions (a lost phone may mean a lost session too): sign in again.
+    ok((await call('GET', `${API}/api/v1/me`, admin)).status === 401, "the reset ends that person's open sessions");
+    admin = await login('admin@khb.test');
     ok((await call('POST', `${API}/api/v1/me/reauth`, plat, { password: 'wrong' })).status === 400, 'a wrong password is not a confirmation');
   }
 
@@ -1445,6 +1448,52 @@ async function main() {
     ok(ol.recentlyResolved.some((x: any) => /Gateway offline: GW Floor 1/.test(x.title)), 'it is listed under "back online"');
     ok((await call('GET', `${H}/online-locks`, lakeAdmin)).status === 403, 'another site cannot see them');
     await call('PUT', `${H}/config/policy`, admin, p19);
+  }
+
+  console.log('\n2.20: battery sets, low flag cleared by cards, expiry date, Visionline on request, setup report, sessions');
+  {
+    const maint20 = await login('maint@khb.test');
+    const bat = (door: string, body: unknown) => call('POST', `${SIM}/sim/doors/${encodeURIComponent(door)}/battery`, undefined, body);
+    const bd = async (id: string) => (await call('GET', `${H}/battery`, maint20)).json.doors?.find((d: any) => d.doorId === id);
+    // How long each set lasted: changes 40 and 10 days ago -> one finished set of about 30 days, one in for 10.
+    await bat('209', { kind: 'exchanged', minutesAgo: 40 * 1440 });
+    await bat('209', { kind: 'exchanged', minutesAgo: 10 * 1440 });
+    const d209 = await until('209 sets', () => bd('209'), (d) => d?.lastSetDays != null);
+    ok(Math.round(d209?.lastSetDays) === 30 && Math.round(d209?.currentSetDays) === 10, `door 209: previous set lasted ${Math.round(d209?.lastSetDays)} days, current set in for ${Math.round(d209?.currentSetDays)} days`, d209);
+    const h209 = (await call('GET', `${H}/battery/doors/209/history`, maint20)).json;
+    ok(h209.sets?.length === 2 && h209.sets[0].current === true, 'the door history lists each set with its days');
+    // A battery alarm, then three staff keycards accepted without the low flag: the alarm closes by itself.
+    await bat('207', { kind: 'low', code: 529 });
+    const low207 = await until('207 low', () => bd('207'), (d) => d?.alert);
+    ok(low207?.state === 'LOW' && low207.alert, 'door 207: the lock raises a battery alarm');
+    for (let i = 0; i < 3; i++) { await call('POST', `${SIM}/sim/doors/207/event`, undefined, { code: 64, registrationNumber: 100 + i }); await sleep(400); }
+    const ok207 = await until('207 cleared by cards', () => bd('207'), (d) => d?.state === 'GOOD' && !d.alert, 30_000);
+    ok(ok207?.state === 'GOOD' && !ok207.alert, 'three staff keycards accepted without the low flag: the battery alarm closes by itself');
+    // Expiry as a date: in the past is refused.
+    const tok20 = (await call('POST', `${H}/keycards/qr-link`, admin, {})).json.path.split('/').pop();
+    const past = await call('POST', `${API}/api/v1/public/keycard-requests/${tok20}`, undefined, { kind: 'new', staffType: 'permanent', givenName: 'Date', surname: 'Test', department: 'Housekeeping', reason: 'expiry test', managerName: 'HK manager', validUntil: new Date(Date.now() - 86_400_000).toISOString() });
+    ok(past.status === 400, 'an expiry date in the past is refused');
+    const fut = await call('POST', `${API}/api/v1/public/keycard-requests/${tok20}`, undefined, { kind: 'new', staffType: 'permanent', givenName: 'Date', surname: 'Test', department: 'Housekeeping', reason: 'expiry test', managerName: 'HK manager', validUntil: new Date(Date.now() + 180 * 86_400_000).toISOString() });
+    ok(fut.status === 201, 'an expiry date chosen on the request page is accepted');
+    // Generic names: the keycard attention data lists them (none in the test Visionline).
+    ok(Array.isArray((await call('GET', `${H}/keycards/attention`, admin)).json.generic), 'keycards in a generic name are listed for administrators');
+    // Visionline read on request: a second refresh within 5 minutes is refused politely.
+    const lr = (await call('GET', `${H}/visionline/last-read`, admin)).json;
+    ok(lr.readMode === 'onRequest', 'Visionline is read on request by default');
+    await call('POST', `${H}/visionline/refresh`, admin);
+    const again = await call('POST', `${H}/visionline/refresh`, admin);
+    ok(again.status === 429 && again.json.error?.code === 'READ_RECENTLY', 'a second refresh within 5 minutes is refused (Visionline is spared)');
+    // Setup report: every room against every user group, and the points worth a look.
+    const sr20 = (await call('GET', `${H}/reports/setup`, admin)).json;
+    ok(sr20.roomMatrix?.rooms?.length === sr20.property.locks && sr20.roomMatrix.groups.length === sr20.property.userGroups, `setup report: ${sr20.roomMatrix?.rooms?.length} rooms x ${sr20.roomMatrix?.groups?.length} user groups`);
+    ok(Array.isArray(sr20.insights) && sr20.insights.length > 0, `setup report: ${sr20.insights?.length} points worth a look`);
+    // Sessions end when the password changes; the session that changed it continues with a new token.
+    const hr1 = await login('hr@khb.test'); const hr2 = await login('hr@khb.test');
+    const ch = await call('POST', `${API}/api/v1/me/password`, hr1, { current: PW, next: 'Another-Passw0rd-2026' });
+    ok(ch.status === 200 && ch.json.token, 'password changed; a new token is given');
+    ok((await call('GET', `${API}/api/v1/me`, hr2)).status === 401, 'the other session of that person has ended');
+    ok((await call('GET', `${API}/api/v1/me`, ch.json.token)).status === 200, 'the session that changed it continues');
+    await call('POST', `${API}/api/v1/me/password`, ch.json.token, { current: 'Another-Passw0rd-2026', next: PW });
   }
 
   console.log('\nGate: every request is traceable without exposing secrets');

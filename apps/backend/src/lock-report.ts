@@ -326,9 +326,18 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   const rates = periods.map((x) => x.dropPer30Days).filter((x): x is number => x != null && x > 0);
   const avgDrop = rates.length ? r2(rates.reduce((s, x) => s + x, 0) / rates.length) : null;
   const estimatedDays = avgDrop ? Math.round(((top - alarmLevel) / avgDrop) * 30) : null;
+  // 2.20 How many days each set of batteries lasted: from one change to the next (complete sets only); the set still in
+  // the lock at the end of the report is counted apart, as "in for N days so far".
+  const finished = periods.filter((x, i) => x.startedBy !== 'report' && i < periods.length - 1);
+  const lastPeriod = periods[periods.length - 1];
+  const lasted = {
+    sets: finished.map((x) => ({ from: x.from, to: x.to, days: x.days })),
+    avgDays: finished.length ? Math.round((finished.reduce((s2, x) => s2 + x.days, 0) / finished.length) * 10) / 10 : null,
+    currentDays: lastPeriod && lastPeriod.startedBy !== 'report' ? lastPeriod.days : null,
+  };
   const lastReading = readings[readings.length - 1] ?? null;
   const battery = { readings, ignoredReadings, alarms, alarmDays, exchanges, periods, avgDropPer30Days: avgDrop, estimatedDaysPerSet: estimatedDays,
-    scale: scaleHigh ? '6-9 V' : '3-4.8 V', alarmLevel, confirmLevel, firmwareDays, lastReading, firmwareAlarms };
+    scale: scaleHigh ? '6-9 V' : '3-4.8 V', alarmLevel, confirmLevel, firmwareDays, lastReading, firmwareAlarms, lasted };
 
   // ---- Faults ------------------------------------------------------------------------------------------------------
   const restartsAll = all.filter((e) => isIn(e.code, C.restart));
@@ -432,6 +441,9 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
     detail: `The deadbolt knob inside the room was turned ${usage.deadbolt} time(s) (released ${usage.deadboltReleased}).${deadboltRefused ? ` ${deadboltRefused} card(s) were refused while it was on: only cards with the right to override the deadbolt open the room then.` : ''}` });
   if (online.pings) f.push({ area: 'data', level: 'info', title: `The lock has an online connection (${online.pings} pings from the server)`,
     detail: `Last ping ${online.lastPing?.replace('T', ' ')}. Pings are sent when the server asks, so gaps between them alone do not mean the lock was offline.` });
+  if (lasted.sets.length) f.push({ area: 'battery', level: 'info', title: `Battery sets lasted ${lasted.sets.map((x) => Math.round(x.days)).join(', ')} day${lasted.sets.length === 1 && Math.round(lasted.sets[0]!.days) === 1 ? '' : 's'}`,
+    detail: `From one battery change to the next${lasted.sets.length > 1 ? ` (average ${Math.round(lasted.avgDays!)} days)` : ''}.${lasted.currentDays != null ? ` The set in the lock at the end of the report had been in for ${Math.round(lasted.currentDays)} days.` : ''}` });
+  else if (lasted.currentDays != null) f.push({ area: 'battery', level: 'info', title: `Batteries in for ${Math.round(lasted.currentDays)} days`, detail: 'Since the last battery change in the report; no complete set to compare with.' });
   if (avgDrop != null) f.push({ area: 'battery', level: 'info', title: `Battery use: ${avgDrop.toFixed(2)} V per 30 days`, detail: estimatedDays != null ? `At this rate a new set reaches the low-battery level (${alarmLevel.toFixed(1)} V) after about ${estimatedDays} days.` : 'Average of the battery periods in the report.' });
   f.push({ area: 'use', level: 'info', title: `${usage.perDay} openings a day`, detail: `Over the last ${Math.round(spanDays)} days${busiest.length ? `, busiest around ${busiest.map((b) => `${String(b.h).padStart(2, '0')}:00`).join(', ')}` : ''}. In the whole report: ${usage.openings} openings (${usage.staffCards} staff card, ${usage.guestCards} guest card, ${usage.openedFromInside} from inside).` });
   if (service.readouts) f.push({ area: 'data', level: 'info', title: `Read with the service device ${service.readouts} times`, detail: `Last read ${service.lastReadout?.replace('T', ' ') ?? '—'}. Time set ${service.timeSet} times, program uploaded ${service.programDownloads} times.` });

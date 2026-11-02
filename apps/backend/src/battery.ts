@@ -133,6 +133,7 @@ export async function applyBatteryEvent(c: pg.PoolClient, hotelId: string, ctx: 
     return { doorId, state, applied: false };
   }
   // A voltage reading without thresholds does not clear an alarm, unless it shows that the batteries were changed.
+  if (state === 'LOW' || state === 'CRITICAL') await c.query('UPDATE battery_status SET cards_since_low=0 WHERE hotel_id=$1 AND door_id=$2', [hotelId, doorId]);
   const newState: BatteryState = state === 'REPORTED' && change ? 'GOOD'
     : state === 'REPORTED' && cur && ['LOW', 'CRITICAL', 'GOOD'].includes(cur.state) ? cur.state : state;
   await c.query(`INSERT INTO battery_status (hotel_id, door_id, state, last_event_code, volts_below, reported_at, received_at) VALUES ($1,$2,$3,$4,$5,$6,now())
@@ -156,6 +157,8 @@ export async function applyBatteryEvent(c: pg.PoolClient, hotelId: string, ctx: 
 
 /** Remember the newest battery change of a door (and forget the "program the lock" request of an older change). */
 async function noteChange(c: pg.PoolClient, hotelId: string, doorId: string, at: Date, source: 'event' | 'inferred' | 'maintenance', detail: string) {
+  // 2.20 Every change is kept, so the portal can say how long each set lasted.
+  await c.query(`INSERT INTO battery_changes (hotel_id, door_id, at, source, detail) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, [hotelId, doorId, at, source, detail]);
   const r = await c.query(`UPDATE battery_status SET last_change_at=$3, last_change_source=$4, last_change_detail=$5, reprogram_ticket_id=NULL, reprogram_at=NULL
     WHERE hotel_id=$1 AND door_id=$2 AND (last_change_at IS NULL OR last_change_at < $3)`, [hotelId, doorId, at, source, detail]);
   if (r.rowCount) await audit(c, { hotelId, actorType: source === 'maintenance' ? 'system' : 'connector', action: 'battery.changed', targetType: 'door', targetId: doorId,
@@ -267,4 +270,59 @@ export async function resolveAlertManually(c: pg.PoolClient, hotelId: string, al
   await resolveAlertFromTicket(c, hotelId, { battery_alert_id: a.id, number: '-', status: 'RESOLVED' }, actor, batteryReplaced);
   await c.query(`UPDATE battery_alerts SET resolved_reason=$2 WHERE id=$1`, [a.id, reason]);
   return a;
+}
+
+
+// ---- 2.20 How long each set of batteries lasted ---------------------------------------------------------------------
+export interface BatterySet { from: string; to: string | null; days: number; daysToLow: number | null; current: boolean; source: string }
+
+/**
+ * The battery sets of one lock from its changes (oldest first): each runs from a change to the next one (or to now for
+ * the set in the lock). daysToLow = days from the change to the first low/critical report that counted (firmware
+ * faults are stored as plain reports, so they do not count).
+ */
+export function batterySets(changes: { at: Date; source: string }[], lows: Date[], now = new Date()): BatterySet[] {
+  const ch = [...changes].sort((a, b) => a.at.getTime() - b.at.getTime());
+  const DAY = 86_400_000;
+  return ch.map((x, i) => {
+    const end = ch[i + 1]?.at ?? null;
+    const stop = (end ?? now).getTime();
+    const low = lows.filter((t) => t.getTime() > x.at.getTime() && t.getTime() < stop).sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
+    return { from: x.at.toISOString(), to: end ? end.toISOString() : null, days: Math.round(((stop - x.at.getTime()) / DAY) * 10) / 10,
+      daysToLow: low ? Math.round(((low.getTime() - x.at.getTime()) / DAY) * 10) / 10 : null, current: !end, source: x.source };
+  });
+}
+
+export async function doorBatterySets(db: pg.Pool | pg.PoolClient, hotelId: string, doorId: string) {
+  const changes = (await many(db, 'SELECT at, source FROM battery_changes WHERE hotel_id=$1 AND door_id=$2 ORDER BY at', [hotelId, doorId])).map((r) => ({ at: new Date(r.at), source: r.source as string }));
+  const lows = (await many(db, `SELECT reported_at FROM battery_readings WHERE hotel_id=$1 AND door_id=$2 AND state IN ('LOW','CRITICAL') ORDER BY reported_at`, [hotelId, doorId])).map((r) => new Date(r.reported_at));
+  return batterySets(changes, lows);
+}
+
+// ---- 2.20 Cards accepted without the low flag -----------------------------------------------------------------------
+/**
+ * Armel, 31 Oct: when the lock accepts two or three staff keycards without logging the low-battery flag again, the
+ * battery is not low. Each accepted card adds one; a low/critical battery event sets the count back to 0. When the
+ * count reaches policy.battery.clearAfterCards (3) and the last voltage reading is not at or below the site's
+ * threshold, the alarm and its request close by themselves.
+ */
+export async function onCardAccepted(c: pg.PoolClient, hotelId: string, ctx: BatteryContext, ev: { doorID?: unknown; eventCode: number; eventTime?: string }) {
+  const need = ctx.policy.battery.clearAfterCards ?? 3;
+  if (!need) return;
+  const door = ctx.resolveDoor(ev.doorID);
+  const doorId = door?.id ?? String(ev.doorID ?? '?');
+  const st = await one(c, `UPDATE battery_status SET cards_since_low = cards_since_low + 1 WHERE hotel_id=$1 AND door_id=$2 AND state IN ('LOW','CRITICAL')
+    RETURNING state, cards_since_low, volts_below`, [hotelId, doorId]);
+  if (!st || st.cards_since_low < need) return;
+  const v = st.volts_below != null ? Number(st.volts_below) : null;
+  if (v != null) {
+    const r = v >= 6 ? ctx.policy.battery.voltage.highRange : ctx.policy.battery.voltage.lowRange;
+    const limit = r.low ?? r.critical;
+    if (limit != null && v <= limit + 1e-6) return; // the voltage itself says the battery is low
+  }
+  let at = new Date();
+  try { if (ev.eventTime) at = fromVisionlineLocal(ev.eventTime, ctx.tz); } catch { /* keep receipt time */ }
+  await c.query(`UPDATE battery_status SET state='GOOD', cards_since_low=0 WHERE hotel_id=$1 AND door_id=$2`, [hotelId, doorId]);
+  await c.query(`INSERT INTO battery_readings (hotel_id, door_id, event_code, state, volts_below, reported_at) VALUES ($1,$2,$3,'GOOD',NULL,$4)`, [hotelId, doorId, ev.eventCode, at]);
+  await clearAlert(c, hotelId, doorId, door?.name ?? doorId, `No low-battery flag with the last ${st.cards_since_low} cards accepted by the lock`, SYSTEM);
 }

@@ -30,7 +30,7 @@ the portal opens "Program the lock and upload firmware" (once; repeated alarms a
 sites that had no threshold).
 
 Every door the platform knows is shown, including doors that have **never reported**. A reading becomes
-**No battery report available** after the number of days set by the hotel (30 by default).
+**stale** after the number of days set by the hotel (30 by default).
 
 > **Offline locks** (all 449 doors at the JW Marriott test system are offline) only report when their
 > events reach Visionline, for example when the lock is read with a programming unit. Expect *never
@@ -97,7 +97,7 @@ These settings are part of the versioned hotel policy, so each save can be rolle
 
 | Setting | Default |
 |---|---|
-| Days without a report before "No battery report available" | 30 |
+| Days without a report before "stale" | 30 |
 | Automatic maintenance request for | Critical alarms |
 | Voltage thresholds (6–9 V packs, 3–4.8 V cells) | empty: readings only |
 | Due time per priority (hours) | urgent 4, high 24, normal 72, low 168 |
@@ -109,3 +109,15 @@ These settings are part of the versioned hotel policy, so each save can be rolle
 The lock simulator page has a **Lock batteries** panel. Click *Low*, *Critical* or *Exchanged* next to a
 door, and the lock sends that event to the simulated Visionline. `.\scripts\windows\test.ps1 -Fast` includes
 46 Phase 2 checks.
+
+
+## 2.20
+
+- **Days per battery set:** every change (lock event, voltage jump to the top of the scale, maintenance request) is kept;
+  a set runs from one change to the next. Battery status shows the days the current set has been in, the days the
+  previous set lasted and the average; the door page lists each set with the days to its first low report.
+- **Cards accepted without the low flag:** each card the lock accepts (events 64 / 67) counts; a low or critical battery
+  event sets the count back to 0. At 3 (setting `clearAfterCards`, 0 = off) the alert and its request are resolved
+  ("No low-battery flag with the last 3 cards accepted by the lock"), unless the last voltage reading is at or below the
+  site's threshold.
+- The word for a lock not heard from for `staleAfterDays` is **stale** again.

@@ -76,8 +76,9 @@ async function adoptAutoSyncDefaults(hotelId: string) {
   if (process.env.SMK_SETUP_MODE !== '1') return; // on-premises installations only (the hotel's own Visionline)
   const latest = await one(pool, `SELECT data, created_by FROM hotel_config_versions WHERE hotel_id=$1 AND kind='visionline' ORDER BY version DESC LIMIT 1`, [hotelId]);
   if (!latest || latest.created_by !== null || latest.data?.directorySync?.enabled) return;
+  // 2.20 People and keycards are read on request (readMode), not every few hours.
   const data = await validateConfig(pool, hotelId, 'visionline', { ...latest.data, discoveryEveryHours: latest.data.discoveryEveryHours ?? 6,
-    directorySync: { ...(latest.data.directorySync ?? {}), enabled: true, scope: 'all', everyHours: 6, maxUsers: Math.max(latest.data.directorySync?.maxUsers ?? 0, 5000) } });
+    directorySync: { ...(latest.data.directorySync ?? {}), enabled: true, scope: 'all', everyHours: 24, maxUsers: Math.max(latest.data.directorySync?.maxUsers ?? 0, 5000) } });
   await saveConfig(pool, hotelId, 'visionline', data, null);
   await audit(null, { hotelId, actorType: 'system', action: 'visionline.auto_sync_enabled', details: { everyHours: 6, scope: 'all' } });
 }
@@ -91,6 +92,8 @@ export async function scheduleDiscovery() {
     const every = Number(vl?.discoveryEveryHours ?? 6);
     if (!every || !(await readyConnector(pool, h.id))) continue;
     const last = await one(pool, `SELECT max(completed_at) AS t FROM commands WHERE hotel_id=$1 AND type='DISCOVER_RESOURCES' AND status='SUCCEEDED'`, [h.id]);
+    // 2.20 On request: only the very first read happens by itself; after that, Refresh from Visionline.
+    if ((vl?.readMode ?? 'onRequest') === 'onRequest' && last?.t) continue;
     const lastTry = await one(pool, `SELECT max(created_at) AS t FROM commands WHERE hotel_id=$1 AND type='DISCOVER_RESOURCES'`, [h.id]);
     const due = !last?.t || Date.now() - new Date(last.t).getTime() > every * 3600_000;
     // After an attempt that did not succeed, wait 15 minutes before the next one.

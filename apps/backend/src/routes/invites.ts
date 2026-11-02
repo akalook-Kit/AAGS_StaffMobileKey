@@ -4,11 +4,22 @@ import { z } from 'zod';
 import { ROLES, type Role } from '@smk/shared';
 import { pool, many, one, tx } from '../db.ts';
 import { audit } from '../audit.ts';
-import { hashPassword, requirePerm, requireReauth, signToken } from '../auth.ts';
+import { hashPassword, operatorToken, requirePerm, requireReauth, signToken } from '../auth.ts';
 import { ApiError, forbidden, notFound } from '../lib/errors.ts';
 import { getConfig } from '../hotel-config.ts';
 import { channels } from '../monitoring/monitor.ts';
 import { sendEmail } from '../monitoring/channels.ts';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+
+/** 2.20 The outside address written by set-tunnel-access.ps1 (Cloudflare Tunnel), e.g. https://portal.example.com/k-…. */
+export function outsideUrl(): string | null {
+  const dir = process.env.SMK_BACKUP_DIR ? dirname(process.env.SMK_BACKUP_DIR) : null;
+  const f = process.env.SMK_OUTSIDE_URL_FILE ?? (dir ? join(dir, 'outside-url.txt') : null);
+  if (!f || !existsSync(f)) return null;
+  try { const u = readFileSync(f, 'utf8').trim(); return /^https:\/\/[a-z0-9.-]+(\/[A-Za-z0-9_-]+)?$/i.test(u) ? u : null; } catch { return null; }
+}
+const outsideLink = (token: string | null) => { const o = outsideUrl(); return o && token ? `${o}/invite#${token}` : null; };
 
 /**
  * 2.16 Inviting people to the portal without handing out passwords.
@@ -95,7 +106,7 @@ export function inviteRoutes(app: FastifyInstance) {
     });
     const link = r.token && b.portalUrl ? `${b.portalUrl.replace(/\/$/, '')}/invite#${r.token}` : null;
     const mail = r.token && b.sendEmail && link ? await emailLink(hotelId, b.email, b.displayName, link) : { emailed: false };
-    return { id: r.id, token: r.token, existing: !r.token, expiresHours: HOURS, ...mail };
+    return { id: r.id, token: r.token, existing: !r.token, expiresHours: HOURS, outsideLink: outsideLink(r.token), ...mail };
   });
 
   /** A new link: for someone who has not set a password yet, or (forgotten password) to choose a new one. The
@@ -119,7 +130,7 @@ export function inviteRoutes(app: FastifyInstance) {
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: t.status === 'ACTIVE' ? 'operator.password_reset_link' : 'operator.invite_renewed', targetType: 'operator', targetId: target });
     const link = b.portalUrl ? `${b.portalUrl.replace(/\/$/, '')}/invite#${token}` : null;
     const mail = b.sendEmail && link ? await emailLink(hotelId, t.email, t.display_name, link) : { emailed: false };
-    return { token, expiresHours: HOURS, ...mail };
+    return { token, expiresHours: HOURS, outsideLink: outsideLink(token), ...mail };
   });
 
   /** Take away someone's access to this site (their roles here and any open link). */
@@ -204,7 +215,7 @@ export function inviteRoutes(app: FastifyInstance) {
     const ok = await tx(async (c) => {
       const u = await c.query(`UPDATE operator_invites SET used_at=now() WHERE id=$1 AND used_at IS NULL AND revoked_at IS NULL`, [i.id]);
       if (!u.rowCount) return false;
-      await c.query(`UPDATE operators SET password_hash=$2, status='ACTIVE' WHERE id=$1 AND status <> 'DISABLED'`, [i.operator_id, hashPassword(b.password)]);
+      await c.query(`UPDATE operators SET password_hash=$2, status='ACTIVE', token_version=token_version+1 WHERE id=$1 AND status <> 'DISABLED'`, [i.operator_id, hashPassword(b.password)]);
       await audit(c, { hotelId: i.hotel_id, actorType: 'operator', actorId: i.operator_id, action: 'operator.invite_accepted', targetType: 'operator', targetId: i.operator_id });
       return true;
     });
@@ -213,6 +224,6 @@ export function inviteRoutes(app: FastifyInstance) {
     const mfa = (await one(pool, 'SELECT mfa_enabled FROM operators WHERE id=$1', [i.operator_id]))?.mfa_enabled;
     if (mfa) return { signIn: true, email: i.email };
     await pool.query('UPDATE operators SET last_sign_in_at=now() WHERE id=$1', [i.operator_id]);
-    return { token: await signToken({ typ: 'op', sub: i.operator_id, mfa: false }), email: i.email };
+    return { token: await operatorToken(i.operator_id, false), email: i.email };
   });
 }

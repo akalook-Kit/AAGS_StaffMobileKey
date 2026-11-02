@@ -1,4 +1,4 @@
-# Security and compliance pack (for hotel groups and institutions, e.g. Marriott vendor review) — Access Monitoring Tool 2.19
+# Security and compliance pack (for hotel groups and institutions, e.g. Marriott vendor review) — Access Monitoring Tool 2.20
 
 **What this is.** The answers a hotel group's IT security team asks of a vendor, prepared in advance. **Approval itself
 can only come from the group** (for Marriott: its third-party / vendor risk assessment, normally a questionnaire,
@@ -111,6 +111,16 @@ e-mails it. The software never "phones home".
   stored.
 - **Lock troubleshooting checks**: the technician's results (OK / problem found, short note, name, time) are stored with
   the report; marking needs `maintenance.work` and is audited (`lock.check_marked`).
+
+## 3g. New in 2.20
+
+- **Security review** of the code (SECURITY-REVIEW-2.20.md): sessions issued before a password change, password link or
+  two-step reset are refused; two-step codes work once; formula-safe exports; fastify 5.12.6.
+- **Outside access through Cloudflare Tunnel** (optional, EXTERNAL-ACCESS.md): no inbound port at the hotel; the tunnel
+  entrance listens on 127.0.0.1 only and takes the visitor's address from Cloudflare's header (refused otherwise); the
+  secret path stays on unless Cloudflare Access is in front; the tunnel token is kept by Cloudflare's program, not by the
+  portal. Cloudflare terminates TLS, so it can see the traffic: mention it in a group review.
+- **Visionline read on request** by default (fewer requests to the hotel's Visionline).
 
 ## 4. Hosting the database (on-premises)
 

@@ -122,11 +122,17 @@ export function RequestFields({ v, set, prefixes }: { v: any; set: (p: any) => v
         <div className="field"><label htmlFor="kr-m">Manager asking</label><input id="kr-m" required maxLength={80} value={v.managerName ?? ''} onChange={f('managerName')} placeholder="Housekeeping manager's name" /></div>
         <div className="field"><label htmlFor="kr-h">HR e-mail (optional)</label><input id="kr-h" type="email" value={v.hrEmail ?? ''} onChange={f('hrEmail')} /></div>
       </div>
+      {v.kind !== 'cancel' && <div className="field" style={{ maxWidth: 260 }}><label htmlFor="kr-x">Expiry date</label><input id="kr-x" type="date" min={todayDate()} value={v.validUntilDate ?? ''} onChange={f('validUntilDate')} />
+        <span className="hint">The card stops working at the end of this day. Empty: {v.staffType === 'daily' ? 'the end of the shift (Settings)' : 'the period set in Settings (one year by default)'}.</span></div>}
       <div className="field"><label htmlFor="kr-r">Reason</label><input id="kr-r" required maxLength={300} value={v.reason ?? ''} onChange={f('reason')} placeholder={v.kind === 'cancel' ? 'Resigned, last day 31 Oct' : 'New starter, Housekeeping floor 2'} /></div>
     </>
   );
 }
-const clean = (v: any) => ({ ...v, jobTitle: v.jobTitle || null, employeeNo: v.employeeNo || null, cardLabel: v.cardLabel || null, hrEmail: v.hrEmail || null, quantity: Number(v.quantity ?? 1) });
+/** 2.20 Expiry is chosen as a date (Armel, 31 Oct): the card works until the end of that day, hotel computer's time. */
+export const todayDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+export const endOfDay = (d: string) => new Date(`${d}T23:59:00`).toISOString();
+const isoToDate = (iso: string | null | undefined) => { if (!iso) return ''; const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const clean = ({ validUntilDate, ...v }: any) => ({ ...v, validUntil: validUntilDate ? endOfDay(validUntilDate) : null, jobTitle: v.jobTitle || null, employeeNo: v.employeeNo || null, cardLabel: v.cardLabel || null, hrEmail: v.hrEmail || null, quantity: Number(v.quantity ?? 1) });
 
 function RequestForm({ onClose }: { onClose: (ok: boolean) => void }) {
   const { base } = useHotel();
@@ -152,7 +158,7 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
   const [label, setLabel] = useState(r.cardLabel ?? '');
   const [group, setGroup] = useState('');
   const [regNo, setRegNo] = useState(r.cardRegNo ?? '');
-  const [until, setUntil] = useState('');
+  const [until, setUntil] = useState(isoToDate(r.validUntil));
   const [ret, setRet] = useState('returned');
   const [cmethod, setCmethod] = useState<'expire_now' | 'cancel_card' | 'visionline_desk'>('cancel_card');
   const [busy, setBusy] = useState<string | null>(null);
@@ -169,7 +175,7 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
   const issue = async () => {
     setError(null); setOk(null);
     try {
-      const x = await api(`${base}/keycards/requests/${r.id}/issue`, { body: { method, encoder: encoder || undefined, cardLabel: label || null, userGroup: group || 'n/a', regNo: regNo || null, vlUserId: vlUser?.id ?? null, validUntil: until ? new Date(until).toISOString() : null, replaceExisting: r.kind === 'replacement' } });
+      const x = await api(`${base}/keycards/requests/${r.id}/issue`, { body: { method, encoder: encoder || undefined, cardLabel: label || null, userGroup: group || 'n/a', regNo: regNo || null, vlUserId: vlUser?.id ?? null, validUntil: until ? endOfDay(until) : null, replaceExisting: r.kind === 'replacement' } });
       if (x.commandId) await wait(x.commandId, 'Card encoded in Visionline. Give it to the person.'); else setOk('Recorded as issued.');
     } catch (e) { setBusy(null); setError(e); }
   };
@@ -215,7 +221,7 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
           <div className="field-row">
             {method === 'existing' ? null : method === 'encoder' ? <div className="field"><label htmlFor="i-e">Encoder</label><select id="i-e" value={encoder} onChange={(e) => setEncoder(e.target.value)}>{(enc.data?.chosen ?? []).map((n: string) => <option key={n}>{n}</option>)}</select><span className="hint">Place a blank card on it first.</span></div>
               : <div className="field"><label htmlFor="i-r">Visionline card number (optional)</label><input id="i-r" value={regNo} onChange={(e) => setRegNo(e.target.value.replace(/\D/g, ''))} /></div>}
-            <div className="field"><label htmlFor="i-u">Valid until</label><input id="i-u" type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} /><span className="hint">Empty: {r.staffType === 'daily' ? 'end of the shift (Settings)' : 'one year (Settings)'}.</span></div>
+            <div className="field"><label htmlFor="i-u">Expiry date</label><input id="i-u" type="date" min={todayDate()} value={until} onChange={(e) => setUntil(e.target.value)} /><span className="hint">Empty: {r.staffType === 'daily' ? 'end of the shift (Settings)' : 'one year (Settings)'}.</span></div>
           </div>
           <button className="btn primary" disabled={(method === 'existing' ? !regNo : !group) || Boolean(busy)} onClick={issue}>{method === 'encoder' ? 'Encode the card' : method === 'existing' ? 'Link this keycard' : 'Record as issued'}</button>
           {r.status === 'SUBMITTED' && <button className="btn" style={{ marginLeft: 8 }} onClick={act(() => api(`${base}/keycards/requests/${r.id}/reject`, { body: { reason: prompt('Why is it rejected?') ?? '' } }), 'Rejected.')}>Reject</button>}
@@ -290,6 +296,15 @@ function Attention() {
           <p className="small muted">To keep one: make a Replacement request; the new card is encoded with "override", which cancels every older card of that person in Visionline.</p>
         </section>
       </div>
+      <section className={`panel${a.data?.generic?.length ? ' panel-warn' : ''}`}>
+        <h2>Keycards in a generic name</h2>
+        {a.data?.generic?.length ? <>
+          <div className="alert warn"><strong>{a.data.generic.length} valid staff keycard{a.data.generic.length === 1 ? '' : 's'}</strong> {a.data.generic.length === 1 ? 'is' : 'are'} held under a name that is not a person ("Staff", "HK 2", "Spare", a number…). Nobody can tell who used {a.data.generic.length === 1 ? 'it' : 'them'} at a door. Issue each card in the name of the person who holds it, or cancel it.</div>
+          <table className="grid"><thead><tr><th>Name in Visionline</th><th>Group</th><th>Card</th><th>Ends</th></tr></thead>
+            <tbody>{a.data.generic.map((x: any) => <tr key={x.regNo}><td><strong>{x.name || '(no name)'}</strong></td><td className="small">{x.group ?? '—'}</td><td className="small">{x.regNo}</td><td className="small nowrap">{x.expiresAt ? fmt.dt(x.expiresAt) : 'no end date'}</td></tr>)}</tbody></table>
+        </> : <p className="empty">Every valid staff keycard is in a person's name.</p>}
+        <p className="small muted">Administrators are told through Monitoring while such cards exist.</p>
+      </section>
     </>
   );
 }

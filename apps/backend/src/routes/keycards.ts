@@ -17,6 +17,7 @@ import { ApiError, badRequest, conflict, forbidden, notFound } from '../lib/erro
 import { getConfig, saveConfig } from '../hotel-config.ts';
 import { importedForSetupReport } from './vl-imports.ts';
 import { sharedVisionlineOperator, ROLE_LABELS } from '@smk/shared';
+import { genericCards } from '../generic-cards.ts';
 import { enqueue, newCorrelationId } from '../commands.ts';
 import { channels } from '../monitoring/monitor.ts';
 import { sendEmail } from '../monitoring/channels.ts';
@@ -65,7 +66,9 @@ const Request = z.object({
   employeeNo: z.string().trim().max(40).optional().nullable(),
   cardLabel: Label.optional().nullable(),
   quantity: z.number().int().min(1).max(50).default(1),
-  validUntil: z.string().datetime().optional().nullable(),
+  // 2.20 An expiry date chosen on the form: in the future and at most ten years ahead.
+  validUntil: z.string().datetime().optional().nullable()
+    .refine((v) => !v || (Date.parse(v) > Date.now() && Date.parse(v) < Date.now() + 3653 * 86_400_000), 'The expiry date must be in the future (at most ten years ahead).'),
   reason: z.string().trim().min(2).max(300),
   managerName: z.string().trim().min(2).max(80),
   hrEmail: z.string().email().optional().nullable(),
@@ -278,7 +281,7 @@ export function keycardRoutes(app: FastifyInstance) {
       /** 2.17 The person already exists in Visionline (their user id), so no duplicate is created. */
       vlUserId: z.string().trim().min(1).max(80).optional().nullable(),
       cardLabel: Label.optional().nullable(), userGroup: z.string().min(1).max(60), doorIds: z.array(z.string().max(100)).max(2000).default([]),
-      validUntil: z.string().datetime().optional().nullable(), regNo: z.string().regex(/^\d{1,12}$/).optional().nullable(), replaceExisting: z.boolean().default(false),
+      validUntil: z.string().datetime().optional().nullable().refine((v) => !v || (Date.parse(v) > Date.now() && Date.parse(v) < Date.now() + 3653 * 86_400_000), 'The expiry date must be in the future (at most ten years ahead).'), regNo: z.string().regex(/^\d{1,12}$/).optional().nullable(), replaceExisting: z.boolean().default(false),
     }).parse(req.body);
     if (!['SUBMITTED', 'ISSUED'].includes(r.status) || r.kind === 'cancel') throw conflict('NOT_ISSUABLE', 'This request is not waiting for a keycard.');
     const label = b.cardLabel ? normLabel(b.cardLabel) : r.card_label;
@@ -407,7 +410,7 @@ export function keycardRoutes(app: FastifyInstance) {
     const hotelId = hid(req);
     const op = await requirePerm(req, hotelId, 'keycards.read');
     const rows = await many(pool, `SELECT label, department, staff_type, holder_name, card_reg_no, status, updated_at FROM keycard_register WHERE hotel_id=$1 ORDER BY label`, [hotelId]);
-    const cell = (v: unknown) => { let s = v == null ? '' : String(v); if (/^[=+\-@]/.test(s)) s = `'${s}`; return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const cell = (v: unknown) => { let s = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'keycard.register_exported', details: { rows: rows.length } });
     reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="keycard-register.csv"');
     return '﻿' + ['Card,Department,Type,Holder,Visionline card,Status,Updated', ...rows.map((r) => [r.label, r.department, r.staff_type, r.holder_name, r.card_reg_no, r.status, r.updated_at?.toISOString?.()].map(cell).join(','))].join('\r\n');
@@ -428,8 +431,10 @@ export function keycardRoutes(app: FastifyInstance) {
           GROUP BY c.card_holder HAVING count(*) > 1 ORDER BY count(*) DESC LIMIT 200`, [hotelId]),
       one(pool, `SELECT count(*) FILTER (WHERE status='SUBMITTED')::int AS submitted FROM keycard_requests WHERE hotel_id=$1`, [hotelId]),
     ]);
+    const generic = await genericCards(hotelId);
     return { expiring: expiring.map((x) => ({ regNo: x.reg_no, holder: x.card_holder, name: x.name ?? x.card_holder, group: x.user_group, expiresAt: x.expires_at, label: x.label })),
-      several: several.map((x) => ({ holder: x.card_holder, name: x.name ?? x.card_holder, group: x.user_group, cards: x.cards, regNos: x.reg_nos })), submitted: open?.submitted ?? 0 };
+      several: several.map((x) => ({ holder: x.card_holder, name: x.name ?? x.card_holder, group: x.user_group, cards: x.cards, regNos: x.reg_nos })), submitted: open?.submitted ?? 0,
+      generic };
   });
   /** Encoders known to Visionline (read with the doors) and the ones the hotel chose. */
   app.get(`${base}/encoders`, async (req) => {
@@ -536,6 +541,43 @@ export function keycardRoutes(app: FastifyInstance) {
       GROUP BY k.card_holder, u.given_name, u.surname, u.user_group, k.user_group ORDER BY 3 NULLS LAST, 2 NULLS LAST LIMIT 2000`, [hotelId]);
     const imported = await importedForSetupReport(hotelId);
     const vlOperator = conn?.health?.propertyUsername ?? null;
+    // ---- 2.20 User groups vs. rooms: every room, which user groups open it (directly or through a door group) and how
+    // many people hold a valid keycard for it; then the points worth a look.
+    const ugs = res.filter((r) => r.kind === 'usergroup');
+    const opens = new Map<string, { doors: Set<string>; doorGroups: Set<string> }>();
+    for (const g of ugs) {
+      const ops2 = (g.data?.doorOperations ?? []) as any[];
+      opens.set(g.name, { doors: new Set(ops2.flatMap((o) => o.doors ?? [])), doorGroups: new Set(ops2.flatMap((o) => o.doorGroups ?? [])) });
+    }
+    const validCards = await many(pool, `SELECT k.card_holder, COALESCE(u.user_group, k.user_group) AS g, k.doors, k.door_groups FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder
+      WHERE k.hotel_id=$1 AND ${VALIDK} AND k.key_id IS NULL AND NOT COALESCE(k.mobile, false) LIMIT 20000`, [hotelId]);
+    const holdersOf = (doorName: string, doorId: string, dg: string | null) => new Set(validCards.filter((k) => (k.doors ?? []).includes(doorName) || (k.doors ?? []).includes(doorId) || (dg != null && (k.door_groups ?? []).includes(dg))).map((k) => k.card_holder ?? '?')).size;
+    const groupNames = ugs.map((g) => g.name).sort((a, b) => a.localeCompare(b));
+    const rooms = doors.map((d) => {
+      const dg = d.data?.doorGroup ?? null;
+      const access = groupNames.map((gn) => { const o = opens.get(gn)!; return o.doors.has(d.name) || o.doors.has(d.external_id) ? 'D' : dg != null && o.doorGroups.has(dg) ? 'G' : ''; });
+      return { name: d.name, group: dg, category: d.data?.doorCategory ?? null, online: d.data?.online ?? null, access, groups: access.filter(Boolean).length, people: holdersOf(d.name, d.external_id, dg) };
+    }).sort((a, b) => (a.group ?? '~').localeCompare(b.group ?? '~') || a.name.localeCompare(b.name, undefined, { numeric: true }));
+    const insights: { level: 'warn' | 'info'; text: string }[] = [];
+    const noGroup = rooms.filter((r) => !r.groups);
+    if (noGroup.length) insights.push({ level: 'info', text: `${noGroup.length} of ${rooms.length} rooms are opened by no user group (only guest, master or special cards): ${noGroup.slice(0, 12).map((r) => r.name).join(', ')}${noGroup.length > 12 ? '…' : ''}.` });
+    const all = groupNames.filter((gn, i) => rooms.length > 0 && rooms.every((r) => r.access[i]));
+    if (all.length) insights.push({ level: 'warn', text: `Opening every room (master level): ${all.map((gn) => `${gn} (${perGroup.find((x) => x.g === gn)?.people ?? 0} people)`).join(', ')}. Check that only the right people hold these cards.` });
+    const ov = ugs.filter((g) => g.data?.ignoreDeadbolt);
+    if (ov.length) insights.push({ level: 'warn', text: `Override the deadbolt (open a room locked from inside): ${ov.map((g) => `${g.name} (${perGroup.find((x) => x.g === g.name)?.people ?? 0} people)`).join(', ')}.` });
+    const guestRooms = rooms.filter((r) => /guest/i.test(r.category ?? ''));
+    if (guestRooms.length) {
+      const into = groupNames.map((gn, i) => ({ gn, n: guestRooms.filter((r) => r.access[i]).length })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n);
+      if (into.length) insights.push({ level: 'info', text: `Guest rooms opened by staff user groups: ${into.slice(0, 8).map((x) => `${x.gn} ${x.n}/${guestRooms.length}`).join(', ')}.` });
+    }
+    const busiest = [...rooms].sort((a, b) => b.people - a.people).filter((r) => r.people > 0).slice(0, 5);
+    if (busiest.length) insights.push({ level: 'info', text: `Rooms most people can open: ${busiest.map((r) => `${r.name} (${r.people})`).join(', ')}.` });
+    const unused = groupNames.filter((gn) => !(perGroup.find((x) => x.g === gn)?.cards));
+    if (unused.length && validCards.length) insights.push({ level: 'info', text: `User groups with no valid keycard: ${unused.slice(0, 10).join(', ')}${unused.length > 10 ? '…' : ''}.` });
+    const gen = await genericCards(hotelId);
+    if (gen.length) insights.push({ level: 'warn', text: `${gen.length} valid staff keycard(s) in a generic name (not a person): ${[...new Set(gen.map((x) => x.name || '(no name)'))].slice(0, 6).join(', ')}. Nobody can tell who used them.` });
+    if (sharedVisionlineOperator(vlOperator)) insights.push({ level: 'warn', text: `The portal works in Visionline as "${vlOperator}", a shared operator: give it a named operator.` });
+    if (!imported.systemSettings) insights.push({ level: 'info', text: 'Import the Visionline System settings report (above) to show the system parameters.' });
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'report.setup_viewed' });
     return {
       printedAt: new Date().toISOString(), printedBy: op.displayName,
@@ -565,6 +607,7 @@ export function keycardRoutes(app: FastifyInstance) {
       accessByPerson: people.map((p) => ({ id: p.card_holder, name: p.name, group: p.g, cards: p.cards, until: p.until, override: Boolean(p.override), mobile: Boolean(p.mobile),
         doors: (p.doors ?? []).slice(0, 400), doorGroups: p.door_groups ?? [], portalUser: p.portal_user ?? null })),
       visionline: { operatorUsed: vlOperator, operatorShared: sharedVisionlineOperator(vlOperator), ...imported },
+      roomMatrix: { groups: groupNames, rooms }, insights,
       parameters: [
         ['Key policy', `Longest key ${pol?.maxValidityHours ?? '-'} h; broad access from ${pol?.broadDoorThreshold ?? '-'} doors needs approval: ${pol?.requireApprovalForBroad === false ? 'no' : 'yes'}; wrong-door limit ${pol?.wrongDoorLimit ?? '-'}`],
         ['Keycard requests', `Encoding from the portal: ${pol?.keycards?.encodeEnabled ? 'on' : 'off'}; encoders: ${(pol?.keycards?.encoders ?? []).join(', ') || '-'}; HR e-mail: ${pol?.keycards?.hrEmail ? 'set' : 'not set'}`],

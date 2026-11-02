@@ -39,6 +39,12 @@ export interface ListenerConfig {
   /** 2.16 Addresses (or ranges) of a connector on another computer, allowed to use the connector API on this
    *  listener. Never on a listener that needs the secret path (the outside entrance). Default: none. */
   connectorFrom?: string[];
+  /** 2.20 Cloudflare Tunnel entrance: the address of the real visitor is in this header (cf-connecting-ip), set by
+   *  cloudflared. Only allowed on a listener bound to 127.0.0.1 / ::1 that admits loopback only, so the header cannot be
+   *  forged from the network. Used for the log, the ban list and x-forwarded-for. */
+  clientIpHeader?: string;
+  /** 2.20 The visitor reaches this listener over https elsewhere (Cloudflare's edge): Secure cookies and HSTS. */
+  publicHttps?: boolean;
 }
 export interface GatewayConfig {
   upstream: string;            // http://127.0.0.1:4000
@@ -130,6 +136,12 @@ export function checkGatewayConfig(cfg: GatewayConfig) {
     ports.add(l.port);
     if (!Array.isArray(l.allow) || !l.allow.length) throw new Error(`${l.name}: the allow-list is empty.`);
     compileAllow(l.allow);
+    if (l.clientIpHeader) {
+      const loop = ['127.0.0.1', '::1', 'localhost'];
+      if (!/^[a-z0-9-]{2,40}$/i.test(l.clientIpHeader)) throw new Error(`${l.name}: clientIpHeader is not a header name.`);
+      if (!loop.includes(l.host) || l.allow.some((a) => !/^(127\.0\.0\.1(\/32)?|::1(\/128)?)$/.test(a))) throw new Error(`${l.name}: clientIpHeader is only for a listener on 127.0.0.1 that admits 127.0.0.1 / ::1 only (the tunnel agent on this machine).`);
+      if (l.connectorFrom?.length) throw new Error(`${l.name}: the tunnel entrance cannot serve a connector.`);
+    }
     if (l.connectorFrom?.length) {
       if (l.requireSecretPath) throw new Error(`${l.name}: a connector cannot use the outside entrance (connectorFrom on a listener with the secret path).`);
       if (l.connectorFrom.includes('private') || l.connectorFrom.some((r) => /\/(0|[1-9])$/.test(r))) throw new Error(`${l.name}: connectorFrom must list the connector computer's own address (or a small range), not "private".`);
@@ -163,15 +175,20 @@ export function startGateway(cfg: GatewayConfig, env: NodeJS.ProcessEnv = proces
   for (const l of cfg.listeners) {
     const allowed = compileAllow(l.allow);
     const connectorOk = l.connectorFrom?.length && !l.requireSecretPath ? compileAllow(l.connectorFrom) : () => false;
-    const secure = Boolean(l.tls);
+    const secure = Boolean(l.tls) || Boolean(l.publicHttps);
     const handler = (req: http.IncomingMessage, res: http.ServerResponse) => {
       const t0 = Date.now();
-      const ip = req.socket.remoteAddress ?? '?';
+      const sockIp = req.socket.remoteAddress ?? '?';
+      // 2.20 Behind the tunnel every request comes from cloudflared on this machine: take the visitor's address from
+      // its header (checked to be an address), so one visitor's misses never ban everybody.
+      const hdr = l.clientIpHeader ? String(req.headers[l.clientIpHeader.toLowerCase()] ?? '').split(',')[0]!.trim() : '';
+      const ip = hdr && net.isIP(hdr) ? hdr : sockIp;
       const url = req.url ?? '/';
       const path = url.split('?')[0]!;
       const done = (status: number, note = '') => log(`${l.name} ${ip} ${req.method} ${path.startsWith(cfg.secretPath) ? '/<secret>' + path.slice(cfg.secretPath.length) : path} ${status} ${Date.now() - t0}ms${note ? ' ' + note : ''}`);
       const deny = (status = 404) => { res.writeHead(status, { 'content-type': 'text/plain', 'cache-control': 'no-store', ...SECURITY_HEADERS }); res.end(status === 404 ? 'Not found' : ''); done(status, 'denied'); };
-      if (!allowed(ip) || banned(ip)) { req.socket.destroy(); return; }
+      if (!allowed(sockIp) || banned(ip)) { req.socket.destroy(); return; }
+      if (l.clientIpHeader && ip === sockIp) { res.writeHead(400, { 'content-type': 'text/plain', ...SECURITY_HEADERS }); res.end('Bad request'); done(400, 'no visitor address from the tunnel'); return; }
 
       let target = url;
       let setPass = false;
@@ -188,9 +205,12 @@ export function startGateway(cfg: GatewayConfig, env: NodeJS.ProcessEnv = proces
       if (/^\/connector\//.test(tpath) && !connectorOk(ip)) return deny();
       if (/^\/integrations\//.test(tpath)) return deny();
       if (l.mobileApi === false && tpath.startsWith('/mobile/')) return deny();
-      // Opening the secret path itself: hand out the pass and go to the portal.
-      if (setPass && (tpath === '/' || tpath === '') && req.method === 'GET') {
-        res.writeHead(302, { location: '/', 'set-cookie': `${COOKIE}=${passFor(key, hours)}; Path=/; Max-Age=${hours * 3600}; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`, 'cache-control': 'no-store', ...SECURITY_HEADERS });
+      // Opening the secret path itself: hand out the pass and go to the portal. 2.20 Also for a page under it (e.g. an
+      // invitation link /<secret>/invite#…): pass, then the page itself (the browser keeps the #… part).
+      const pageUnderSecret = setPass && req.method === 'GET' && !/^\/(api|mobile|connector|integrations|assets)\//.test(tpath) && !/\.[a-z0-9]{1,5}$/i.test(tpath);
+      if (pageUnderSecret) {
+        const loc = tpath === '' ? '/' : target;
+        res.writeHead(302, { location: /^\/(?![\/\\])[^\r\n]*$/.test(loc) ? loc : '/', 'set-cookie': `${COOKIE}=${passFor(key, hours)}; Path=/; Max-Age=${hours * 3600}; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`, 'cache-control': 'no-store', ...SECURITY_HEADERS });
         res.end(); done(302, 'pass issued'); return;
       }
       const headers = { ...req.headers };

@@ -1,3 +1,4 @@
+import { RefreshVisionline } from '../components/RefreshVisionline';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
@@ -17,25 +18,12 @@ export function VisionlinePage() {
   const [sp, setSp] = useSearchParams();
   const tab = (sp.get('tab') ?? 'cards') as (typeof TABS)[number]['id'];
   const ov = useApi<any>(`${base}/visionline/overview`, [], 20_000);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const [ok, setOk] = useState<string | null>(null);
   const d = ov.data;
-  const refresh = async () => {
-    setBusy(true); setError(null); setOk(null);
-    try {
-      const r = await api(`${base}/visionline/refresh`, { body: {} });
-      setOk(`Reading doors and user groups${r.sync?.skipped ? '' : ', people and keycards'} from Visionline now. The lists update by themselves in a few minutes.${r.sync?.skipped ? ` People and keycards: ${r.sync.skipped}` : ''}`);
-      await ov.reload();
-    } catch (e) { setError(e); } finally { setBusy(false); }
-  };
   return (
     <>
-      <PageHead title="Visionline cards & people" intro="Read from your Visionline by the connector, by itself: doors and user groups every few hours, people and keycards on a schedule, and a card made at the Visionline desk within seconds. Read-only; nothing here changes Visionline.">
-        {can('resources.discover') && <button className="btn" onClick={refresh} disabled={busy}>{busy ? 'Asking the connector…' : 'Refresh now'}</button>}
-      </PageHead>
-      <ErrorNote error={error ?? ov.error} />
-      {ok && <div className="alert ok">{ok}</div>}
+      <PageHead title="Visionline cards & people" intro="Read from your Visionline by the connector: doors, user groups, people and keycards when you press Refresh from Visionline (or on a schedule, Settings → Reports & sync), and a card made at the Visionline desk within seconds. Read-only; nothing here changes Visionline." />
+      <RefreshVisionline onDone={() => void ov.reload()} />
+      <ErrorNote error={ov.error} />
       {d && <Status d={d} />}
       <div className="seg" role="tablist" style={{ margin: '4px 0 14px', flexWrap: 'wrap' }}>
         {TABS.map((x) => <button key={x.id} role="tab" aria-pressed={tab === x.id} onClick={() => setSp({ tab: x.id })}>{x.l}</button>)}

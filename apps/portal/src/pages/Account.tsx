@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, sealCredential } from '../api';
+import { api, auth, sealCredential } from '../api';
 import { useHotel } from '../App';
 import { ErrorNote, PageHead, setThemePref, themePref, type ThemePref, Status, fmt, useApi, waitForCommand } from '../ui';
 
@@ -38,7 +38,7 @@ function UserSettings() {
   const savePw = async () => {
     setError(null); setOk(null);
     if (next !== again) { setError(new Error('The new passwords do not match.')); return; }
-    try { await api('/api/v1/me/password', { body: { current: cur, next } }); setCur(''); setNext(''); setAgain(''); setOk('Password changed.'); } catch (e) { setError(e); }
+    try { const r = await api<{ token?: string }>('/api/v1/me/password', { body: { current: cur, next } }); if (r?.token) auth.set(r.token); setCur(''); setNext(''); setAgain(''); setOk('Password changed.'); } catch (e) { setError(e); }
   };
   return (
     <div className="panel" style={{ maxWidth: 720 }}>
@@ -50,10 +50,10 @@ function UserSettings() {
       <h3 style={{ marginTop: 24 }}>Change password</h3>
       <div className="field-row">
         <div className="field"><label htmlFor="cp">Current password</label><input id="cp" type="password" autoComplete="current-password" value={cur} onChange={(e) => setCur(e.target.value)} /></div>
-        <div className="field"><label htmlFor="np">New password</label><input id="np" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} /><span className="hint">At least 10 characters.</span></div>
+        <div className="field"><label htmlFor="np">New password</label><input id="np" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} /><span className="hint">At least 12 characters. Your other sessions end; this one continues.</span></div>
         <div className="field"><label htmlFor="ap">New password again</label><input id="ap" type="password" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} /></div>
       </div>
-      <button className="btn primary" onClick={savePw} disabled={!cur || next.length < 10}>Change password</button>
+      <button className="btn primary" onClick={savePw} disabled={!cur || next.length < 12}>Change password</button>
     </div>
   );
 }

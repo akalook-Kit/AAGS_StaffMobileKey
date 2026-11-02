@@ -58,6 +58,9 @@ foreach ($a in $list) { Test-Address $a }
 $port = if ($ExternalPort -gt 0) { $ExternalPort } elseif ($ext) { [int]$ext.port } else { 0 }
 
 $listeners = @($lan)
+# 2.20 Keep the Cloudflare Tunnel entrance (set-tunnel-access.ps1).
+$tun = @($cfg.listeners | Where-Object { $_.name -eq 'tunnel' })[0]
+if ($tun) { $listeners += $tun }
 if (-not $Disable) {
   if ($port -le 0) { Fail 'Give the port the hotel firewall forwards to, with -ExternalPort (for example 9443).' }
   if ($port -eq [int]$lan.port) { Fail "-ExternalPort must differ from the hotel-network port $($lan.port)." }

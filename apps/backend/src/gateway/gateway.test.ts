@@ -123,3 +123,61 @@ describe('gateway: connector on another computer of the hotel network (2.16)', (
     expect(checkGatewayConfig({ ...base, listeners: [{ name: 'lan', host: '0.0.0.0', port: 8443, allow: ['private'], requireSecretPath: false, connectorFrom: ['192.168.1.50'] }] })).toBe(true);
   });
 });
+
+describe('gateway tunnel entrance (2.20, Cloudflare Tunnel)', () => {
+  let upstream: http.Server; let gw: Awaited<ReturnType<typeof startGateway>>; let port = 0;
+  const seen: { url?: string; xff?: string; proto?: string }[] = [];
+  const SECRET = '/k-tunnel-secret-path-1234567';
+  beforeAll(async () => {
+    upstream = http.createServer((req, res) => { seen.push({ url: req.url, xff: req.headers['x-forwarded-for'] as string, proto: req.headers['x-forwarded-proto'] as string }); res.writeHead(200); res.end('ok'); });
+    await new Promise<void>((r) => upstream.listen(0, '127.0.0.1', () => r()));
+    const up = (upstream.address() as AddressInfo).port;
+    gw = startGateway({ upstream: `http://127.0.0.1:${up}`, secretPath: SECRET, banAfter: 3,
+      listeners: [{ name: 'tunnel', host: '127.0.0.1', port: 0, allow: ['127.0.0.1', '::1'], requireSecretPath: true, clientIpHeader: 'cf-connecting-ip', publicHttps: true }] }, {});
+    await new Promise((r) => setTimeout(r, 100));
+    port = (gw.servers[0]!.address() as AddressInfo).port;
+  });
+  afterAll(async () => { await gw.close(); upstream.close(); });
+  const get = (path: string, headers: Record<string, string> = {}) => fetch(`http://127.0.0.1:${port}${path}`, { headers, redirect: 'manual' });
+
+  it('an invitation link under the secret path gives the pass and opens the page', async () => {
+    const r = await get(`${SECRET}/invite`, { 'cf-connecting-ip': '41.202.219.10' });
+    expect(r.status).toBe(302);
+    expect(r.headers.get('location')).toBe('/invite');
+    expect(r.headers.get('set-cookie')).toMatch(/Secure/);
+  });
+  it('passes the visitor address on, and bans only that visitor', async () => {
+    const cookie = (await get(`${SECRET}/`, { 'cf-connecting-ip': '41.202.219.10' })).headers.get('set-cookie')!.split(';')[0]!;
+    await get('/api/v1/me', { cookie, 'cf-connecting-ip': '41.202.219.10' });
+    expect(seen.at(-1)).toMatchObject({ xff: '41.202.219.10', proto: 'https' });
+    for (let i = 0; i < 4; i++) await get('/nothing', { 'cf-connecting-ip': '196.1.1.1' }).catch(() => undefined);
+    await expect(get('/api/v1/me', { 'cf-connecting-ip': '196.1.1.1', cookie })).rejects.toThrow();
+    expect((await get('/api/v1/me', { cookie, 'cf-connecting-ip': '41.202.219.10' })).status).toBe(200);
+  });
+  it('refuses a request without the visitor address', async () => {
+    expect((await get(`${SECRET}/`)).status).toBe(400);
+  });
+  it('refuses the header option on a listener the network can reach', () => {
+    expect(() => startGateway({ upstream: 'http://127.0.0.1:1', secretPath: SECRET, listeners: [{ name: 'x', host: '0.0.0.0', port: 0, allow: ['private'], requireSecretPath: true, clientIpHeader: 'cf-connecting-ip' }] }, {})).toThrow(/127\.0\.0\.1/);
+  });
+});
+
+describe('gateway redirects stay on this site (2.20)', () => {
+  let upstream: http.Server; let gw: Awaited<ReturnType<typeof startGateway>>; let port = 0;
+  const SECRET = '/k-redirect-secret-path-12345';
+  beforeAll(async () => {
+    upstream = http.createServer((_q, r) => { r.writeHead(200); r.end('ok'); });
+    await new Promise<void>((r) => upstream.listen(0, '127.0.0.1', () => r()));
+    gw = startGateway({ upstream: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`, secretPath: SECRET, listeners: [{ name: 'external', host: '127.0.0.1', port: 0, allow: ['127.0.0.1'], requireSecretPath: true }] }, {});
+    await new Promise((r) => setTimeout(r, 100));
+    port = (gw.servers[0]!.address() as AddressInfo).port;
+  });
+  afterAll(async () => { await gw.close(); upstream.close(); });
+  it('never redirects to another host', async () => {
+    for (const p of [`${SECRET}//evil.example/x`, `${SECRET}/\\evil.example/x`, `${SECRET}/%5Cevil.example`]) {
+      const r = await fetch(`http://127.0.0.1:${port}${p}`, { redirect: 'manual' });
+      const loc = r.headers.get('location');
+      expect(loc === '/' || /^\/[^/\\]/.test(loc ?? '')).toBe(true); // same site: '/' or '/path', never '//host' or '/\\host'
+    }
+  });
+});

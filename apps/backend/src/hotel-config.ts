@@ -99,7 +99,7 @@ export const SCHEMAS = {
     assetLimitsKb: z.object({ logo: z.number().int().default(500), heroImage: z.number().int().default(1500) }).default({ logo: 500, heroImage: 1500 }),
     /** Phase 2 battery monitoring. Alarms come from the locks' own battery events [Web API §7.14.1]. */
     battery: z.object({
-      /** A door's battery reading shows "No battery report available" when nothing was reported for this many days. */
+      /** A door's battery reading shows "stale" when nothing was reported for this many days. */
       staleAfterDays: z.number().int().min(1).max(365).default(30),
       /** Open a maintenance request automatically for: critical alarms, any alarm, or never. */
       autoTicket: z.enum(['critical', 'any', 'off']).default('critical'),
@@ -119,7 +119,12 @@ export const SCHEMAS = {
       stillAlarmingDays: z.number().int().min(0).max(90).default(14),
       /** 2.18 A reading at the top of the scale (4.8 V / 9.0 V) means new batteries and closes the alarm. */
       fullReadingMeansNew: z.boolean().default(true),
-    }).default({ staleAfterDays: 30, autoTicket: 'critical', voltage: { highRange: { low: null, critical: null }, lowRange: { low: null, critical: 3.6 } }, changeJumpVolts: 0.8, stillAlarmingDays: 14, fullReadingMeansNew: true }),
+      /** 2.20 A low/critical battery alarm closes by itself after this many cards accepted by the lock without the
+       *  low-battery flag (and no voltage reading at or below the threshold). 0 = off. */
+      clearAfterCards: z.number().int().min(0).max(20).default(3),
+      /** 2.20 Lock events that count as a card accepted (64 staff card, 67 guest card). */
+      cardAcceptedCodes: z.array(z.number().int()).default([64, 67]),
+    }).default({ staleAfterDays: 30, autoTicket: 'critical', voltage: { highRange: { low: null, critical: null }, lowRange: { low: null, critical: 3.6 } }, changeJumpVolts: 0.8, stillAlarmingDays: 14, fullReadingMeansNew: true, clearAfterCards: 3, cardAcceptedCodes: [64, 67] }),
     /** 2.6 event log: door entrances are lock events too. The connector's Visionline watch also asks for these codes
      *  [Web API §7.14.1; 64 = staff card accepted]. Add others (e.g. guest card accepted) from the hotel's lock
      *  documentation; switch off to receive refused entries and battery events only. */
@@ -300,6 +305,11 @@ export const SCHEMAS = {
     /** Future start times: "hold" = the platform creates the key in Visionline at its start time (Web API §7.6.2);
      *  "send" = create it now with startTime in the future (only once ASSA ABLOY confirms Visionline accepts it). */
     startTimeMode: z.enum(['hold', 'send']).default('hold'),
+    /** 2.20 (Armel, 31 Oct) "onRequest": doors, groups, people and keycards are read from Visionline only when someone
+     *  presses Refresh from Visionline (after uploading lock data or refreshing resources in Visionline), so Visionline
+     *  is not loaded with regular requests. Live events (cards used, battery reports) still arrive as they happen.
+     *  "scheduled": read every discoveryEveryHours / directorySync.everyHours as before. */
+    readMode: z.enum(['onRequest', 'scheduled']).default('onRequest'),
     /** 2.10 Read doors, door groups, user groups and time schedules from Visionline every N hours (0 = only by hand). */
     discoveryEveryHours: z.number().int().min(0).max(168).default(6),
     /** Management reports: read Visionline's people, valid keycards and lock alarms (read-only, opt-in).

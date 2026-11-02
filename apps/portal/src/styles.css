@@ -819,3 +819,15 @@ ol.steps > li { margin-bottom: 14px; }
 .elim-step.is-ok { opacity: .72; } .elim-step.is-problem { border-color: var(--bad-line); background: var(--bad-bg); }
 .elim-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 @media print { .elim-step { break-inside: avoid; } }
+
+/* 2.20 Refresh from Visionline */
+.refresh-vl { margin: 0 0 14px; }
+/* 2.20 Setup report: findings, room matrix, parameters */
+.ssr-insights { margin: 0; padding-left: 20px; } .ssr-insights li { margin: 5px 0; }
+.ssr-matrix-wrap { overflow-x: auto; }
+.ssr-matrix th.rot { height: 120px; vertical-align: bottom; padding: 2px; }
+.ssr-matrix th.rot span { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; font-weight: 600; }
+.ssr-matrix td.c { text-align: center; min-width: 22px; }
+.ssr-matrix tr.none td { color: var(--ink-2); background: var(--warn-bg, #f9eeda); }
+.ssr-param h4 { margin: 12px 0 4px; } .ssr-lines { margin: 0; padding-left: 18px; columns: 2; font-size: 12.5px; } .ssr-lines li { break-inside: avoid; }
+@media print { .ssr-matrix { font-size: 8pt; } .ssr-matrix th.rot { height: 90px; } }

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, download } from '../api';
 import { useHotel } from '../App';
 import { Drawer, ErrorNote, PageHead, Status, fmt, useApi } from '../ui';
+import { RefreshVisionline } from '../components/RefreshVisionline';
 
 type BState = 'GOOD' | 'LOW' | 'CRITICAL' | 'REPORTED' | 'NEVER';
 interface BDoor {
@@ -12,6 +13,8 @@ interface BDoor {
   ticket: { id: string; number: number; status: string; assignee: string | null } | null;
   /** 2.15 */
   lastChange: { at: string; source: 'event' | 'inferred' | 'maintenance'; detail: string | null } | null;
+  /** 2.20 */
+  currentSetDays?: number | null; lastSetDays?: number | null; avgSetDays?: number | null; setsCounted?: number;
   reprogram: { at: string; ticketId: string; number: number; status: string } | null;
 }
 const OPEN_T = ['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS', 'ON_HOLD'];
@@ -55,17 +58,18 @@ export function BatteryPage() {
 
   return (
     <>
-      <PageHead title="Battery status" intro={<>Lock batteries as the locks report them to Visionline: alarms, exchanges and voltage readings. Offline locks report only when their events reach Visionline, so some doors may show <em>never reported</em> or <em>no battery report available</em> (nothing heard from the lock for a while; its last reading may be out of date).</>}>
+      <PageHead title="Battery status" intro={<>Lock batteries as the locks report them to Visionline: alarms, exchanges and voltage readings. Offline locks report only when their events reach Visionline, so some doors may show <em>never reported</em> or <em>stale</em> (nothing heard from the lock for a while; its last reading may be out of date).</>}>
         <Link className="btn" to="/lock-troubleshoot">Troubleshoot a lock</Link>
         <button className="btn" onClick={() => download(`${base}/battery/export`, 'battery-history.csv').catch(setError)}>Export history</button>
         {can('settings.manage') && <Link className="btn" to="/settings?tab=battery">Thresholds</Link>}
       </PageHead>
+      <RefreshVisionline compact />
       <ErrorNote error={error ?? b.error} />
       {s && (
         <div className="figures">
           <div><div className="v" style={{ color: s.critical ? 'var(--bad)' : undefined }}>{s.critical}</div><div className="l">critical</div></div>
           <div><div className="v" style={{ color: s.low ? 'var(--warn)' : undefined }}>{s.low}</div><div className="l">low</div></div>
-          <div><div className="v">{s.stale}</div><div className="l">no battery report available (nothing for {b.data!.policy.staleAfterDays} days)</div></div>
+          <div><div className="v">{s.stale}</div><div className="l">stale (no report for {b.data!.policy.staleAfterDays} days)</div></div>
           <div><div className="v">{s.never}<span style={{ fontSize: 18, color: 'var(--ink-3)' }}>/{s.total}</span></div><div className="l">never reported</div></div>
           <div><div className="v" style={{ color: 'var(--ok)' }}>{s.good}</div><div className="l">good</div></div>
           {s.reprogram > 0 && <div><div className="v" style={{ color: 'var(--bad)' }}>{s.reprogram}</div><div className="l">to program (alarm after new batteries)</div></div>}
@@ -125,9 +129,9 @@ export function BatteryPage() {
               <div className="doors">
                 {ds.map((d) => (
                   <button key={d.doorId} className={`door wide ${d.state}${d.stale ? ' stale' : ''}`} onClick={() => nav(`/battery/${encodeURIComponent(d.doorId)}`)}
-                    title={`${d.name}: ${STATE_LABEL[d.state]}${d.stale ? ' (no battery report available)' : ''}${d.reportedAt ? ` · ${fmt.dt(d.reportedAt)}` : ''}${d.lastChange ? ` · batteries changed ${fmt.dt(d.lastChange.at)}` : ''}${needsProgramming(d) ? ' · program the lock' : ''}`}>
+                    title={`${d.name}: ${STATE_LABEL[d.state]}${d.stale ? ' (stale)' : ''}${d.reportedAt ? ` · ${fmt.dt(d.reportedAt)}` : ''}${d.lastChange ? ` · batteries changed ${fmt.dt(d.lastChange.at)}` : ''}${d.currentSetDays != null ? ` · in for ${Math.round(d.currentSetDays)} days` : ''}${d.lastSetDays != null ? ` · last set lasted ${Math.round(d.lastSetDays)} days` : ''}${needsProgramming(d) ? ' · program the lock' : ''}`}>
                     <span className="cell" aria-hidden><i /></span>{d.name}
-                    <span className="sr">{STATE_LABEL[d.state]}{d.stale ? ', no battery report available' : ''}</span>
+                    <span className="sr">{STATE_LABEL[d.state]}{d.stale ? ', stale' : ''}</span>
                   </button>
                 ))}
               </div>
@@ -149,7 +153,7 @@ function Legend() {
   return (
     <div className="row small muted batlegend" style={{ marginBottom: 12 }}>
       {(['CRITICAL', 'LOW', 'GOOD', 'REPORTED', 'NEVER'] as BState[]).map((s) => <span key={s} className={`door wide ${s}`} aria-hidden><span className="cell"><i /></span>{STATE_LABEL[s]}</span>)}
-      <span className="door wide GOOD stale" aria-hidden><span className="cell"><i /></span>No battery report available</span>
+      <span className="door wide GOOD stale" aria-hidden><span className="cell"><i /></span>Stale</span>
     </div>
   );
 }
@@ -160,7 +164,7 @@ export const ticketTone = (s: string) => ({ OPEN: 'PENDING', ACKNOWLEDGED: 'SCHE
 function DoorBattery({ id, door, onClose, onChanged }: { id: string; door: BDoor | null; onClose: () => void; onChanged: () => void }) {
   const { base, can } = useHotel();
   const nav = useNavigate();
-  const h = useApi<{ readings: any[]; alerts: any[] }>(`${base}/battery/doors/${encodeURIComponent(id)}/history`, [id, door?.reportedAt, door?.alert?.status]);
+  const h = useApi<{ readings: any[]; alerts: any[]; sets?: { from: string; to: string | null; days: number; daysToLow: number | null; current: boolean; source: string }[] }>(`${base}/battery/doors/${encodeURIComponent(id)}/history`, [id, door?.reportedAt, door?.alert?.status]);
   const att = useApi<any>(`${base}/attention`);
   const people = useApi<any[]>(can('maintenance.manage') ? `${base}/maintenance/assignees` : null);
   const [error, setError] = useState<unknown>(null);
@@ -208,16 +212,22 @@ function DoorBattery({ id, door, onClose, onChanged }: { id: string; door: BDoor
       <div className="split" style={{ gridTemplateColumns: 'minmax(0,1fr) 250px' }}>
         <div>
           <dl className="kv" style={{ marginBottom: 18 }}>
-            <dt>Battery</dt><dd><Status s={STATE_PILL[door.state]} label={STATE_LABEL[door.state]} />{door.stale && <> <Status s="PENDING" label="No battery report available" /></>}</dd>
+            <dt>Battery</dt><dd><Status s={STATE_PILL[door.state]} label={STATE_LABEL[door.state]} />{door.stale && <> <Status s="PENDING" label="Stale" /></>}</dd>
             <dt>Last report</dt><dd>{door.lastEvent ? `${door.lastEvent.name}${door.lastEvent.code ? ` (event ${door.lastEvent.code})` : ''}` : 'This lock has not reported a battery event'}</dd>
             {door.voltsBelow != null && <><dt>Voltage</dt><dd>below {door.voltsBelow.toFixed(1)} V</dd></>}
             <dt>Reported</dt><dd>{door.reportedAt ? `${fmt.dt(door.reportedAt)} (lock time)` : '—'}{door.receivedAt ? <span className="small muted"> · received {fmt.rel(door.receivedAt)}</span> : null}</dd>
             <dt>Batteries changed</dt><dd>{door.lastChange ? <>{fmt.dt(door.lastChange.at)} <span className="small muted">· {CHANGE_SOURCE[door.lastChange.source]}{door.lastChange.detail && door.lastChange.source === 'inferred' ? ` (${door.lastChange.detail.replace(/^Battery level rose from /, '')})` : ''}</span></> : <span className="muted">Not known yet (no "battery exchanged" event or voltage jump received)</span>}</dd>
+            {door.currentSetDays != null && <><dt>Batteries in for</dt><dd>{Math.round(door.currentSetDays)} days{door.lastSetDays != null ? <span className="small muted"> · previous set lasted {Math.round(door.lastSetDays)} days{door.setsCounted && door.setsCounted > 1 ? ` · average ${Math.round(door.avgSetDays ?? 0)} days over ${door.setsCounted} sets` : ''}</span> : null}</dd></>}
             {door.reprogram && <><dt>Program the lock</dt><dd><Link to={`/maintenance/${door.reprogram.ticketId}`}>Request #{door.reprogram.number}</Link> <Status s={ticketTone(door.reprogram.status)} label={TICKET_LABEL[door.reprogram.status] ?? door.reprogram.status} /><div className="small muted">Still alarming after new batteries: program the lock and upload its firmware with the service tool.</div></dd></>}
             <dt>Lock</dt><dd>{door.online == null ? '—' : door.online ? 'Online' : 'Offline (reports when its events reach Visionline)'}</dd>
             {a && <><dt>Alert</dt><dd><Status s={STATE_PILL[a.severity]} label={`${STATE_LABEL[a.severity]} · ${a.status === 'OPEN' ? 'open' : 'acknowledged'}`} /><span className="small muted"> since {fmt.dt(a.openedAt)} · {a.occurrences} {a.occurrences === 1 ? 'report' : 'reports'}{a.acknowledgedBy ? ` · acknowledged by ${a.acknowledgedBy}` : ''}</span></dd></>}
             {door.ticket && <><dt>Maintenance</dt><dd><Link to={`/maintenance/${door.ticket.id}`}>Request #{door.ticket.number}</Link> <Status s={ticketTone(door.ticket.status)} label={TICKET_LABEL[door.ticket.status]} /> <span className="small muted">{door.ticket.assignee ?? 'unassigned'}</span></dd></>}
           </dl>
+          {(h.data?.sets ?? []).length > 0 && <>
+            <h3>How long each set of batteries lasted</h3>
+            <table className="grid" style={{ marginBottom: 18 }}><thead><tr><th>Put in</th><th>Taken out</th><th className="num">Days</th><th className="num">Days to first low report</th></tr></thead>
+              <tbody>{h.data!.sets!.map((x, i) => <tr key={i}><td className="small">{fmt.dt(x.from)}<span className="sub">{CHANGE_SOURCE[x.source as keyof typeof CHANGE_SOURCE] ?? x.source}</span></td><td className="small">{x.to ? fmt.dt(x.to) : <em>still in the lock</em>}</td><td className="num">{Math.round(x.days)}</td><td className="num">{x.daysToLow != null ? Math.round(x.daysToLow) : '—'}</td></tr>)}</tbody></table>
+          </>}
           <h3>Reports from this lock</h3>
           {(h.data?.readings ?? []).length ? (
             <table className="grid"><thead><tr><th>Lock time</th><th>Event</th><th>Meaning</th></tr></thead>

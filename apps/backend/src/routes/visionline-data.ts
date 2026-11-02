@@ -55,10 +55,29 @@ export function visionlineDataRoutes(app: FastifyInstance) {
     };
   });
 
+  /** 2.20 When Visionline was last read (for the Refresh from Visionline button on several pages). */
+  app.get(`${P}/hotels/:hotelId/visionline/last-read`, async (req) => {
+    const hotelId = hid(req);
+    await requirePerm(req, hotelId, 'resources.read');
+    const vl = await getConfig(pool, hotelId, 'visionline');
+    const d = await one(pool, `SELECT max(completed_at) FILTER (WHERE status='SUCCEEDED') AS done, max(created_at) AS asked,
+        bool_or(status IN ('PENDING','LEASED') AND expires_at > now()) AS running FROM commands WHERE hotel_id=$1 AND type='DISCOVER_RESOURCES'`, [hotelId]);
+    const s2 = await one(pool, `SELECT max(finished_at) FILTER (WHERE status='SUCCEEDED' AND NOT partial) AS done, bool_or(status='RUNNING' AND started_at > now() - interval '40 minutes') AS running
+      FROM directory_syncs WHERE hotel_id=$1`, [hotelId]);
+    return { readMode: vl?.readMode ?? 'onRequest', doors: d?.done ?? null, people: s2?.done ?? null, running: Boolean(d?.running || s2?.running), lastAsked: d?.asked ?? null };
+  });
+
   app.post(`${P}/hotels/:hotelId/visionline/refresh`, async (req) => {
     const hotelId = hid(req);
     const op = await requirePerm(req, hotelId, 'resources.discover');
     if (!(await readyConnector(pool, hotelId))) throw new ApiError(409, 'CONNECTOR_NOT_READY', 'The connector is offline or has no Visionline account yet (Settings → Visionline).');
+    // 2.20 Spare Visionline: one full read every 5 minutes at most, however often the button is pressed.
+    // Counted from the last time someone pressed the button (automatic reads do not block a person).
+    const recent = await one(pool, `SELECT max(at) AS t FROM audit_log WHERE hotel_id=$1 AND action='resources.discovery_requested' AND details->>'reason'='refresh now'`, [hotelId]);
+    if (recent?.t && Date.now() - new Date(recent.t).getTime() < 5 * 60_000) {
+      const wait = Math.ceil((5 * 60_000 - (Date.now() - new Date(recent.t).getTime())) / 60_000);
+      throw new ApiError(429, 'READ_RECENTLY', `Visionline was read less than 5 minutes ago; the lists are being updated. Try again in ${wait} minute${wait === 1 ? '' : 's'}.`);
+    }
     const d = await requestDiscovery(pool, hotelId, op.id, 'refresh now');
     let sync: { syncId?: string; alreadyRunning?: boolean; skipped?: string } = {};
     try { sync = await requestDirectorySync(hotelId, op.id); } catch (e) { sync = { skipped: (e as Error).message }; }

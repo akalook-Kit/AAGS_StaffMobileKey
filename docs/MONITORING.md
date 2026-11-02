@@ -13,6 +13,7 @@ connector or Visionline down) and stays red until the problem is fixed.
 | Door back online | The lock reports again (or its "online" code) - the alert closes | - | Doors offline |
 | Gateway offline (2.19) | A gateway listed on Online locks & gateways is named by an open Visionline alarm (its EEID, or its name with "gateway", "offline"…), or all the locks behind it (at least 2) are offline | critical | Doors and gateways offline |
 | Gateway back | No alarm names it any more and one of its locks reports again - the alert closes | - | Doors and gateways offline |
+| Keycards in a generic name (2.20) | Valid staff keycards held under a name that is not a person ("Staff", "HK 2", "Spare", a number) | warning | Lock alarms and batteries |
 | First entrance at a watched door | First entrance each day (or every entrance, or the first only) at a door you chose | notice | Watched doors (VIP) |
 | Lock alarm | Open Visionline alarm in the last 24 h (from the Visionline read in Reports & sync) | critical | Lock alarms and batteries |
 | Battery critically low | Battery module | critical | Lock alarms and batteries |
