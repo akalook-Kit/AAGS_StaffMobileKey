@@ -76,9 +76,12 @@ try {
       }
       Set-Content -Path (Join-Path $env:ProgramData 'StaffMobileKey\connector-portal-url.txt') -Value $portal -Encoding ASCII
     }
+    $global:LASTEXITCODE = 0
     try { & (Join-Path $connPkg 'install.ps1') @cargs }
     finally { Remove-Item Env:\SMK_CONNECTOR_TOKEN, Env:\SMK_CONNECTOR_ADMIN_PASSWORD -ErrorAction SilentlyContinue }
     $rc = $LASTEXITCODE
+    $svc = Get-Service StaffMobileKeyConnector -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -eq 'Running') { $rc = 0 } elseif (-not $rc) { Write-Host 'The connector service is not running.'; $rc = 1 }
   } else {
     # ---- The portal (and the connector) on this server ---------------------------------------------------------
     $iargs = @{ NoBrowser = $true }
@@ -94,8 +97,21 @@ try {
       $name = $Matches[1]
       if ($k + 1 -lt $opts.Count -and "$($opts[$k + 1])" -notmatch '^-[A-Za-z]+$') { $iargs[$name] = "$($opts[$k + 1])"; $k++ } else { $iargs[$name] = $true }
     }
+    $global:LASTEXITCODE = 0
     & (Join-Path $here 'install-onprem.ps1') @iargs
     $rc = $LASTEXITCODE
+    # 2.17.1 install-onprem.ps1 stops with exit 1 on a real failure; any other code here was left by the last Windows
+    # command it ran (sc.exe, icacls...) or by the connector, which is only a note there. What counts is the portal
+    # answering. (2.17.0 failed the .msi with error 1722 on such a leftover code.)
+    $healthy = $false
+    try {
+      $pu = (Get-Content (Join-Path $env:ProgramData 'StaffMobileKey\Platform\portal-url.txt') -Raw).Trim()
+      for ($t = 0; $t -lt 15 -and -not $healthy; $t++) { try { $healthy = [bool](Invoke-RestMethod -Uri "$pu/healthz" -TimeoutSec 4).ok } catch { Start-Sleep -Seconds 2 } }
+    } catch { }
+    if ($healthy) {
+      if ($rc -and $rc -ne 0) { Write-Host "The portal is running (a step reported code $rc; see the log above)." }
+      $rc = 0
+    } elseif (-not $rc) { Write-Host 'The portal does not answer.'; $rc = 1 }
   }
 } catch {
   Write-Host "The installation stopped: $($_.Exception.Message)" -ForegroundColor Red

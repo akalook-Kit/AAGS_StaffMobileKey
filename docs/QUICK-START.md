@@ -8,7 +8,7 @@ requests, watches lock batteries and supports emergencies. It works for a hotel 
 hospital, a school). Staff mobile keys are an optional module, off by default.
 
 It has two parts: the **portal** (with its database) and the **connector**, which talks to Visionline. One file
-installs either or both: `AccessMonitoringTool-Server-2.17.0.msi`.
+installs either or both: `AccessMonitoringTool-Server-2.17.1.msi`.
 
 | | A. One computer | B. Two computers |
 |---|---|---|

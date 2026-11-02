@@ -14,10 +14,15 @@ WHAT THE SERVER NEEDS
   - .NET Framework 4.8 (part of Windows)
   - 2 GB free disk space (more as the database grows; Monitoring warns below 50 GB)
 
+NEW IN 2.17.1
+  Fixes error 1722 at the end of the 2.17.0 installation ("A program run as part of the setup did not finish as
+  expected"): the installer now checks that the portal (or the connector) is running instead of taking the code of the
+  last Windows command. Nothing else changes.
+
 NEW IN 2.17 (ACCESS MONITORING TOOL)
   One .msi installs the portal, the connector, or both: a small window asks at the start (Everything / Portal only /
   Connector only, and the addresses). No console windows appear; tick "Show the installation steps" (or run
-  msiexec /i AccessMonitoringTool-Server-2.17.0.msi SMK_SHOW=1) to follow the log. Logs: C:\ProgramData\StaffMobileKey\
+  msiexec /i AccessMonitoringTool-Server-2.17.1.msi SMK_SHOW=1) to follow the log. Logs: C:\ProgramData\StaffMobileKey\
   setup-logs. Upgrades keep the answers; SMK_ASK=1 asks again. Staff mobile keys are off by default (Settings ->
   Modules). Notice board and a livelier sign-in page, My charts, Visionline reports imported into the System setup
   report (System settings, operators, card list), issued-by for every card made from the portal, mobile keys made in

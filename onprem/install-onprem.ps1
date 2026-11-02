@@ -573,3 +573,5 @@ if ($setupCode) {
   Write-Host "        The code is also in $codeFile (administrators only)."
   if (-not $NoBrowser) { try { Start-Process "$platformUrl/#code=$setupCode" } catch { } }
 } elseif (-not $NoBrowser -and -not $upgrade) { try { Start-Process "$platformUrl/" } catch { } }
+
+exit 0
