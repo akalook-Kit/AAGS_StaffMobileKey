@@ -1,7 +1,8 @@
 import { VL, toVisionlineLocal } from '@smk/shared/node';
 import type { DirectoryChunk, SyncDirectoryPayload } from '@smk/shared';
-import type { VisionlineClient } from './client.ts';
+import { VisionlineApiError, type VisionlineClient } from './client.ts';
 import { firstText, isNotFound } from './adapter.ts';
+import { utcForms, withTimeForms } from './time-forms.ts';
 
 /**
  * Read-only snapshot of Visionline's people, valid keycards and lock alarms for management reports.
@@ -31,6 +32,12 @@ async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>, pause
 }
 
 const bool = (v: unknown) => v === true || v === 'true';
+
+/** Adds the request to a Visionline error so the portal says which read failed (no secrets in paths). */
+function where(path: string, e: unknown): never {
+  if (e instanceof VisionlineApiError && !e.message.startsWith('GET ')) e.message = `GET ${path}: ${e.message}`;
+  throw e;
+}
 
 export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayload, timeZone: string, send: (c: Omit<DirectoryChunk, 'syncId'>) => Promise<void>,
   opts: { pauseMs?: number; onProgress?: (s: string) => void } = {}) {
@@ -69,7 +76,8 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
     await send({ final: false, users: u, cards: c, alarms: [], notes: [] });
   };
 
-  const now = toVisionlineLocal(new Date(), timeZone);
+  const nowDate = new Date();
+  const cardTimeForms = [toVisionlineLocal(nowDate, timeZone), ...utcForms(nowDate)];
   let done = 0;
   await pool(ids, 2, async (id) => {
     let u: any;
@@ -78,8 +86,9 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
     counts.users++;
     if (p.includeCards) {
       let found: { id: unknown }[] = [];
-      try { found = (await vl.request<{ id: unknown }[]>('GET', `${VL.paths.cards}?cardHolder=${encodeURIComponent(id)}&validTime=${now}`)) ?? []; }
-      catch (e) { if (!isNotFound(e)) throw e; }
+      try {
+        found = (await withTimeForms('cards.validTime', cardTimeForms, (t) => vl.request<{ id: unknown }[]>('GET', `${VL.paths.cards}?cardHolder=${encodeURIComponent(id)}&validTime=${t}`))) ?? [];
+      } catch (e) { if (!isNotFound(e)) where(`${VL.paths.cards}?validTime=…`, e); }
       for (const f of found) {
         const reg = firstText(f.id);
         if (!reg) continue;
@@ -108,10 +117,10 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
     try {
       const types = new Map<string, string>();
       try { for (const t of (await vl.request<any[]>('GET', '/alarmTypes')) ?? []) { const k = firstText(t?.id); if (k) types.set(k, firstText(t?.name) ?? k); } } catch (e) { if (!isNotFound(e)) throw e; }
-      const since = p.alarmsSince ?? new Date(Date.now() - 30 * 86_400_000).toISOString();
-      // updatedSince is UTC [§5.3.2]; the document's examples use the compact form.
-      const utc = since.replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z').slice(0, 13);
-      const list = (await vl.request<{ id: unknown }[]>('GET', `/alarms?updatedSince=${utc}`)) ?? [];
+      const since = new Date(p.alarmsSince ?? Date.now() - 30 * 86_400_000);
+      // updatedSince is UTC [§5.3.2], with the "Z" (without it Visionline answers "Time must be in UTC.").
+      const list = (await withTimeForms('alarms.updatedSince', utcForms(Number.isNaN(since.getTime()) ? new Date(Date.now() - 30 * 86_400_000) : since),
+        (t) => vl.request<{ id: unknown }[]>('GET', `/alarms?updatedSince=${t}`)).catch((e) => where('/alarms?updatedSince=…', e))) ?? [];
       const idsA = list.map((a) => firstText(a.id)).filter((x): x is string => Boolean(x)).slice(-1500);
       if (list.length > idsA.length) notes.push(`${list.length} alarms since the last sync; the newest 1500 were read.`);
       await pool(idsA, 2, async (aid) => {
@@ -126,8 +135,10 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
         counts.alarms++;
       }, pause);
     } catch (e) {
-      if (!isNotFound(e) && (e as any)?.status !== 403) throw e;
-      notes.push('Lock alarms are not available from this Visionline (option "Web service for checking and confirming alarms" not licensed).');
+      // Alarms never spoil the people and keycards read: a problem here becomes a note in the sync result.
+      if (!(e instanceof VisionlineApiError) || e.status === 0 || e.status === 401) throw e;
+      if (isNotFound(e) || e.status === 403) notes.push('Lock alarms are not available from this Visionline (option "Web service for checking and confirming alarms" not licensed).');
+      else notes.push(`Lock alarms could not be read: ${e.message}`);
     }
   }
   // Last part carries the alarms and the notes, and tells the platform the snapshot is complete.

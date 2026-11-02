@@ -30,6 +30,14 @@ the platform records the card at once and asks the connector to re-read that one
 In the test setup: `POST http://localhost:14444/sim/desk/cards {"userId":"vl-x","givenName":"A","surname":"B","userGroup":"Engineering"}`
 encodes a card at the simulated desk.
 
+## Times sent to Visionline (2.11.1)
+
+Visionline versions differ in the time format they accept in queries. Connector 0.9.1 sends alarm times in UTC with the
+"Z" and, if Visionline answers "Time must be in UTC." (or another time-format error), tries the other documented forms
+once and remembers the one that works. A problem reading lock alarms no longer fails the whole read: people and
+keycards are still recorded and the alarm problem is shown as a note under **Recent reads**. Error messages now say
+which request failed (for example `GET /alarms?updatedSince=…: …`).
+
 ## Privacy and limits
 
 - Kept: Visionline user id, names, user group; card number, validity, state, doors, door groups, time schedule.

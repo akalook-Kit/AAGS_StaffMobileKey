@@ -1,6 +1,7 @@
 import { VL, toVisionlineLocal, VL_DOC } from '@smk/shared/node';
 import type { DiscoveredResource, ErrorInfo, IssueStaffKeyPayload, RevokeStaffKeyPayload } from '@smk/shared';
 import { VisionlineClient, VisionlineApiError } from './client.ts';
+import { utcForms, withTimeForms } from './time-forms.ts';
 
 /**
  * Versioned Visionline adapter (spec §4.2, §13.1). Translates platform commands into the documented
@@ -228,8 +229,9 @@ export class WebApiAdapter implements VisionlineAdapter {
   }
 
   private async onlyValidCard(cardHolder: string): Promise<string> {
-    const now = toVisionlineLocal(new Date(), this.timeZone());
-    const list = await this.vl.request<{ id: string | number }[]>('GET', `${VL.paths.cards}?cardHolder=${encodeURIComponent(cardHolder)}&validTime=${now}`);
+    const d = new Date();
+    const list = await withTimeForms('cards.validTime', [toVisionlineLocal(d, this.timeZone()), ...utcForms(d)],
+      (t) => this.vl.request<{ id: string | number }[]>('GET', `${VL.paths.cards}?cardHolder=${encodeURIComponent(cardHolder)}&validTime=${t}`));
     if (!list?.length) throw new VisionlineApiError(404, 40411, `Visionline has no valid card for ${cardHolder}`);
     if (list.length > 1) throw new VisionlineApiError(409, undefined, `${cardHolder} has ${list.length} valid cards in Visionline; cannot tell which one is the mobile key. Use check-out instead.`);
     return String(list[0]!.id);
@@ -262,7 +264,8 @@ export class WebApiAdapter implements VisionlineAdapter {
   }
 
   async cancelledSince(since: Date) {
-    const list = await this.vl.request<{ id: string }[]>('GET', `${VL.paths.cards}?cancelTimeSince=${toVisionlineLocal(since, this.timeZone())}`);
+    const list = await withTimeForms('cards.cancelTimeSince', [toVisionlineLocal(since, this.timeZone()), ...utcForms(since)],
+      (t) => this.vl.request<{ id: string }[]>('GET', `${VL.paths.cards}?cancelTimeSince=${t}`));
     const out: any[] = [];
     for (const c of list ?? []) {
       try {

@@ -242,10 +242,12 @@ export function registerVisionline(app: FastifyInstance, st: SimState, opts: {
   // ---- alarms [§5.1–5.4]: needs the option "Web service for checking and confirming alarms"
   const utcCompact = (ms: number) => new Date(ms).toISOString().replace(/[-:]/g, '').slice(0, 15);
   app.get(p('/alarmTypes'), async () => st.alarmTypes);
-  app.get(p('/alarms'), async (req) => {
+  app.get(p('/alarms'), async (req, reply) => {
     const q = req.query as Record<string, string>;
     let since = 0;
-    if (q.updatedSince) { const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?/.exec(q.updatedSince); if (m) since = Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, +(m[6] ?? 0)); }
+    // As on a real Visionline (2.38): updatedSince must carry the UTC "Z", otherwise 400 "Time must be in UTC."
+    if (q.updatedSince && !/Z$/i.test(q.updatedSince)) return fail(reply, 40002, 'Time must be in UTC.');
+    if (q.updatedSince) { const m = /^(\d{4})-?(\d{2})-?(\d{2})T(\d{2}):?(\d{2}):?(\d{2})?/.exec(q.updatedSince); if (m) since = Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, +(m[6] ?? 0)); }
     const types = q.alarmType ? q.alarmType.split(',') : null;
     return st.alarms.filter((a) => a.updatedAt >= since && (!types || types.includes(a.alarmType))).sort((a, b) => a.updatedAt - b.updatedAt).map((a) => ({ id: a.id, updateTime: utcCompact(a.updatedAt) }));
   });
