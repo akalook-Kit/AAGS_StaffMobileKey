@@ -121,10 +121,10 @@ export const SCHEMAS = {
       fullReadingMeansNew: z.boolean().default(true),
       /** 2.20 A low/critical battery alarm closes by itself after this many cards accepted by the lock without the
        *  low-battery flag (and no voltage reading at or below the threshold). 0 = off. */
-      clearAfterCards: z.number().int().min(0).max(20).default(3),
+      clearAfterCards: z.number().int().min(0).max(20).default(2),
       /** 2.20 Lock events that count as a card accepted (64 staff card, 67 guest card). */
       cardAcceptedCodes: z.array(z.number().int()).default([64, 67]),
-    }).default({ staleAfterDays: 30, autoTicket: 'critical', voltage: { highRange: { low: null, critical: null }, lowRange: { low: null, critical: 3.6 } }, changeJumpVolts: 0.8, stillAlarmingDays: 14, fullReadingMeansNew: true, clearAfterCards: 3, cardAcceptedCodes: [64, 67] }),
+    }).default({ staleAfterDays: 30, autoTicket: 'critical', voltage: { highRange: { low: null, critical: null }, lowRange: { low: null, critical: 3.6 } }, changeJumpVolts: 0.8, stillAlarmingDays: 14, fullReadingMeansNew: true, clearAfterCards: 2, cardAcceptedCodes: [64, 67] }),
     /** 2.6 event log: door entrances are lock events too. The connector's Visionline watch also asks for these codes
      *  [Web API §7.14.1; 64 = staff card accepted]. Add others (e.g. guest card accepted) from the hotel's lock
      *  documentation; switch off to receive refused entries and battery events only. */

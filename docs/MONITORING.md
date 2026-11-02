@@ -13,18 +13,29 @@ connector or Visionline down) and stays red until the problem is fixed.
 | Door back online | The lock reports again (or its "online" code) - the alert closes | - | Doors offline |
 | Gateway offline (2.19) | A gateway listed on Online locks & gateways is named by an open Visionline alarm (its EEID, or its name with "gateway", "offline"…), or all the locks behind it (at least 2) are offline | critical | Doors and gateways offline |
 | Gateway back | No alarm names it any more and one of its locks reports again - the alert closes | - | Doors and gateways offline |
-| Keycards in a generic name (2.20) | Valid staff keycards held under a name that is not a person ("Staff", "HK 2", "Spare", a number) | warning | Lock alarms and batteries |
+| Keycards in a generic name (2.20) | Valid staff keycards held under a name that is not a person ("Staff", "HK 2", "Spare", a number). 2.21: the site's administrators also get an e-mail for each new one (each card once) | warning | Lock alarms and batteries |
 | First entrance at a watched door | First entrance each day (or every entrance, or the first only) at a door you chose | notice | Watched doors (VIP) |
 | Lock alarm | Open Visionline alarm in the last 24 h (from the Visionline read in Reports & sync) | critical | Lock alarms and batteries |
 | Battery critically low | Battery module | critical | Lock alarms and batteries |
 | Connector offline | No contact for 10 minutes | critical | System |
-| Visionline not reachable | The connector reports it cannot reach the Web API | critical | System |
+| Visionline not reachable | The connector has not reached the Web API for **3 minutes** (2.21; one dropped connection no longer raises it) | critical | System |
 | **Disk space low** | Less than **50 GB** free on C: of the platform server, or of the Visionline PC (connector 0.8.0 or newer reports it) | critical, **red until fixed** | System |
 | **Database large** | Database bigger than **500 MB** | warning | System |
 
 All limits are in **Settings -> Alert thresholds**. An alert is announced once when it opens and (optionally) once
 when it is over; the same problem coming back within 60 minutes is not announced again. **Mark as seen** records
 who is handling it; it does not silence a disk or connector alert.
+
+### About "Visionline cannot be reached: read ECONNRESET" (2.21)
+
+Up to 2.20 a single dropped connection raised this red alarm. The connector keeps its connection to Visionline open
+between requests; when Visionline (or Windows under it) closes an idle connection, the next request on it fails with
+"read ECONNRESET" although Visionline is working. The connector checks Visionline every minute, so the alarm opened and
+closed again and again (with an e-mail/SMS each time) and pressing Refresh did not make it go away for long.
+Connector 0.15.0 (in the 2.21 installer) closes idle connections itself after 15 seconds, resends a read once on a new
+connection, and checks twice before saying Visionline is down; the platform raises the alarm only after 3 minutes
+without an answer. If the alarm still appears after 2.21, Visionline really is not answering: check the Visionline
+service and its Web API on the Visionline PC.
 
 ### About "door offline"
 

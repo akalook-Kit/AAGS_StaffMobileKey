@@ -303,11 +303,11 @@ export async function doorBatterySets(db: pg.Pool | pg.PoolClient, hotelId: stri
 /**
  * Armel, 31 Oct: when the lock accepts two or three staff keycards without logging the low-battery flag again, the
  * battery is not low. Each accepted card adds one; a low/critical battery event sets the count back to 0. When the
- * count reaches policy.battery.clearAfterCards (3) and the last voltage reading is not at or below the site's
+ * count reaches policy.battery.clearAfterCards (2 since 2.21) and the last voltage reading is not at or below the site's
  * threshold, the alarm and its request close by themselves.
  */
 export async function onCardAccepted(c: pg.PoolClient, hotelId: string, ctx: BatteryContext, ev: { doorID?: unknown; eventCode: number; eventTime?: string }) {
-  const need = ctx.policy.battery.clearAfterCards ?? 3;
+  const need = ctx.policy.battery.clearAfterCards ?? 2;
   if (!need) return;
   const door = ctx.resolveDoor(ev.doorID);
   const doorId = door?.id ?? String(ev.doorID ?? '?');

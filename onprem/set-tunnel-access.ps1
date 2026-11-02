@@ -14,6 +14,11 @@
     .\set-tunnel-access.ps1 -Hostname portal.afratech.africa -Token <the token>     switch it on
     .\set-tunnel-access.ps1 -Show                                                   what is set
     .\set-tunnel-access.ps1 -Disable                                                switch it off
+    .\set-tunnel-access.ps1 -QuickTest                                              try it now, no domain (2.21)
+
+  -QuickTest needs no domain, no Cloudflare account and no token: Cloudflare gives a random temporary address
+  (https://<words>.trycloudflare.com) while this window stays open. For a test only: the address changes every time,
+  Cloudflare gives no uptime guarantee and Cloudflare Access cannot be put in front; the secret path stays required.
 
   The token is a secret: it is passed to cloudflared and stored by it in Windows (its service), never written to
   this platform's files or logs. Options: -Port 8447 (the local port Cloudflare's agent uses), -NoSecretPath (only
@@ -27,6 +32,7 @@ param(
   [switch]$NoSecretPath,
   [switch]$Disable,
   [switch]$Show,
+  [switch]$QuickTest,
   [string]$CloudflaredExe = '',
   [string]$CloudflaredVersion = '2026.9.3',
   [string]$DataDir = (Join-Path $env:ProgramData 'StaffMobileKey\Platform')
@@ -57,6 +63,7 @@ if ($Show) { Show-State; exit 0 }
 $cfg = Get-Content $file -Raw | ConvertFrom-Json
 $listeners = @($cfg.listeners | Where-Object { $_.name -ne 'tunnel' })
 if (-not $Disable) {
+  if ($QuickTest) { $NoSecretPath = $false; $Hostname = 'quick.trycloudflare.com' }
   if ($Hostname -notmatch '^(?=.{4,200}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$') { Fail 'Give the outside address with -Hostname, for example portal.afratech.africa (no https://, no path).' }
   if ($Port -lt 1024 -or $Port -gt 65535) { Fail '-Port must be between 1024 and 65535.' }
   if (@($listeners | Where-Object { [int]$_.port -eq $Port }).Count) { Fail "Port $Port is already used by the portal; choose another with -Port." }
@@ -102,7 +109,7 @@ if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Cloudf
   Remove-Item $tmp -Force; Remove-Item $cfExe -Force -ErrorAction SilentlyContinue
   Fail "cloudflared.exe is not signed by Cloudflare ($($sig.Status)); it was deleted and nothing was changed."
 }
-if (-not $Token -and -not (Get-Service cloudflared -ErrorAction SilentlyContinue)) { Remove-Item $tmp -Force; Fail 'Give the tunnel token from the Cloudflare dashboard with -Token (see the top of this script).' }
+if (-not $QuickTest -and -not $Token -and -not (Get-Service cloudflared -ErrorAction SilentlyContinue)) { Remove-Item $tmp -Force; Fail 'Give the tunnel token from the Cloudflare dashboard with -Token (see the top of this script).' }
 
 Copy-Item $file "$file.bak" -Force; Move-Item $tmp $file -Force
 Restart-Service StaffMobileKeyGateway
@@ -110,6 +117,31 @@ Start-Sleep -Seconds 3
 if (-not (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)) {
   Copy-Item "$file.bak" $file -Force; Restart-Service StaffMobileKeyGateway
   Fail "The gateway did not open port $Port; the previous settings are back. See $(Join-Path $DataDir 'logs\gateway.log')."
+}
+if ($QuickTest) {
+  # A temporary Cloudflare address for this server while the window is open; nothing is installed.
+  $log = Join-Path $env:TEMP "cloudflared-quick-$PID.log"
+  $p = Start-Process -FilePath $cfExe -ArgumentList @('tunnel', '--no-autoupdate', '--url', "http://127.0.0.1:$Port", '--logfile', $log) -PassThru -WindowStyle Hidden
+  $quick = $null
+  for ($i = 0; $i -lt 60 -and -not $quick -and -not $p.HasExited; $i++) {
+    Start-Sleep -Seconds 1
+    if (Test-Path $log) { $m = Select-String -Path $log -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' | Select-Object -First 1; if ($m) { $quick = $m.Matches[0].Value } }
+  }
+  if (-not $quick) { if (-not $p.HasExited) { Stop-Process $p -Force }; Fail "Cloudflare did not give a test address. The server must reach Cloudflare outbound (TCP 443 and 7844). Details: $log" }
+  $c2 = Get-Content $file -Raw | ConvertFrom-Json
+  $outside = $quick + $c2.secretPath
+  Set-Content -Path $outsideFile -Value $outside -Encoding ASCII
+  & icacls $outsideFile /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' '*S-1-5-19:R' | Out-Null
+  Write-Host ''
+  Write-Host 'TEST outside address (works while this window stays open):' -ForegroundColor Green
+  Write-Host "  $outside/" -ForegroundColor Cyan
+  Write-Host '  Keep it like a password. Press Ctrl+C here to stop; the address then stops working.'
+  try { Wait-Process -Id $p.Id } finally {
+    if (-not $p.HasExited) { Stop-Process $p -Force }
+    Remove-Item $outsideFile -Force -ErrorAction SilentlyContinue
+    Write-Host 'Test address stopped. The tunnel entrance (127.0.0.1 only) stays ready for the real set-up with your domain.'
+  }
+  exit 0
 }
 if ($Token) {
   if (Get-Service cloudflared -ErrorAction SilentlyContinue) { & $cfExe service uninstall | Out-Null; Start-Sleep -Seconds 2 }

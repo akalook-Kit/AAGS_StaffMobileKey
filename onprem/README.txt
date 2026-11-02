@@ -14,6 +14,13 @@ WHAT THE SERVER NEEDS
   - .NET Framework 4.8 (part of Windows)
   - 2 GB free disk space (more as the database grows; Monitoring warns below 50 GB)
 
+NEW IN 2.21
+  Connector 0.15.0: no more false "Visionline cannot be reached: read ECONNRESET" alarms (idle connections closed
+  first, a read is resent once, the alarm needs 3 minutes without Visionline). "Issued from Visionline" with the
+  Visionline operator and the person linked to it; staff keycards record who issued them. A battery alarm closes
+  after 2 cards. New generic-name keycards are e-mailed to the administrators. set-tunnel-access.ps1 -QuickTest:
+  try outside access now with a temporary Cloudflare address, no domain needed.
+
 NEW IN 2.20
   "Stale" is back. Days each battery set lasted (Battery status and Lock troubleshooting). A battery alarm closes by
   itself after 3 cards accepted without the low flag. Visionline is read on request (Refresh from Visionline, at most

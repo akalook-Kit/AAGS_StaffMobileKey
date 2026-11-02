@@ -26,7 +26,7 @@ export const DATASETS: Record<string, Dataset> = {
         COALESCE(s.full_name, NULLIF(trim(coalesce(u.given_name,'') || ' ' || coalesce(u.surname,'')), ''), 'Unknown holder') AS person,
         COALESCE(u.user_group, vc.user_group, '—') AS user_group,
         CASE WHEN k.id IS NOT NULL THEN 'Mobile key' WHEN vc.reg_no IS NOT NULL THEN 'Keycard' ELSE 'Not matched' END AS card_kind,
-        COALESCE(o.display_name, CASE WHEN vc.reg_no IS NOT NULL THEN 'Visionline desk' END, 'Unknown (not matched)') AS issued_by,
+        COALESCE(o.display_name, CASE WHEN vc.reg_no IS NOT NULL THEN COALESCE(vl_issuer_label(e.hotel_id, vc.reg_no), 'Issued from Visionline') END, 'Unknown (not matched)') AS issued_by,
         COALESCE(e.registration_number, '—') AS card_no
       FROM visionline_events e
       LEFT JOIN resources d ON d.hotel_id=e.hotel_id AND d.kind='door' AND (d.external_id=e.door_id OR d.data->>'doorID'=e.door_id)
@@ -50,7 +50,7 @@ export const DATASETS: Record<string, Dataset> = {
         CASE WHEN k.key_id IS NOT NULL THEN 'Mobile key' ELSE 'Keycard' END AS kind,
         CASE WHEN k.active AND NOT k.cancelled AND NOT k.discarded AND NOT k.overridden AND (k.expires_at IS NULL OR k.expires_at > now()) THEN 'Valid' ELSE 'Ended' END AS state,
         CASE WHEN k.deadbolt_override THEN 'Overrides deadbolt' WHEN k.deadbolt_override = false THEN 'No deadbolt override' ELSE 'Not reported' END AS deadbolt,
-        COALESCE(o.display_name, CASE WHEN k.key_id IS NULL THEN 'Visionline desk' END, '—') AS issued_by,
+        COALESCE(o.display_name, CASE WHEN k.key_id IS NULL THEN COALESCE((SELECT p.operator_name FROM portal_encoded_cards p WHERE p.hotel_id=k.hotel_id AND p.reg_no=k.reg_no), vl_issuer_label(k.hotel_id, k.reg_no), 'Issued from Visionline') END, '—') AS issued_by,
         CASE WHEN k.expires_at IS NULL THEN 'No end' WHEN k.expires_at < now() THEN 'Ended' WHEN k.expires_at < now() + interval '7 days' THEN 'Within 7 days'
              WHEN k.expires_at < now() + interval '30 days' THEN 'Within 30 days' WHEN k.expires_at < now() + interval '1 year' THEN 'Within a year' ELSE 'Later' END AS ends,
         CASE WHEN k.door_count = 0 THEN 'Door groups only' WHEN k.door_count <= 5 THEN '1-5 doors' WHEN k.door_count <= 20 THEN '6-20 doors' ELSE 'More than 20 doors' END AS doors_band,

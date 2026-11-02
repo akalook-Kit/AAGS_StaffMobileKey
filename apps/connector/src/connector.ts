@@ -18,7 +18,7 @@ import { readDirectory } from './visionline/directory.ts';
 /** Commands that change Visionline; refused in read-only mode. */
 const WRITES = new Set(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'CREATE_USER_GROUP', 'ENCODE_KEYCARD', 'CANCEL_KEYCARD', 'DOOR_COMMANDS']);
 
-export const CONNECTOR_VERSION = '0.14.0';
+export const CONNECTOR_VERSION = '0.15.0';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -115,7 +115,7 @@ export class Connector {
     const status = !credentialsConfigured || !this.visionlineReachable ? (this.lastError ? 'ERROR' : 'DEGRADED') : 'OK';
     return {
       connectorVersion: CONNECTOR_VERSION, contractVersion: CONTRACT_VERSION, status, adapter: ADAPTER_VERSION,
-      credentialsConfigured, visionlineReachable: this.visionlineReachable, visionlineQueue: this.vl.limiter.waiting, visionlineMaxConcurrent: this.vl.limiter.maxConcurrent, visionlineApiVersion: this.apiVersion,
+      credentialsConfigured, visionlineReachable: this.visionlineReachable, visionlineDownSince: this.visionlineDownSince, visionlineQueue: this.vl.limiter.waiting, visionlineMaxConcurrent: this.vl.limiter.maxConcurrent, visionlineApiVersion: this.apiVersion,
       tlsTrust: this.vl.tlsState, lastSuccessfulSessionAt: this.vl.lastSessionAt, lastError: this.lastError,
       queueDepth: this.journal.depth(), inFlight: this.journal.inFlight(), clockOffsetMs: this.vl.skewMs,
       callbackHealth: this.cfg.visionline.watch ? `Visionline watch: ${this.watch.status}` : 'Visionline watch switched off',
@@ -164,15 +164,27 @@ export class Connector {
 
   /** Lightweight Visionline probe for health: create/reuse a session and list resources. */
   async probeVisionline() {
-    try {
-      const r = await this.vl.request<{ id: string }[]>('GET', '/resources');
-      this.visionlineReachable = true;
-      this.apiVersion = `v1 (${r.length} resources)`;
-      if (this.lastError?.startsWith('Visionline')) this.lastError = null;
-    } catch (e) {
-      this.visionlineReachable = false;
-      this.lastError = `Visionline: ${(e as Error).message}`;
+    // 2.21 One failed probe is not an outage: try again after a few seconds before saying Visionline is unreachable.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const r = await this.vl.request<{ id: string }[]>('GET', '/resources');
+        this.markVisionline(true);
+        this.apiVersion = `v1 (${r.length} resources)`;
+        if (this.lastError?.startsWith('Visionline')) this.lastError = null;
+        return;
+      } catch (e) {
+        if (attempt === 0) { await sleep(5_000); continue; }
+        this.markVisionline(false);
+        this.lastError = `Visionline: ${(e as Error).message}`;
+      }
     }
+  }
+
+  /** 2.21 Since when Visionline has not answered (null while it answers): the platform alarms only after a few minutes. */
+  visionlineDownSince: string | null = null;
+  private markVisionline(ok: boolean) {
+    this.visionlineReachable = ok;
+    if (ok) this.visionlineDownSince = null; else this.visionlineDownSince ??= new Date().toISOString();
   }
 
   // ---- command execution ---------------------------------------------------------------------
@@ -247,14 +259,14 @@ export class Connector {
           break;
         }
       }
-      this.visionlineReachable = true;
+      this.markVisionline(true);
     } catch (e) {
       const info = ['STALE_SEALING_KEY', 'SEALED_MISMATCH', 'VISIONLINE_READ_ONLY'].includes((e as any)?.code)
         ? { code: (e as any).code, message: (e as Error).message, retryable: false }
         : toErrorInfo(e);
       if ((e as any)?.partial) (info as any).partial = (e as any).partial;
       result = { status: 'FAILED', error: info };
-      if (info.code === 'VISIONLINE_UNREACHABLE') this.visionlineReachable = false;
+      if (info.code === 'VISIONLINE_UNREACHABLE') this.markVisionline(false);
     }
     this.journal.put(cmd, 'DONE', result!);
     return result!;

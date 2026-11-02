@@ -37,10 +37,30 @@ security review this should be mentioned; if it is not acceptable, use a relay s
 
 ## Setting it up (about 20 minutes)
 
+### 0. Try it today without a domain (2.21)
+
+```powershell
+cd "C:\Program Files\StaffMobileKey\Platform"
+.\set-tunnel-access.ps1 -QuickTest
+```
+
+No domain, no Cloudflare account, no token: Cloudflare gives a random temporary address
+(`https://<words>.trycloudflare.com/k-…`) that works while the PowerShell window stays open (Ctrl+C stops it). For a
+test only: the address changes each time, Cloudflare gives no uptime guarantee for it, and Cloudflare Access cannot be
+put in front, so the secret path stays required. Use it to check that the hotel's firewall lets the server out
+(TCP 443 / 7844) and that the portal works from a phone on mobile data.
+
 ### 1. The domain on Cloudflare
 
 - A domain whose DNS is on Cloudflare (free plan). Either move an existing domain's nameservers to Cloudflare, or
   register a separate one just for the portal. (Cloudflare Tunnel needs the domain's DNS on Cloudflare.)
+- **Free domains for now** (2.21): free sub-domain services that let you set Cloudflare's nameservers work, for
+  example **DigitalPlat FreeDomain** (names such as `khb-portal.dpdns.org`, usually approved quickly) or **EU.org**
+  (names such as `khb-portal.eu.org`, approval can take days or weeks). Register the name there, add it to Cloudflare
+  (free plan), and put the two Cloudflare nameservers into the free service. Free services can be withdrawn and some
+  security filters distrust them: for the hotels' production use, a paid domain (about US$10 a year, also sold by
+  Cloudflare Registrar at cost) is the safer choice. Moving later is easy: change the public hostname in the tunnel
+  and run `set-tunnel-access.ps1 -Hostname <new name>` again (no new token needed).
 
 ### 2. The tunnel in the Cloudflare dashboard
 

@@ -66,6 +66,7 @@ export function SetupReportPage() {
                 <tbody>{x.visionline.operators.rows.map((row: string[], i: number) => <tr key={i}>{row.map((c, j) => <td key={j}>{c}</td>)}</tr>)}</tbody></table>
             </>
           ) : <p>Who can do what in Visionline is not given by the Visionline Web API. Export the operator list from Visionline and import it above to show it here.</p>}
+          <OperatorLinks />
         </Sec>
         <Sec title="Access by User Group">
           <table className="ssr-t"><thead><tr><th>User group</th><th>People</th><th>Valid keycards</th><th>Mobile keys</th><th>Override</th><th>Door groups</th><th>Doors</th></tr></thead>
@@ -138,6 +139,34 @@ function ByPerson({ rows }: { rows: any[] }) {
           <td>{r.doors.length > 12 ? `${r.doors.slice(0, 12).join(', ')} … (${r.doors.length})` : r.doors.join(', ') || '—'}</td>
           <td>{[r.override && 'deadbolt override', r.mobile && 'mobile key', r.portalUser && `portal user: ${r.portalUser}`].filter(Boolean).join(' · ')}</td></tr>)}</tbody></table>
       {!rows.length && <p>No keycards read from Visionline yet (Visionline cards &amp; people).</p>}
+    </>
+  );
+}
+
+/**
+ * 2.21 Which person each Visionline operator is, so a keycard made in Visionline shows "Issued from Visionline ·
+ * operator (person)". A user's own verified Visionline sign-in links them automatically.
+ */
+function OperatorLinks() {
+  const { base, can } = useHotel();
+  const ops = useApi<any[]>(`${base}/visionline/operators`);
+  const users = useApi<any[]>(can('settings.manage') ? `${base}/operators` : null);
+  const [error, setError] = useState<unknown>(null);
+  if (!ops.data?.length) return null;
+  const link = async (vlOperator: string, operatorId: string) => {
+    setError(null);
+    try { await api(`${base}/visionline/operators/link`, { method: 'PUT', body: { vlOperator, operatorId: operatorId || null } }); await ops.reload(); } catch (e) { setError(e); }
+  };
+  return (
+    <>
+      <h4>Who each Visionline operator is</h4>
+      <ErrorNote error={error} />
+      <table className="ssr-t"><thead><tr><th>Visionline operator</th><th>Template</th><th>Keycards known to be issued</th><th>Person (portal user)</th></tr></thead>
+        <tbody>{ops.data.map((o: any) => <tr key={o.name}><td>{o.name}{o.shared ? ' (shared)' : ''}</td><td>{o.template ?? '—'}</td><td>{o.cardsIssued || '—'}</td>
+          <td>{can('settings.manage') && users.data && o.portalUser?.by !== 'own Visionline sign-in'
+            ? <select className="no-print" aria-label={`Person for ${o.name}`} value={o.portalUser?.id ?? ''} onChange={(e) => void link(o.name, e.target.value)}><option value="">Not linked</option>{users.data.map((u: any) => <option key={u.id} value={u.id}>{u.display_name ?? u.email}</option>)}</select>
+            : null}
+            <span className={can('settings.manage') && users.data && o.portalUser?.by !== 'own Visionline sign-in' ? 'print-only' : ''}>{o.portalUser ? `${o.portalUser.name}${o.portalUser.by === 'own Visionline sign-in' ? ' (own Visionline sign-in)' : ''}` : '—'}</span></td></tr>)}</tbody></table>
     </>
   );
 }

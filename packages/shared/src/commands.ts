@@ -260,6 +260,8 @@ export const ConnectorHealth = z.object({
   adapter: z.string(),
   credentialsConfigured: z.boolean(),
   visionlineReachable: z.boolean(),
+  /** 2.21 When Visionline stopped answering (null while it answers). */
+  visionlineDownSince: z.string().nullable().optional(),
   /** 2.13 Requests waiting for their turn on the shared Visionline, and the connector's cap. */
   visionlineQueue: z.number().int().optional(), visionlineMaxConcurrent: z.number().int().optional(),
   visionlineApiVersion: z.string().nullable(),

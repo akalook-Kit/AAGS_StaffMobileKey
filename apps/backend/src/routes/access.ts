@@ -80,7 +80,8 @@ export function accessRoutes(app: FastifyInstance) {
     const events = r.events.filter(mine);
     const cards = q.holder ? await many(pool, `SELECT k.reg_no, k.starts_at, k.expires_at, k.door_count, k.deadbolt_override, k.key_id IS NOT NULL AS mobile_key,
         (k.starts_at IS NULL OR k.starts_at <= now()) AND (k.expires_at IS NULL OR k.expires_at > now()) AND NOT k.cancelled AND NOT k.discarded AND NOT k.overridden AND k.active AS valid,
-        (SELECT o.display_name FROM key_requests kr JOIN operators o ON o.id=kr.requested_by WHERE kr.id=k.key_id) AS issued_by
+        COALESCE((SELECT o.display_name FROM key_requests kr JOIN operators o ON o.id=kr.requested_by WHERE kr.id=k.key_id),
+          (SELECT p.operator_name FROM portal_encoded_cards p WHERE p.hotel_id=k.hotel_id AND p.reg_no=k.reg_no), vl_issuer_label(k.hotel_id, k.reg_no)) AS issued_by
       FROM vl_cards k WHERE k.hotel_id=$1 AND k.card_holder=$2 ORDER BY valid DESC, k.expires_at DESC NULLS LAST LIMIT 20`, [hotelId, q.holder]) : [];
     const doors = new Map<string, { door: string; doorId: string | null; entrances: number; refused: number; last: string }>();
     for (const e of events) {
@@ -92,7 +93,7 @@ export function accessRoutes(app: FastifyInstance) {
     }
     return { tz: r.tz, days: q.days,
       person: { name: display, holder: q.holder ?? null, group: u?.user_group ?? s?.department ?? null, jobTitle: s?.job_title ?? null, staffId: s?.id ?? null },
-      cards: cards.map((c) => ({ regNo: c.reg_no, startsAt: c.starts_at, expiresAt: c.expires_at, doors: c.door_count, deadbolt: c.deadbolt_override, mobileKey: c.mobile_key, valid: c.valid, issuedBy: c.issued_by ?? (c.mobile_key ? null : 'Visionline desk') })),
+      cards: cards.map((c) => ({ regNo: c.reg_no, startsAt: c.starts_at, expiresAt: c.expires_at, doors: c.door_count, deadbolt: c.deadbolt_override, mobileKey: c.mobile_key, valid: c.valid, issuedBy: c.issued_by ?? (c.mobile_key ? null : 'Issued from Visionline') })),
       totals: { ...totals(events), entrances: r.counts.entrances, refused: r.counts.all - r.counts.entrances }, doors: [...doors.values()].sort((a, b) => b.last.localeCompare(a.last)), byDay: byDay(events, tzDay), events: events.slice(0, 500) };
   });
 }

@@ -21,7 +21,7 @@ export function VisionlinePage() {
   const d = ov.data;
   return (
     <>
-      <PageHead title="Visionline cards & people" intro="Read from your Visionline by the connector: doors, user groups, people and keycards when you press Refresh from Visionline (or on a schedule, Settings → Reports & sync), and a card made at the Visionline desk within seconds. Read-only; nothing here changes Visionline." />
+      <PageHead title="Visionline cards & people" intro="Read from your Visionline by the connector: doors, user groups, people and keycards when you press Refresh from Visionline (or on a schedule, Settings → Reports & sync), and a card made in Visionline within seconds. Read-only; nothing here changes Visionline." />
       <RefreshVisionline onDone={() => void ov.reload()} />
       <ErrorNote error={ov.error} />
       {d && <Status d={d} />}

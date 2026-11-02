@@ -154,6 +154,10 @@ async function sampleSystem(diskPath: string) {
   await pool.query(`DELETE FROM system_samples WHERE at < now() - interval '400 days'`);
 }
 
+/** 2.21 Minutes Visionline must stay unreachable before the critical alarm (and its e-mails and SMS) goes out. */
+export const VL_DOWN_MINUTES = 3;
+const vlFirstDown = new Map<string, number>();
+
 // ---- the minute check ---------------------------------------------------------------------------------
 export async function checkHotel(hotelId: string, now = new Date()) {
   const pol = await monitoringPolicy(hotelId);
@@ -168,9 +172,16 @@ export async function checkHotel(hotelId: string, now = new Date()) {
       await raise(hotelId, { kind: 'connector_offline', subject: c.id, severity: 'critical', title: `Hotel connector "${c.name}" is offline`,
         detail: c.last_seen_at ? `No contact since ${new Date(c.last_seen_at).toISOString().slice(0, 16).replace('T', ' ')} UTC. Keys cannot be issued or revoked.` : 'It has never connected.' });
     } else if (c.health && c.health.visionlineReachable === false && c.health.credentialsConfigured) {
-      vlDown.push(c.id);
-      await raise(hotelId, { kind: 'visionline_unreachable', subject: c.id, severity: 'critical', title: 'Visionline cannot be reached', detail: c.health.lastError ?? 'The connector cannot reach the Visionline Web API.' });
-    }
+      // 2.21 Only an outage that lasts: one dropped connection is not "Visionline cannot be reached". Connector 0.15+
+      // says since when; for older connectors the platform remembers when it first saw it.
+      const since = Date.parse(c.health.visionlineDownSince ?? '') || (vlFirstDown.get(c.id) ?? (vlFirstDown.set(c.id, now.getTime()), now.getTime()));
+      const open = await one(pool, `SELECT 1 FROM monitor_alerts WHERE hotel_id=$1 AND kind='visionline_unreachable' AND subject=$2 AND resolved_at IS NULL`, [hotelId, c.id]);
+      if (open || now.getTime() - since >= VL_DOWN_MINUTES * 60_000) {
+        vlDown.push(c.id);
+        await raise(hotelId, { kind: 'visionline_unreachable', subject: c.id, severity: 'critical', title: 'Visionline cannot be reached',
+          detail: `${c.health.lastError ?? 'The connector cannot reach the Visionline Web API.'} (since ${new Date(since).toISOString().slice(11, 16)} UTC)` });
+      }
+    } else vlFirstDown.delete(c.id);
   }
   await clearOthers(hotelId, 'connector_offline', offline);
   await clearOthers(hotelId, 'visionline_unreachable', vlDown);
@@ -285,6 +296,38 @@ async function checkGenericCards(hotelId: string) {
   if (g.length) await raise(hotelId, { kind: 'generic_keycards', subject: 'all', severity: 'warning', title: `${g.length} staff keycard${g.length === 1 ? '' : 's'} in a generic name`,
     detail: `Held under names that are not a person (e.g. ${[...new Set(g.map((x) => x.name || '(no name)'))].slice(0, 4).join(', ')}): nobody can tell who used them. Staff keycards → Keycards in a generic name.`, data: { count: g.length } });
   else await clear(hotelId, 'generic_keycards', 'all', 'Every valid staff keycard is now in a person\'s name.');
+  await emailNewGenericCards(hotelId, g);
+}
+
+/**
+ * 2.21 The site's administrators get an e-mail for each new keycard in a generic name (each card once), besides the
+ * portal warning and the alert contacts of the "locks" category. Sent only when e-mail is set up (Settings → Alerts).
+ */
+export async function emailNewGenericCards(hotelId: string, g: Awaited<ReturnType<typeof genericCards>>) {
+  if (!g.length) return { sent: 0, cards: 0 };
+  const done = new Set((await many(pool, `SELECT reg_no FROM generic_card_notices WHERE hotel_id=$1 AND reg_no = ANY($2::text[])`, [hotelId, g.map((x) => x.regNo)])).map((r) => r.reg_no as string));
+  const fresh = g.filter((x) => !done.has(x.regNo));
+  if (!fresh.length) return { sent: 0, cards: 0 };
+  const ch = await channels(hotelId);
+  if (!ch.email.enabled) return { sent: 0, cards: fresh.length };
+  const admins = await many(pool, `SELECT DISTINCT o.email FROM memberships m JOIN operators o ON o.id=m.operator_id WHERE m.hotel_id=$1 AND m.role='HOTEL_ADMIN' AND o.status='ACTIVE' AND o.email IS NOT NULL`, [hotelId]);
+  const hotel = await hotelName(hotelId);
+  const subject = `[${hotel}] ${fresh.length} new staff keycard${fresh.length === 1 ? '' : 's'} in a generic name`;
+  const text = [`These valid staff keycards are held under a name that is not a person, so nobody can tell who used them:`, '',
+    ...fresh.slice(0, 50).map((x) => `- Card ${x.regNo}: "${x.name || '(no name)'}"${x.group ? `, user group ${x.group}` : ''}${x.expiresAt ? `, valid until ${new Date(x.expiresAt).toISOString().slice(0, 10)}` : ''}`),
+    ...(fresh.length > 50 ? [`... and ${fresh.length - 50} more.`] : []), '',
+    'Put each card in the name of the person who holds it (in Visionline), or cancel it.',
+    'Access Monitoring Tool: Staff keycards → Keycards in a generic name.'].join('\n');
+  let sent = 0;
+  for (const a of admins) {
+    let error: string | null = null;
+    try { await sendEmail(ch.email, a.email, subject, text, hotelId); sent++; } catch (e) { error = (e as Error).message.slice(0, 300); }
+    await pool.query(`INSERT INTO alert_messages (hotel_id, alert_id, contact_id, channel, recipient, subject, status, error) VALUES ($1,NULL,NULL,'email',$2,$3,$4,$5)`,
+      [hotelId, maskRecipient('email', a.email), subject, error ? 'failed' : 'sent', error]);
+  }
+  // Each card once, even if no administrator could be reached (the portal warning stays).
+  await pool.query(`INSERT INTO generic_card_notices (hotel_id, reg_no) SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING`, [hotelId, fresh.map((x) => x.regNo)]);
+  return { sent, cards: fresh.length };
 }
 
 /** 2.19 Gateways: offline from a Visionline alarm or when all their locks are offline; the alert closes by itself. */

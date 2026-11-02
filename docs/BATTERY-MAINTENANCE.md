@@ -119,5 +119,5 @@ door, and the lock sends that event to the simulated Visionline. `.\scripts\wind
 - **Cards accepted without the low flag:** each card the lock accepts (events 64 / 67) counts; a low or critical battery
   event sets the count back to 0. At 3 (setting `clearAfterCards`, 0 = off) the alert and its request are resolved
   ("No low-battery flag with the last 3 cards accepted by the lock"), unless the last voltage reading is at or below the
-  site's threshold.
+  site's threshold. **2.21: 2 cards** (Armel, 31 Oct: "2 are enough"); sites that had 3 are moved to 2.
 - The word for a lock not heard from for `staleAfterDays` is **stale** again.

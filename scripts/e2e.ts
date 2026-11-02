@@ -1142,10 +1142,10 @@ async function main() {
     const ru = await until('room 309 usage', () => call('GET', `${H}/reports/room-keycards?from=${from}&to=${to}`, admin), (r) => (r.json.rooms ?? []).find((x: any) => x.door === '309')?.cards?.length >= 2);
     const r309 = ru.json.rooms?.find((x: any) => x.door === '309');
     const g = r309?.cards.find((c: any) => c.card === guest.regNos[0]);
-    ok(r309 && g?.entries === 1 && g?.refused === 1 && /Visionline desk/.test(g.issuedBy), 'keycards used per room: room 309 lists the guest card (1 entry, 1 refused, issued at the Visionline desk)', r309);
+    ok(r309 && g?.entries === 1 && g?.refused === 1 && /Issued from Visionline/.test(g.issuedBy), 'keycards used per room: room 309 lists the guest card (1 entry, 1 refused, issued from Visionline)', r309);
     ok(r309?.cards.some((c: any) => c.card === desk.regNo && c.entries === 1), 'and the staff card used there');
     ok(g && Math.abs(new Date(g.first).getTime() - (Date.now() - 120 * 60_000)) < 3 * 60_000, 'events uploaded late from an offline lock are placed at the time the lock recorded them');
-    ok(ru.json.rooms.some((x: any) => x.cards.some((c: any) => c.kind === 'mobile' && c.issuedBy && !/Visionline desk/.test(c.issuedBy))), 'mobile keys show the portal user who issued them');
+    ok(ru.json.rooms.some((x: any) => x.cards.some((c: any) => c.kind === 'mobile' && c.issuedBy && !/Issued from Visionline/.test(c.issuedBy))), 'mobile keys show the portal user who issued them');
     ok(!ru.json.rooms.some((x: any) => /Entrance/.test(x.door)), 'guest rooms only by default');
     ok((await call('GET', `${H}/reports/room-keycards?from=${from}&to=${to}`, lakeAdmin)).status === 403, 'another hotel cannot read the room report');
     const rpdf = await fetch(`${H}/reports/room-keycards/pdf`, { method: 'POST', headers: { authorization: `Bearer ${admin}`, 'content-type': 'application/json' }, body: JSON.stringify({ from, to }) });
@@ -1278,7 +1278,7 @@ async function main() {
       const lg = await call('POST', `${H}/visionline-imports`, admin, { fileName: 'cards.txt', data: Buffer.from(log, 'utf8').toString('base64') });
       ok(lg.json.kind === 'card_log' && lg.json.issuers === 1, 'a Visionline card list with the operator is imported');
       const look = (await call('GET', `${H}/visionline/cards/${anyCard.reg_no}/lookup`, gm17)).json;
-      ok(look.card?.issuedBy === 'Visionline: Marie Desk', `"Issued by" now shows the Visionline operator for a desk card (${look.card?.issuedBy})`);
+      ok(look.card?.issuedBy === 'Issued from Visionline · Marie Desk', `"Issued by" now shows the Visionline operator for a desk card (${look.card?.issuedBy})`);
     }
     const ops = `Operator\tOperator template\r\nPMS\tInterface\r\nmarie\tFront office\r\n`;
     ok((await call('POST', `${H}/visionline-imports`, admin, { fileName: 'operators.txt', data: Buffer.from(ops).toString('base64') })).json.kind === 'operators', 'the Visionline operator list is imported');
@@ -1462,13 +1462,15 @@ async function main() {
     ok(Math.round(d209?.lastSetDays) === 30 && Math.round(d209?.currentSetDays) === 10, `door 209: previous set lasted ${Math.round(d209?.lastSetDays)} days, current set in for ${Math.round(d209?.currentSetDays)} days`, d209);
     const h209 = (await call('GET', `${H}/battery/doors/209/history`, maint20)).json;
     ok(h209.sets?.length === 2 && h209.sets[0].current === true, 'the door history lists each set with its days');
-    // A battery alarm, then three staff keycards accepted without the low flag: the alarm closes by itself.
+    // A battery alarm, then two staff keycards accepted without the low flag (2.21: 2, was 3): the alarm closes by itself.
     await bat('207', { kind: 'low', code: 529 });
     const low207 = await until('207 low', () => bd('207'), (d) => d?.alert);
     ok(low207?.state === 'LOW' && low207.alert, 'door 207: the lock raises a battery alarm');
-    for (let i = 0; i < 3; i++) { await call('POST', `${SIM}/sim/doors/207/event`, undefined, { code: 64, registrationNumber: 100 + i }); await sleep(400); }
+    await call('POST', `${SIM}/sim/doors/207/event`, undefined, { code: 64, registrationNumber: 100 }); await sleep(2500);
+    ok((await bd('207'))?.alert, 'one card is not enough: the alarm stays');
+    await call('POST', `${SIM}/sim/doors/207/event`, undefined, { code: 64, registrationNumber: 101 }); await sleep(400);
     const ok207 = await until('207 cleared by cards', () => bd('207'), (d) => d?.state === 'GOOD' && !d.alert, 30_000);
-    ok(ok207?.state === 'GOOD' && !ok207.alert, 'three staff keycards accepted without the low flag: the battery alarm closes by itself');
+    ok(ok207?.state === 'GOOD' && !ok207.alert, 'two staff keycards accepted without the low flag: the battery alarm closes by itself');
     // Expiry as a date: in the past is refused.
     const tok20 = (await call('POST', `${H}/keycards/qr-link`, admin, {})).json.path.split('/').pop();
     const past = await call('POST', `${API}/api/v1/public/keycard-requests/${tok20}`, undefined, { kind: 'new', staffType: 'permanent', givenName: 'Date', surname: 'Test', department: 'Housekeeping', reason: 'expiry test', managerName: 'HK manager', validUntil: new Date(Date.now() - 86_400_000).toISOString() });
@@ -1494,6 +1496,49 @@ async function main() {
     ok((await call('GET', `${API}/api/v1/me`, hr2)).status === 401, 'the other session of that person has ended');
     ok((await call('GET', `${API}/api/v1/me`, ch.json.token)).status === 200, 'the session that changed it continues');
     await call('POST', `${API}/api/v1/me/password`, ch.json.token, { current: 'Another-Passw0rd-2026', next: PW });
+  }
+
+  console.log('\n2.21: issued from Visionline with the operator, who issued staff keycards, generic keycards e-mailed');
+  {
+    const tok21 = (await call('POST', `${H}/keycards/qr-link`, admin, {})).json.path.split('/').pop();
+    const rq = await call('POST', `${API}/api/v1/public/keycard-requests/${tok21}`, undefined, { kind: 'new', staffType: 'permanent', givenName: 'Ines', surname: 'Ndongo', department: 'Housekeeping', reason: 'New starter 2.21', managerName: 'HK manager' });
+    // A keycard made in Visionline by operator "jdoe", recorded on the Keycards page.
+    const desk = await call('POST', `${SIM}/sim/desk/cards`, undefined, { userId: `vl-in-${Date.now() % 100000}`, givenName: 'Ines', surname: 'Ndongo', userGroup: 'Housekeeping', days: 90 });
+    await until('desk card 2.21', () => call('GET', `${H}/visionline/cards?q=${desk.json.regNo}&state=all`, admin), (x) => x.json?.[0]?.reg_no === String(desk.json.regNo), 60_000);
+    const before = (await call('GET', `${H}/visionline/cards?q=${desk.json.regNo}&state=all`, admin)).json[0];
+    ok(before.issued_by === null || /^Issued from Visionline/.test(before.issued_by ?? 'Issued from Visionline'), 'a card made in Visionline and not recorded: "Issued from Visionline"');
+    const rqId = rq.json.id ?? (await call('GET', `${H}/keycards/requests?q=Ndongo`, issuer)).json[0]?.id;
+    const is = await call('POST', `${H}/keycards/requests/${rqId}/issue`, issuer, { method: 'visionline_desk', userGroup: 'Housekeeping', cardLabel: 'HK 021', regNo: String(desk.json.regNo), vlOperator: 'jdoe' });
+    ok(is.status === 200 && is.json.status === 'ISSUED', 'recorded as issued from Visionline by operator jdoe', is.json);
+    const l1 = (await call('GET', `${H}/visionline/cards/${desk.json.regNo}/lookup`, admin)).json;
+    ok(l1.card?.issuedBy === 'Issued from Visionline · jdoe' || l1.issuedBy === 'Issued from Visionline · jdoe' || JSON.stringify(l1).includes('Issued from Visionline · jdoe'), 'card lookup: "Issued from Visionline · jdoe"', l1);
+    const eric = (await call('GET', `${H}/operators`, admin)).json.find((o: any) => o.email === 'issuer@khb.test');
+    ok((await call('PUT', `${H}/visionline/operators/link`, issuer, { vlOperator: 'jdoe', operatorId: eric.id })).status === 403, 'only administrators link Visionline operators to people');
+    ok((await call('PUT', `${H}/visionline/operators/link`, lakeAdmin, { vlOperator: 'jdoe', operatorId: eric.id })).status === 403, 'another site cannot link them');
+    const linked = await call('PUT', `${H}/visionline/operators/link`, admin, { vlOperator: 'jdoe', operatorId: eric.id });
+    ok(linked.status === 200 && linked.json.find((o: any) => o.name === 'jdoe')?.portalUser?.name === 'Eric Supervisor', 'operator jdoe is linked to Eric Supervisor');
+    const l2 = JSON.stringify((await call('GET', `${H}/visionline/cards/${desk.json.regNo}/lookup`, admin)).json);
+    ok(l2.includes('Issued from Visionline · jdoe (Eric Supervisor)'), 'the card now shows "Issued from Visionline · jdoe (Eric Supervisor)"');
+    const lst = (await call('GET', `${H}/visionline/cards?q=${desk.json.regNo}&state=all`, admin)).json[0];
+    ok(lst.issued_by === 'Issued from Visionline · jdoe (Eric Supervisor)', 'the Visionline card list shows the same', lst.issued_by);
+    const rq2 = (await call('GET', `${H}/keycards/requests?q=Ndongo`, issuer)).json[0];
+    ok(rq2.issuedBy === 'Eric Supervisor' && rq2.vlOperator === 'jdoe' && rq2.issuedAt, 'the staff keycard request records who issued it, when, and the Visionline operator');
+    const rg = (await call('GET', `${H}/keycards/register`, issuer)).json.find((x: any) => x.label === 'HK 021');
+    ok(/Issued from Visionline · jdoe \(Eric Supervisor\)/.test(rg?.issuedBy ?? ''), 'the keycard register shows who issued the card', rg);
+    ok((await call('GET', `${H}/keycards/register.csv`, issuer)).json.includes('Issued by'), 'and so does its export for HR');
+    const hk7 = (await call('GET', `${H}/keycards/register`, issuer)).json.find((x: any) => x.label === 'HK 007');
+    ok(/Eric Supervisor \(encoded from the portal\)/.test(hk7?.issuedBy ?? ''), 'a card encoded from the portal shows the user who encoded it', hk7);
+    await call('PUT', `${H}/visionline/operators/link`, admin, { vlOperator: 'jdoe', operatorId: null });
+    ok(JSON.stringify((await call('GET', `${H}/visionline/cards/${desk.json.regNo}/lookup`, admin)).json).includes('Issued from Visionline · jdoe"'), 'unlinked: the operator alone is shown');
+    // A keycard in a generic name: the administrators get an e-mail (once per card).
+    const gen = await call('POST', `${SIM}/sim/desk/cards`, undefined, { userId: `vl-st-${Date.now() % 100000}`, givenName: 'Staff', surname: '2', userGroup: 'Housekeeping', days: 30 });
+    await until('generic card read', () => call('GET', `${H}/keycards/attention`, admin), (x) => x.json?.generic?.some((g: any) => g.regNo === String(gen.json.regNo)), 60_000);
+    await call('POST', `${H}/monitoring/check`, admin, {});
+    const m1 = (await call('GET', `${H}/monitoring/messages`, admin)).json.filter((m: any) => /in a generic name/.test(m.subject ?? '') && !m.contact);
+    ok(m1.length >= 1 && m1.every((m: any) => !m.recipient.includes('admin@khb.test')), `the administrators are e-mailed about the generic keycard (${m1.length} message${m1.length === 1 ? '' : 's'}, addresses masked)`, m1);
+    await call('POST', `${H}/monitoring/check`, admin, {});
+    const m2 = (await call('GET', `${H}/monitoring/messages`, admin)).json.filter((m: any) => /in a generic name/.test(m.subject ?? '') && !m.contact);
+    ok(m2.length === m1.length, 'the same card is not e-mailed again');
   }
 
   console.log('\nGate: every request is traceable without exposing secrets');

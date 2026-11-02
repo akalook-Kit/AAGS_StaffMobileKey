@@ -59,6 +59,24 @@ Every lock event received from Visionline (entrances, refused entries, alarms, b
 system events, with filters (period, type, door, person, known/unknown card). **Print** makes a PDF with a
 fingerprint (SHA-256) that can be checked later under *Verify a PDF*: any change to the file shows.
 
+### 5e. New in 2.21
+
+- **"Issued from Visionline"** replaces "Visionline desk" for keycards made in Visionline. When the Visionline operator
+  who made the card is known it is shown, with the person behind that operator: *Issued from Visionline · jdoe (John
+  Doe)*. The operator is known when the card was recorded on the Staff keycards page (field *Visionline operator who
+  made it*; empty = your own Visionline operator) or from a card log imported in the System setup report. The
+  Visionline Web API itself does not say who made a card.
+- **Who each Visionline operator is:** System setup report → Visionline Operators → *Who each Visionline operator is*:
+  an administrator links each Visionline operator to a portal user. Users who saved their own Visionline sign-in are
+  linked automatically.
+- **Staff keycards record who issued them:** the requests list, the request page, the keycard register and its HR
+  export show *Issued by* (the portal user), when, and how (encoded from the portal, issued from Visionline with the
+  operator, or an existing keycard linked).
+- **Battery alarm clears after 2 cards** accepted by the lock without the low flag (was 3).
+- **Keycards in a generic name** are also e-mailed to the site's administrators (each card once), besides the warning
+  in the portal and Monitoring.
+- **Fewer false "Visionline cannot be reached" alarms:** see Monitoring, connector 0.15.0.
+
 ### 5d. New in 2.20
 
 - **"Stale" is back** on Battery status for a lock not heard from for the number of days set in Settings.
@@ -164,9 +182,10 @@ fingerprint (SHA-256) that can be checked later under *Verify a PDF*: any change
   keycards, mobile keys, alarms, maintenance or breakfast, saves them, shares them and pins them to the Overview.
 - **Mobile keys made in Visionline** are recognised: Visionline shows a phone's "card serial" as FFFFFFFF. They show
   as *Mobile key* in Visionline cards & people and in the reports.
-- **Issued by**: every keycard encoded from this portal records the portal user. Cards made at the Visionline desk
-  show *Visionline desk* unless a card list with the operator is imported (System setup report → Visionline
-  reports): then *Visionline: <operator>*. When the Visionline user of the connector is a shared one (PMS /
+- **Issued by**: every keycard encoded from this portal records the portal user. Cards made in Visionline
+  show *Issued from Visionline* (2.21), with the operator and the person linked to that operator when known
+  (recorded on the Staff keycards page, or a card list with the operator imported: System setup report → Visionline
+  reports). When the Visionline user of the connector is a shared one (PMS /
   interface user), the portal warns: give people named Visionline operators.
 - **Issuing a staff keycard**: choose the person already in Visionline (no duplicate), or *Existing keycard* to link
   a card the person already holds, with its user group.
@@ -191,8 +210,8 @@ refused in a period: card number, type (mobile key, staff card, guest or other c
 entries, refused entries, first and last use. **Print PDF** makes the same fingerprinted PDF as the Event log.
 
 *Issued by* shows the portal user for mobile keys and for keycards handled on the Keycards page (encoded at an
-encoder from the portal or recorded there). Keycards made at the Visionline desk show **Visionline desk**: the
-Visionline Web API does not tell which desk operator encoded a card; Visionline's own card log does. For a guest
+encoder from the portal or recorded there). Keycards made in Visionline show **Issued from Visionline** (2.21), with the
+Visionline operator and the person behind it when known; the Visionline Web API does not tell who encoded a card. For a guest
 card, the guest's name is shown when the day's in-house list (Breakfast import) has a stay in that room.
 
 **Offline locks and offline systems.** A lock event reaches the platform when Visionline has it:
@@ -281,19 +300,19 @@ ink well).
 ## 9b. Staff keycards (requests, register, cancellations)
 
 *People & keys → Staff keycards.* Visionline stays the key system: every card is made in Visionline, either encoded
-from the portal at an encoder or made at the Visionline desk and recorded here.
+from the portal at an encoder or issued from Visionline and recorded here, with who issued it.
 
 - **Request**: *New request* (or the **QR code page**: front office prints the QR code from *QR code page*; managers
   scan it with their phone, no sign-in). Choose New / Replacement / Cancellation, permanent or daily staff, first name,
   surname, department, job title, employee number, card number (e.g. **HK 001**), the manager asking (e.g. the
   Housekeeping manager), HR e-mail, reason. Daily staff can ask for several cards at once.
 - **Issue**: open the request, choose the Visionline user group and validity. *Encode here*: place a blank card on the
-  chosen encoder and press *Encode the card* (the person is created in Visionline if needed). *Made at the Visionline
-  desk*: record the Visionline card number. Permanent staff need the card number (HK 001); it goes into the
+  chosen encoder and press *Encode the card* (the person is created in Visionline if needed). *Issued from
+  Visionline*: record the Visionline card number and the Visionline operator who made it (empty = yours). Permanent staff need the card number (HK 001); it goes into the
   **Register**.
 - **Resignation / cancellation**: open the request, say whether the card was returned, lost or damaged, and stop it:
   *Overwriting it at the encoder* (the returned card is rewritten so it expires one minute later), *Cancelling its
-  number in Visionline*, or *Done at the Visionline desk*. HR and the security manager receive an e-mail ("keycard
+  number in Visionline*, or *Done in Visionline*. HR and the security manager receive an e-mail ("keycard
   cancelled and returned").
 - **Send to HR** e-mails one request; **Register → Export for HR** gives the whole list (CSV).
 - **Renewals & duplicates**: staff keycards ending within 7/30/60 days (also on *To do now*, and once a day an e-mail

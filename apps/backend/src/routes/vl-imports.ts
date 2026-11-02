@@ -67,6 +67,29 @@ export function vlImportRoutes(app: FastifyInstance) {
       WHERE i.hotel_id=$1 ORDER BY i.kind, i.imported_at DESC`, [hotelId]);
   });
 
+  /**
+   * 2.21 Visionline operators and the portal user each one is (who issued a keycard made in Visionline). Names come
+   * from the imported operators list, the card log, keycards recorded as issued from Visionline, and the users' own
+   * verified Visionline sign-ins (linked automatically).
+   */
+  app.get(`${P}/hotels/:hotelId/visionline/operators`, async (req) => {
+    const hotelId = hid(req);
+    await requirePerm(req, hotelId, 'keycards.read');
+    return visionlineOperators(hotelId);
+  });
+  app.put(`${P}/hotels/:hotelId/visionline/operators/link`, async (req) => {
+    const hotelId = hid(req);
+    const op = await requirePerm(req, hotelId, 'settings.manage');
+    const b = z.object({ vlOperator: z.string().trim().min(1).max(80), operatorId: z.string().uuid().nullable() }).parse(req.body);
+    if (b.operatorId && !(await one(pool, 'SELECT 1 FROM memberships WHERE operator_id=$1 AND hotel_id=$2', [b.operatorId, hotelId]))) throw new ApiError(400, 'UNKNOWN_USER', 'This person is not a user of this site.');
+    await tx(async (c) => {
+      await c.query(`DELETE FROM vl_operator_links WHERE hotel_id=$1 AND (lower(vl_operator)=lower($2) OR operator_id=$3)`, [hotelId, b.vlOperator, b.operatorId]);
+      if (b.operatorId) await c.query(`INSERT INTO vl_operator_links (hotel_id, vl_operator, operator_id, linked_by) VALUES ($1,$2,$3,$4)`, [hotelId, b.vlOperator, b.operatorId, op.id]);
+      await audit(c, { hotelId, actorType: 'operator', actorId: op.id, action: b.operatorId ? 'visionline.operator_linked' : 'visionline.operator_unlinked', targetType: 'operator', targetId: b.operatorId ?? undefined, details: { vlOperator: b.vlOperator } });
+    });
+    return visionlineOperators(hotelId);
+  });
+
   app.delete(`${P}/hotels/:hotelId/visionline-imports/:id`, async (req) => {
     const hotelId = hid(req);
     const op = await requirePerm(req, hotelId, 'settings.manage');
@@ -78,6 +101,30 @@ export function vlImportRoutes(app: FastifyInstance) {
 }
 
 /** What the setup report shows from the imports (newest of each kind) and from the portal itself. */
+export async function visionlineOperators(hotelId: string) {
+  const ops = await one(pool, `SELECT data FROM vl_imports WHERE hotel_id=$1 AND kind='operators' ORDER BY imported_at DESC LIMIT 1`, [hotelId]);
+  const names = new Map<string, { name: string; template: string | null; listed: boolean }>();
+  const add = (n: string | null | undefined, template: string | null = null, listed = false) => {
+    const name = (n ?? '').trim().slice(0, 80); if (!name) return;
+    const k = name.toLowerCase(); const x = names.get(k);
+    names.set(k, { name: x?.name ?? name, template: x?.template ?? template, listed: Boolean(x?.listed || listed) });
+  };
+  if (ops) { const c = operatorColumns(ops.data.head ?? []); if (c.name >= 0) for (const r of (ops.data.rows ?? []) as string[][]) add(r[c.name], c.template >= 0 ? r[c.template] ?? null : null, true); }
+  const issued = await many(pool, `SELECT lower(operator) AS k, min(operator) AS name, count(*)::int AS n FROM vl_card_issuers WHERE hotel_id=$1 GROUP BY 1`, [hotelId]);
+  for (const r of issued) add(r.name);
+  const links = await many(pool, `SELECT l.vl_operator, o.id, o.display_name FROM vl_operator_links l JOIN operators o ON o.id=l.operator_id WHERE l.hotel_id=$1`, [hotelId]);
+  const creds = await many(pool, `SELECT c.username, o.id, o.display_name FROM operator_vl_credentials c JOIN operators o ON o.id=c.operator_id WHERE c.hotel_id=$1 AND c.status='VERIFIED'`, [hotelId]);
+  for (const l of links) add(l.vl_operator); for (const c of creds) add(c.username);
+  const count = new Map(issued.map((r) => [r.k as string, r.n as number]));
+  return [...names.values()].sort((a, b) => a.name.localeCompare(b.name)).map((x) => {
+    const k = x.name.toLowerCase();
+    const l = links.find((y) => y.vl_operator.toLowerCase() === k); const c = creds.find((y) => y.username.toLowerCase() === k);
+    const who = l ?? c;
+    return { name: x.name, template: x.template, inOperatorsList: x.listed, shared: sharedVisionlineOperator(x.name), cardsIssued: count.get(k) ?? 0,
+      portalUser: who ? { id: who.id, name: who.display_name, by: l ? 'administrator' : 'own Visionline sign-in' } : null };
+  });
+}
+
 export async function importedForSetupReport(hotelId: string) {
   const rows = await many(pool, `SELECT DISTINCT ON (kind) id, kind, file_name, data, rows, imported_at FROM vl_imports WHERE hotel_id=$1 ORDER BY kind, imported_at DESC`, [hotelId]);
   const by = (k: string) => rows.find((r) => r.kind === k);

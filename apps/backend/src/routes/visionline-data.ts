@@ -114,8 +114,8 @@ export function visionlineDataRoutes(app: FastifyInstance) {
         (k.key_id IS NOT NULL OR k.mobile IS TRUE) AS mobile_key, k.source, k.first_seen_at, k.last_seen_at, ${VALID} AS valid, k.operations, k.deadbolt_override,
         COALESCE((SELECT o.display_name FROM key_requests r JOIN operators o ON o.id=r.requested_by WHERE r.id=k.key_id),
           (SELECT p.operator_name FROM portal_encoded_cards p WHERE p.hotel_id=k.hotel_id AND p.reg_no=k.reg_no),
-          (SELECT o.display_name FROM keycard_requests q JOIN operators o ON o.id=q.handled_by WHERE q.hotel_id=k.hotel_id AND q.card_reg_no=k.reg_no ORDER BY q.updated_at DESC LIMIT 1),
-          (SELECT 'Visionline: ' || i.operator FROM vl_card_issuers i WHERE i.hotel_id=k.hotel_id AND i.reg_no=k.reg_no)) AS issued_by
+          vl_issuer_label(k.hotel_id, k.reg_no),
+          (SELECT o.display_name FROM keycard_requests q JOIN operators o ON o.id=COALESCE(q.issued_by, q.handled_by) WHERE q.hotel_id=k.hotel_id AND q.card_reg_no=k.reg_no ORDER BY q.updated_at DESC LIMIT 1)) AS issued_by
       FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder
       WHERE k.hotel_id=$1 ${state} ${kind} ${db} ${doorSql} ${masterSql}
         AND ($2::text IS NULL OR COALESCE(u.user_group, k.user_group) = $2)
@@ -173,8 +173,8 @@ export function visionlineDataRoutes(app: FastifyInstance) {
     const k = await one(pool, `SELECT k.*, NULLIF(trim(coalesce(u.given_name,'') || ' ' || coalesce(u.surname,'')), '') AS holder_name, COALESCE(u.user_group, k.user_group) AS group_name,
         COALESCE((SELECT o.display_name FROM key_requests r JOIN operators o ON o.id=r.requested_by WHERE r.id=k.key_id),
           (SELECT p.operator_name FROM portal_encoded_cards p WHERE p.hotel_id=k.hotel_id AND p.reg_no=k.reg_no),
-          (SELECT o.display_name FROM keycard_requests q JOIN operators o ON o.id=q.handled_by WHERE q.hotel_id=k.hotel_id AND q.card_reg_no=k.reg_no ORDER BY q.updated_at DESC LIMIT 1),
-          (SELECT 'Visionline: ' || i.operator FROM vl_card_issuers i WHERE i.hotel_id=k.hotel_id AND i.reg_no=k.reg_no)) AS issued_by_name,
+          vl_issuer_label(k.hotel_id, k.reg_no),
+          (SELECT o.display_name FROM keycard_requests q JOIN operators o ON o.id=COALESCE(q.issued_by, q.handled_by) WHERE q.hotel_id=k.hotel_id AND q.card_reg_no=k.reg_no ORDER BY q.updated_at DESC LIMIT 1)) AS issued_by_name,
         (SELECT s.full_name FROM key_requests r JOIN staff s ON s.id=r.staff_id WHERE r.id=k.key_id) AS staff_name
       FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder WHERE k.hotel_id=$1 AND k.reg_no=$2`, [hotelId, regNo]);
     const key = k ? null : await one(pool, `SELECT r.id, r.status, r.starts_at, r.expires_at, s.full_name, o.display_name AS issued_by FROM key_requests r JOIN staff s ON s.id=r.staff_id JOIN operators o ON o.id=r.requested_by

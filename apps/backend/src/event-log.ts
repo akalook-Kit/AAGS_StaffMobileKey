@@ -157,14 +157,13 @@ export async function queryEvents(hotelId: string, f: EventFilter) {
         count(*) FILTER (WHERE severity IN ('error','warning'))::int AS errors FROM sel`, params)).rows[0];
     const byCat = (await c.query(`${filtered} SELECT category, count(*)::int AS n FROM sel WHERE ${clsSql} GROUP BY category`, params)).rows;
     const page = (await c.query(`${filtered}
-      SELECT sel.*, wd.label AS watched, COALESCE(op.display_name, pec.operator_name, 'Visionline: ' || vci.operator) AS m_issued_by, (kr.id IS NOT NULL OR sel.key_id IS NOT NULL OR sel.m_vkey IS NOT NULL OR sel.m_vmobile IS TRUE) AS m_mobile
+      SELECT sel.*, wd.label AS watched, COALESCE(op.display_name, pec.operator_name, vl_issuer_label($1, sel.card)) AS m_issued_by, (kr.id IS NOT NULL OR sel.key_id IS NOT NULL OR sel.m_vkey IS NOT NULL OR sel.m_vmobile IS TRUE) AS m_mobile
       FROM (SELECT * FROM sel WHERE ${clsSql} ORDER BY at DESC, id DESC LIMIT ${limit + 1}) sel
         LEFT JOIN watched_doors wd ON wd.hotel_id=$1 AND wd.active AND wd.door_id=sel.door_id
         LEFT JOIN LATERAL (SELECT r.id, r.requested_by FROM key_requests r WHERE r.hotel_id=$1 AND sel.card IS NOT NULL AND sel.card <> '0' AND r.card_reg_no=sel.card ORDER BY r.created_at DESC LIMIT 1) kr ON true
         LEFT JOIN key_requests kk ON kk.id = COALESCE(sel.key_id, sel.m_vkey)
         LEFT JOIN operators op ON op.id = COALESCE(kk.requested_by, kr.requested_by)
         LEFT JOIN portal_encoded_cards pec ON pec.hotel_id=$1 AND pec.reg_no=sel.card
-        LEFT JOIN vl_card_issuers vci ON vci.hotel_id=$1 AND vci.reg_no=sel.card
       ORDER BY at DESC, id DESC`, params)).rows;
     return { counts: agg, byCatRows: byCat, rows: page };
   });
@@ -186,7 +185,7 @@ export async function queryEvents(hotelId: string, f: EventFilter) {
       match: r.card && r.card !== '0' && (r.id.startsWith('v') || r.id.startsWith('c'))
         ? { known, kind: r.m_mobile ? 'mobile' : r.m_reg ? 'card' : null, holderId: r.m_holder ?? null, group: r.m_vgroup ?? null,
           validThen: r.m_reg ? (!r.m_starts || new Date(r.m_starts) <= at) && (!r.m_expires || new Date(r.m_expires) > at) && !r.m_cancelled : null,
-          issuedBy: r.m_issued_by ?? (r.m_reg ? (r.m_mobile ? 'Visionline (mobile key)' : 'Visionline desk') : null), deadbolt: r.m_deadbolt ?? null }
+          issuedBy: r.m_issued_by ?? (r.m_reg ? (r.m_mobile ? 'Visionline (mobile key)' : 'Issued from Visionline') : null), deadbolt: r.m_deadbolt ?? null }
         : null,
     };
   });

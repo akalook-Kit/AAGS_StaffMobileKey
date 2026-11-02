@@ -57,7 +57,7 @@ function Requests() {
       {qr && <QrPanel url={qr} onClose={() => setQr(null)} />}
       <div className="panel flush"><div className="table-scroll">
         {list.data && !list.data.length ? <div className="empty">No requests yet. Managers can ask from the portal or from the QR code page.</div> : (
-          <table className="grid"><thead><tr><th>Number</th><th>Person</th><th>Request</th><th>Card</th><th>Manager</th><th>Status</th><th>When</th></tr></thead>
+          <table className="grid"><thead><tr><th>Number</th><th>Person</th><th>Request</th><th>Card</th><th>Manager</th><th>Status</th><th>Issued by</th><th>When</th></tr></thead>
             <tbody>{(list.data ?? []).map((r) => (
               <tr key={r.id} className="click" onClick={() => setOpen(r)}>
                 <td className="nowrap"><strong>{r.number}</strong>{r.source === 'qr' && <div className="small muted">QR page</div>}</td>
@@ -66,6 +66,7 @@ function Requests() {
                 <td className="nowrap">{r.cardLabel ?? <span className="muted">—</span>}{r.cardRegNo && <div className="small muted">VL {r.cardRegNo}</div>}</td>
                 <td className="small">{r.managerName}</td>
                 <td><span className={`pill ${r.status === 'SUBMITTED' ? 'warn' : ['ISSUED', 'COLLECTED'].includes(r.status) ? 'ok' : ''}`}>{ST[r.status] ?? r.status}</span></td>
+                <td className="small">{r.issuedBy ? <>{r.issuedBy}{r.vlOperator && <div className="muted">Visionline: {r.vlOperator}</div>}</> : <span className="muted">—</span>}</td>
                 <td className="small">{fmt.dt(r.createdAt)}</td>
               </tr>))}</tbody></table>)}
       </div></div>
@@ -158,6 +159,9 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
   const [label, setLabel] = useState(r.cardLabel ?? '');
   const [group, setGroup] = useState('');
   const [regNo, setRegNo] = useState(r.cardRegNo ?? '');
+  // 2.21 Issued from Visionline: which Visionline operator made it (empty = the user's own Visionline operator).
+  const [vlOp, setVlOp] = useState('');
+  const vlOps = useApi<any[]>(`${base}/visionline/operators`);
   const [until, setUntil] = useState(isoToDate(r.validUntil));
   const [ret, setRet] = useState('returned');
   const [cmethod, setCmethod] = useState<'expire_now' | 'cancel_card' | 'visionline_desk'>('cancel_card');
@@ -175,7 +179,7 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
   const issue = async () => {
     setError(null); setOk(null);
     try {
-      const x = await api(`${base}/keycards/requests/${r.id}/issue`, { body: { method, encoder: encoder || undefined, cardLabel: label || null, userGroup: group || 'n/a', regNo: regNo || null, vlUserId: vlUser?.id ?? null, validUntil: until ? endOfDay(until) : null, replaceExisting: r.kind === 'replacement' } });
+      const x = await api(`${base}/keycards/requests/${r.id}/issue`, { body: { method, encoder: encoder || undefined, cardLabel: label || null, userGroup: group || 'n/a', regNo: regNo || null, vlUserId: vlUser?.id ?? null, vlOperator: method === 'visionline_desk' && vlOp.trim() ? vlOp.trim() : null, validUntil: until ? endOfDay(until) : null, replaceExisting: r.kind === 'replacement' } });
       if (x.commandId) await wait(x.commandId, 'Card encoded in Visionline. Give it to the person.'); else setOk('Recorded as issued.');
     } catch (e) { setBusy(null); setError(e); }
   };
@@ -199,6 +203,7 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
         <dt>Department</dt><dd>{r.department}{r.jobTitle ? ` · ${r.jobTitle}` : ''}</dd>
         <dt>Employee no.</dt><dd>{r.employeeNo ?? '—'}</dd>
         <dt>Card</dt><dd>{r.cardLabel ?? '—'}{r.cardRegNo ? ` · Visionline ${r.cardRegNo}` : ''}</dd>
+        {r.issuedBy && <><dt>Issued by</dt><dd>{r.issuedBy}{r.issuedAt ? ` · ${fmt.dt(r.issuedAt)}` : ''} · {r.issueMethod === 'encoder' ? 'encoded from the portal' : r.issueMethod === 'visionline_desk' ? `issued from Visionline${r.vlOperator ? ` by operator ${r.vlOperator}` : ''}` : 'existing keycard linked'}</dd></>}
         <dt>Manager</dt><dd>{r.managerName}</dd>
         <dt>Reason</dt><dd>{r.reason}</dd>
       </dl>
@@ -207,7 +212,7 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
           <h3>Issue the keycard</h3>
           <div className="seg" style={{ marginBottom: 10 }}>
             <button aria-pressed={method === 'encoder'} disabled={!enc.data?.encodeEnabled} onClick={() => setMethod('encoder')} title={enc.data?.encodeEnabled ? '' : 'Switched off in Settings -> Keycards'}>Encode here</button>
-            <button aria-pressed={method === 'visionline_desk'} onClick={() => setMethod('visionline_desk')}>Made at the Visionline desk</button>
+            <button aria-pressed={method === 'visionline_desk'} onClick={() => setMethod('visionline_desk')}>Issued from Visionline</button>
             <button aria-pressed={method === 'existing'} onClick={() => setMethod('existing')} title="The person already holds a keycard in Visionline">Existing keycard</button>
           </div>
           <VlPicker mode={method === 'existing' ? 'card' : 'person'} initial={`${r.givenName} ${r.surname}`}
@@ -220,7 +225,10 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
           </div>
           <div className="field-row">
             {method === 'existing' ? null : method === 'encoder' ? <div className="field"><label htmlFor="i-e">Encoder</label><select id="i-e" value={encoder} onChange={(e) => setEncoder(e.target.value)}>{(enc.data?.chosen ?? []).map((n: string) => <option key={n}>{n}</option>)}</select><span className="hint">Place a blank card on it first.</span></div>
-              : <div className="field"><label htmlFor="i-r">Visionline card number (optional)</label><input id="i-r" value={regNo} onChange={(e) => setRegNo(e.target.value.replace(/\D/g, ''))} /></div>}
+              : <><div className="field"><label htmlFor="i-r">Visionline card number (optional)</label><input id="i-r" value={regNo} onChange={(e) => setRegNo(e.target.value.replace(/\D/g, ''))} /></div>
+                <div className="field"><label htmlFor="i-o">Visionline operator who made it</label><input id="i-o" list="i-o-list" value={vlOp} onChange={(e) => setVlOp(e.target.value)} maxLength={80} placeholder="You (your Visionline operator)" />
+                  <datalist id="i-o-list">{(vlOps.data ?? []).map((o: any) => <option key={o.name} value={o.name}>{o.portalUser ? o.portalUser.name : ''}</option>)}</datalist>
+                  <span className="hint">Shown as "Issued from Visionline · operator (person)" wherever the card appears.</span></div></>}
             <div className="field"><label htmlFor="i-u">Expiry date</label><input id="i-u" type="date" min={todayDate()} value={until} onChange={(e) => setUntil(e.target.value)} /><span className="hint">Empty: {r.staffType === 'daily' ? 'end of the shift (Settings)' : 'one year (Settings)'}.</span></div>
           </div>
           <button className="btn primary" disabled={(method === 'existing' ? !regNo : !group) || Boolean(busy)} onClick={issue}>{method === 'encoder' ? 'Encode the card' : method === 'existing' ? 'Link this keycard' : 'Record as issued'}</button>
@@ -234,7 +242,7 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
             <div className="field"><label htmlFor="c-s">The card was</label><select id="c-s" value={ret} onChange={(e) => setRet(e.target.value)}><option value="returned">Returned</option><option value="lost">Lost</option><option value="damaged">Damaged</option><option value="not_returned">Not returned</option></select></div>
             <div className="field"><label htmlFor="c-m">Stop it by</label><select id="c-m" value={cmethod} onChange={(e) => setCmethod(e.target.value as any)}>
               <option value="expire_now" disabled={!enc.data?.encodeEnabled || ret !== 'returned'}>Overwriting it at the encoder (expires in 1 minute)</option>
-              <option value="cancel_card">Cancelling its number in Visionline</option><option value="visionline_desk">Done at the Visionline desk</option></select></div>
+              <option value="cancel_card">Cancelling its number in Visionline</option><option value="visionline_desk">Done in Visionline</option></select></div>
           </div>
           {cmethod === 'expire_now' ? <div className="field" style={{ maxWidth: 260 }}><label htmlFor="c-e">Encoder</label><select id="c-e" value={encoder} onChange={(e) => setEncoder(e.target.value)}>{(enc.data?.chosen ?? []).map((n: string) => <option key={n}>{n}</option>)}</select><span className="hint">Place the returned card on it.</span></div>
             : cmethod === 'cancel_card' && <div className="field" style={{ maxWidth: 260 }}><label htmlFor="c-r">Visionline card number</label><input id="c-r" value={regNo} onChange={(e) => setRegNo(e.target.value.replace(/\D/g, ''))} /></div>}
@@ -264,9 +272,9 @@ function Register() {
       <ErrorNote error={reg.error} />
       <div className="panel flush"><div className="table-scroll">
         {reg.data && !rows.length ? <div className="empty">No numbered cards yet. They are added when a request is issued with a card number.</div> : (
-          <table className="grid"><thead><tr><th>Card</th><th>Holder</th><th>Department</th><th>Type</th><th>Visionline card</th><th>Valid until</th><th>Status</th></tr></thead>
+          <table className="grid"><thead><tr><th>Card</th><th>Holder</th><th>Department</th><th>Type</th><th>Visionline card</th><th>Issued by</th><th>Valid until</th><th>Status</th></tr></thead>
             <tbody>{rows.map((r) => <tr key={r.label}><td><strong>{r.label}</strong></td><td>{r.holder ?? '—'}</td><td>{r.department ?? '—'}</td><td>{r.staffType === 'daily' ? 'Daily' : 'Permanent'}</td>
-              <td>{r.regNo ?? '—'}</td><td className="small">{r.expiresAt ? fmt.dt(r.expiresAt) : '—'}</td><td><span className={`pill ${r.status === 'in_use' ? 'ok' : r.status === 'lost' ? 'bad' : ''}`}>{r.status.replace('_', ' ')}</span></td></tr>)}</tbody></table>)}
+              <td>{r.regNo ?? '—'}</td><td className="small">{r.issuedBy ?? '—'}{r.issuedAt && <div className="muted">{fmt.dt(r.issuedAt)}</div>}</td><td className="small">{r.expiresAt ? fmt.dt(r.expiresAt) : '—'}</td><td><span className={`pill ${r.status === 'in_use' ? 'ok' : r.status === 'lost' ? 'bad' : ''}`}>{r.status.replace('_', ' ')}</span></td></tr>)}</tbody></table>)}
       </div></div>
     </>
   );

@@ -119,7 +119,7 @@ export function eventRoutes(app: FastifyInstance) {
     const out = await buildReportPdf({
       hotelId, report: 'room-keycards', title: 'Keycards used per room', operatorId: op.id, operatorName: op.displayName,
       selection: [`Period: ${d.format(f.from)} to ${d.format(f.to)} (${timezone})`, f.door ? `Door: ${r.rooms[0]?.door ?? f.door}` : f.scope === 'rooms' ? 'Guest rooms' : 'All doors',
-        'Issued by: the portal user for mobile keys and keycards handled in the portal; "Visionline desk" otherwise (Visionline\'s card log names the desk operator).'],
+        'Issued by: the portal user for mobile keys and keycards handled in the portal; "Issued from Visionline" otherwise, with the Visionline operator (and the person linked to that operator) when it is known.'],
       summary: [['Rooms', String(r.totals.rooms)], ['Keycards', String(r.totals.cards)], ['Entries', String(r.totals.entries)], ['Refused', String(r.totals.refused)]],
       note: r.truncated ? 'The period has more than 20 000 door events; only the newest are counted. Choose a shorter period or one door.' : null,
       columns: [{ label: 'Room / door', width: 9 }, { label: 'Card', width: 9 }, { label: 'Type', width: 10 }, { label: 'Holder', width: 19 }, { label: 'Issued by', width: 20 },

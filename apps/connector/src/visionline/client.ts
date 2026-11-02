@@ -74,6 +74,7 @@ export class VisionlineClient {
   trustMode: 'ca' | 'exact' | 'system' = 'system';
 
   /** One limiter for the whole connector: the property client and every personal-credential client share it. */
+  static idleSocketMs = Number(process.env.VL_IDLE_SOCKET_MS ?? 15_000);
   static shared = new VisionlineLimiter(Number(process.env.VL_MAX_CONCURRENT ?? 2), Number(process.env.VL_MIN_GAP_MS ?? 40));
   limiter = VisionlineClient.shared;
 
@@ -82,10 +83,24 @@ export class VisionlineClient {
     if (this.base.protocol !== 'https:') throw new Error('Visionline Web API must be reached over HTTPS');
     const t = visionlineTrust(trust.caFile ? readFileSync(trust.caFile) : undefined, { servername: trust.servername, pinSha256: trust.pinSha256 });
     this.trustMode = t.mode;
-    this.agent = new https.Agent({ keepAlive: true, maxSockets: 4, minVersion: 'TLSv1.2', servername: trust.servername, ...t.tlsOptions } as https.AgentOptions);
+    // 2.21 An idle connection is closed by us after 15 s, before Visionline's own idle limit drops it: a request sent on
+    // a connection Visionline has already closed fails with "read ECONNRESET" (the false "Visionline cannot be
+    // reached" alarm at Bana, 31 Oct). Requests in progress keep their own timeout.
+    this.agent = new https.Agent({ keepAlive: true, maxSockets: 4, timeout: VisionlineClient.idleSocketMs, minVersion: 'TLSv1.2', servername: trust.servername, ...t.tlsOptions } as https.AgentOptions);
   }
 
-  private raw(method: string, path: string, body?: unknown, signed = true, timeoutMs = 30_000): Promise<{ status: number; json: any; date: string | undefined }> {
+  /**
+   * 2.21 A read (GET) sent on a kept-alive connection that Visionline had already closed is resent once on a new
+   * connection: nothing reached Visionline. Writes are never resent here (withSafeRetry decides for them).
+   */
+  private async raw(method: string, path: string, body?: unknown, signed = true, timeoutMs = 30_000): Promise<{ status: number; json: any; date: string | undefined }> {
+    try { return await this.raw1(method, path, body, signed, timeoutMs); } catch (e) {
+      if (!(e instanceof VisionlineApiError && (e as any).staleSocket && (method === 'GET' || method === 'HEAD'))) throw e;
+      return this.raw1(method, path, body, signed, timeoutMs);
+    }
+  }
+
+  private raw1(method: string, path: string, body?: unknown, signed = true, timeoutMs = 30_000): Promise<{ status: number; json: any; date: string | undefined }> {
     const json = body === undefined ? undefined : JSON.stringify(body);
     const url = this.base.pathname + path; // e.g. /api/v1/cards?action=mobileAccess
     const headers: Record<string, string> = { date: new Date(Date.now() + this.skewMs).toUTCString(), accept: 'application/json' };
@@ -99,8 +114,10 @@ export class VisionlineClient {
       const sig = sign(this.session.accessKey, { method, contentMd5: headers['content-md5'], contentType: headers['content-type'], date: headers.date, url });
       headers.authorization = authorizationHeader(this.session.id, sig);
     }
+    let answered = false;
     return new Promise((resolve, reject) => {
       const req = https.request({ protocol: 'https:', hostname: this.base.hostname, port: this.base.port || 443, method, path: url, headers, agent: this.agent, timeout: timeoutMs }, (res) => {
+        answered = true;
         const chunks: Buffer[] = [];
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => {
@@ -116,7 +133,10 @@ export class VisionlineClient {
         if (/certificate|self.signed|fingerprint|altnames|CERT_/i.test(e.message + (e.code ?? ''))) this.tlsState = `failed: ${e.message}`;
         // A connection that was never established cannot have reached Visionline: safe to retry.
         const notSent = ['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH'].includes(e.code ?? '') || this.tlsState.startsWith('failed');
-        reject(new VisionlineApiError(0, undefined, `Visionline unreachable: ${e.message}`, undefined, notSent));
+        const err = new VisionlineApiError(0, undefined, `Visionline unreachable: ${e.message}`, undefined, notSent);
+        // The connection was reused and dropped before any answer: Visionline had closed it while it was idle.
+        if (req.reusedSocket && !answered && ['ECONNRESET', 'EPIPE', 'ECONNABORTED'].includes(e.code ?? '')) (err as any).staleSocket = true;
+        reject(err);
       });
       if (json !== undefined) req.write(json);
       req.end();

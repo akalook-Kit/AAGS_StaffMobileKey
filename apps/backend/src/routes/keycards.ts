@@ -1,6 +1,6 @@
 /**
  * 2.14 Staff keycards: requests (portal or QR code page), issuing them in Visionline (encoded at an encoder from the
- * portal, or at the Visionline desk and recorded here), the keycard register (HK 001…), returns on resignation (the
+ * portal, or issued from Visionline and recorded here), the keycard register (HK 001…), returns on resignation (the
  * returned card is overwritten with a card that dies a minute later; a lost card is cancelled by its number), e-mails
  * to HR and the security manager, renewal reminders and holders with more than one card. Also the unpaid-guest
  * lock-out (front office asks, a manager approves; checkout command to an online lock or a 1-minute override card for
@@ -106,8 +106,17 @@ const out = (r: any) => ({
   employeeNo: r.employee_no, cardLabel: r.card_label, quantity: r.quantity, validUntil: r.valid_until, reason: r.reason, managerName: r.manager_name, hrEmail: r.hr_email, note: r.note,
   source: r.source, vlUserId: r.vl_user_id, cardRegNo: r.card_reg_no, issueMethod: r.issue_method, returnState: r.return_state, cancelMethod: r.cancel_method, commandId: r.command_id,
   userGroup: r.user_group, history: r.history, notified: r.notified, createdAt: r.created_at, updatedAt: r.updated_at, requestedBy: r.requested_by_name ?? null,
+  // 2.21 Who issued the card (portal user), when, and the Visionline operator who made it when it was made in Visionline.
+  issuedBy: r.issued_by_name ?? null, issuedAt: r.issued_at ?? null, vlOperator: r.vl_operator ?? null,
 });
-const SEL = `SELECT k.*, o.display_name AS requested_by_name FROM keycard_requests k LEFT JOIN operators o ON o.id=k.requested_by`;
+const SEL = `SELECT k.*, o.display_name AS requested_by_name, ib.display_name AS issued_by_name FROM keycard_requests k LEFT JOIN operators o ON o.id=k.requested_by LEFT JOIN operators ib ON ib.id=k.issued_by`;
+
+/** 2.21 The Visionline operator a portal user works as: linked by an administrator, or their own verified Visionline sign-in. */
+export async function vlOperatorOf(hotelId: string, operatorId: string): Promise<string | null> {
+  const r = await one(pool, `SELECT vl_operator AS name FROM vl_operator_links WHERE hotel_id=$1 AND operator_id=$2
+    UNION ALL SELECT username FROM operator_vl_credentials WHERE hotel_id=$1 AND operator_id=$2 AND status='VERIFIED' LIMIT 1`, [hotelId, operatorId]);
+  return r?.name ?? null;
+}
 
 /** Visionline user id for a person: their existing Visionline user, or one made from the request number. */
 const holderId = (r: any) => r.vl_user_id ?? `kr-${r.number.toLowerCase()}`;
@@ -143,7 +152,7 @@ export async function onKeycardCommandResult(c: pg.PoolClient, cmd: any, result:
   }
   if (ctx.step === 'issue') {
     const reg = result.result?.regNo ?? null;
-    await c.query(`UPDATE keycard_requests SET status='ISSUED', card_reg_no=COALESCE($2, card_reg_no), vl_user_id=COALESCE(vl_user_id,$3), issued_count=issued_count+1, updated_at=now(),
+    await c.query(`UPDATE keycard_requests SET status='ISSUED', card_reg_no=COALESCE($2, card_reg_no), vl_user_id=COALESCE(vl_user_id,$3), issued_count=issued_count+1, updated_at=now(), issued_at=now(),
         history = history || $4::jsonb WHERE id=$1`, [r.id, reg, cmd.payload.cardHolder, hist('Visionline', `Encoded at ${cmd.payload.encoder}${reg ? `, card ${reg}` : ''}`)]);
     if (r.card_label) await upsertRegister(c, cmd.hotel_id, r.card_label, { department: r.department, staffType: r.staff_type, holder: `${r.given_name} ${r.surname}`, vlUserId: cmd.payload.cardHolder, regNo: reg, status: 'in_use', requestId: r.id });
   } else if (ctx.step === 'collect') {
@@ -270,7 +279,7 @@ export function keycardRoutes(app: FastifyInstance) {
 
   /**
    * Issue: encoded at an encoder from the portal (Visionline makes the card, the holder is created in Visionline if
-   * needed), or recorded as made at the Visionline desk. Permanent staff need the hotel's card number (HK 001).
+   * needed), or recorded as issued from Visionline (with the Visionline operator). Permanent staff need the hotel's card number (HK 001).
    */
   app.post(`${base}/requests/:id/issue`, async (req) => {
     const hotelId = hid(req);
@@ -281,6 +290,8 @@ export function keycardRoutes(app: FastifyInstance) {
       /** 2.17 The person already exists in Visionline (their user id), so no duplicate is created. */
       vlUserId: z.string().trim().min(1).max(80).optional().nullable(),
       cardLabel: Label.optional().nullable(), userGroup: z.string().min(1).max(60), doorIds: z.array(z.string().max(100)).max(2000).default([]),
+      /** 2.21 Issued from Visionline: the Visionline operator who made the card (default: the user's own operator). */
+      vlOperator: z.string().trim().min(1).max(80).optional().nullable(),
       validUntil: z.string().datetime().optional().nullable().refine((v) => !v || (Date.parse(v) > Date.now() && Date.parse(v) < Date.now() + 3653 * 86_400_000), 'The expiry date must be in the future (at most ten years ahead).'), regNo: z.string().regex(/^\d{1,12}$/).optional().nullable(), replaceExisting: z.boolean().default(false),
     }).parse(req.body);
     if (!['SUBMITTED', 'ISSUED'].includes(r.status) || r.kind === 'cancel') throw conflict('NOT_ISSUABLE', 'This request is not waiting for a keycard.');
@@ -299,7 +310,7 @@ export function keycardRoutes(app: FastifyInstance) {
         WHERE k.hotel_id=$1 AND k.reg_no=$2`, [hotelId, b.regNo]);
       if (!k) throw badRequest('UNKNOWN_CARD', 'This keycard is not in the list read from Visionline.');
       await pool.query(`UPDATE keycard_requests SET status='ISSUED', card_label=$2, user_group=$3, valid_until=COALESCE($4, valid_until), handled_by=$5, issue_method='visionline_desk', card_reg_no=$6,
-          vl_user_id=COALESCE($7, vl_user_id), issued_count=issued_count+1, updated_at=now(), history = history || $8::jsonb WHERE id=$1`,
+          vl_user_id=COALESCE($7, vl_user_id), issued_count=issued_count+1, updated_at=now(), issued_by=$5, issued_at=now(), history = history || $8::jsonb WHERE id=$1`,
         [r.id, label, k.user_group ?? b.userGroup, k.expires_at, op.id, k.reg_no, k.card_holder, hist(op.displayName, `Linked to the existing Visionline keycard ${k.reg_no}${k.user_group ? ` (${k.user_group})` : ''}`)]);
       if (label) await upsertRegister(pool, hotelId, label, { department: r.department, staffType: r.staff_type, holder: `${r.given_name} ${r.surname}`, vlUserId: k.card_holder, regNo: k.reg_no, status: 'in_use', requestId: r.id });
       await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'keycard.issued', targetType: 'keycard_request', targetId: r.id, details: { number: r.number, method: 'existing', label, regNo: k.reg_no } });
@@ -309,14 +320,19 @@ export function keycardRoutes(app: FastifyInstance) {
       if (!(await one(pool, `SELECT 1 FROM vl_users WHERE hotel_id=$1 AND user_id=$2`, [hotelId, b.vlUserId]))) throw badRequest('UNKNOWN_PERSON', 'This person is not in the list read from Visionline.');
       await pool.query(`UPDATE keycard_requests SET vl_user_id=$2 WHERE id=$1`, [r.id, b.vlUserId]); r.vl_user_id = b.vlUserId;
     }
-    await pool.query(`UPDATE keycard_requests SET card_label=$2, user_group=$3, valid_until=$4, handled_by=$5, issue_method=$6, updated_at=now() WHERE id=$1`, [r.id, label, b.userGroup, until, op.id, b.method]);
+    await pool.query(`UPDATE keycard_requests SET card_label=$2, user_group=$3, valid_until=$4, handled_by=$5, issued_by=$5, issue_method=$6, updated_at=now() WHERE id=$1`, [r.id, label, b.userGroup, until, op.id, b.method]);
     if (b.method === 'visionline_desk') {
-      await pool.query(`UPDATE keycard_requests SET status='ISSUED', card_reg_no=COALESCE($2, card_reg_no), issued_count=issued_count+1, history = history || $3::jsonb WHERE id=$1`, [r.id, b.regNo ?? null, hist(op.displayName, `Made at the Visionline desk${b.regNo ? `, card ${b.regNo}` : ''}`)]);
+      const vlOp = b.vlOperator ?? await vlOperatorOf(hotelId, op.id);
+      await pool.query(`UPDATE keycard_requests SET status='ISSUED', card_reg_no=COALESCE($2, card_reg_no), issued_count=issued_count+1, issued_at=now(), vl_operator=$4, history = history || $3::jsonb WHERE id=$1`,
+        [r.id, b.regNo ?? null, hist(op.displayName, `Issued from Visionline${vlOp ? ` by operator ${vlOp}` : ''}${b.regNo ? `, card ${b.regNo}` : ''}`), vlOp]);
+      const reg = b.regNo ?? r.card_reg_no;
+      if (reg && vlOp) await pool.query(`INSERT INTO vl_card_issuers (hotel_id, reg_no, operator, issued_at, source, recorded_by) VALUES ($1,$2,$3,now(),'portal',$4)
+        ON CONFLICT (hotel_id, reg_no) DO UPDATE SET operator=EXCLUDED.operator, issued_at=EXCLUDED.issued_at, source='portal', recorded_by=EXCLUDED.recorded_by, import_id=NULL`, [hotelId, reg, vlOp, op.id]);
       if (label) await upsertRegister(pool, hotelId, label, { department: r.department, staffType: r.staff_type, holder: `${r.given_name} ${r.surname}`, vlUserId: r.vl_user_id, regNo: b.regNo ?? null, status: 'in_use', requestId: r.id });
-      await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'keycard.issued', targetType: 'keycard_request', targetId: r.id, details: { number: r.number, method: 'visionline_desk', label, regNo: b.regNo } });
+      await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'keycard.issued', targetType: 'keycard_request', targetId: r.id, details: { number: r.number, method: 'visionline_desk', label, regNo: b.regNo, vlOperator: vlOp } });
       return { status: 'ISSUED' };
     }
-    if (!pol.encodeEnabled) throw conflict('ENCODE_OFF', 'Encoding from the portal is switched off (Settings -> Keycards). Make the card at the Visionline desk and record it here.');
+    if (!pol.encodeEnabled) throw conflict('ENCODE_OFF', 'Encoding from the portal is switched off (Settings -> Keycards). Make the card in Visionline and record it here (Issued from Visionline).');
     if (!b.encoder || (pol.encoders.length && !pol.encoders.includes(b.encoder))) throw badRequest('UNKNOWN_ENCODER', 'Choose one of the encoders chosen in Settings -> Keycards.');
     const ug = await one(pool, `SELECT data FROM resources WHERE hotel_id=$1 AND kind='usergroup' AND external_id=$2 AND active`, [hotelId, b.userGroup]);
     if (!ug) throw badRequest('UNKNOWN_GROUP', 'Unknown Visionline user group.');
@@ -349,7 +365,7 @@ export function keycardRoutes(app: FastifyInstance) {
       return { status: 'COLLECTED' };
     }
     const pol = await kcPolicy(hotelId);
-    if (!pol.encodeEnabled && b.method === 'expire_now') throw conflict('ENCODE_OFF', 'Encoding from the portal is switched off. Cancel the card by its number instead, or at the Visionline desk.');
+    if (!pol.encodeEnabled && b.method === 'expire_now') throw conflict('ENCODE_OFF', 'Encoding from the portal is switched off. Cancel the card by its number instead, or in Visionline.');
     let cmd: any;
     if (b.method === 'expire_now') {
       if (!b.encoder) throw badRequest('UNKNOWN_ENCODER', 'Choose the encoder where the returned card lies.');
@@ -403,17 +419,18 @@ export function keycardRoutes(app: FastifyInstance) {
   app.get(`${base}/register`, async (req) => {
     const hotelId = hid(req);
     await requirePerm(req, hotelId, 'keycards.read');
-    const rows = await many(pool, `SELECT g.*, c.expires_at, c.cancelled FROM keycard_register g LEFT JOIN vl_cards c ON c.hotel_id=g.hotel_id AND c.reg_no=g.card_reg_no WHERE g.hotel_id=$1 ORDER BY g.label`, [hotelId]);
-    return rows.map((x) => ({ label: x.label, department: x.department, staffType: x.staff_type, holder: x.holder_name, vlUserId: x.vl_user_id, regNo: x.card_reg_no, status: x.status, expiresAt: x.expires_at, updatedAt: x.updated_at }));
+    const rows = await many(pool, `SELECT g.*, c.expires_at, c.cancelled, COALESCE(vl_issuer_label(g.hotel_id, g.card_reg_no), ib.display_name || CASE WHEN q.issue_method='encoder' THEN ' (encoded from the portal)' WHEN q.issue_method='visionline_desk' THEN ' (recorded in the portal' || COALESCE(', Visionline operator ' || q.vl_operator, '') || ')' ELSE '' END) AS issued_by, q.issued_at FROM keycard_register g LEFT JOIN vl_cards c ON c.hotel_id=g.hotel_id AND c.reg_no=g.card_reg_no
+      LEFT JOIN keycard_requests q ON q.id=g.request_id LEFT JOIN operators ib ON ib.id=q.issued_by WHERE g.hotel_id=$1 ORDER BY g.label`, [hotelId]);
+    return rows.map((x) => ({ label: x.label, department: x.department, staffType: x.staff_type, holder: x.holder_name, vlUserId: x.vl_user_id, regNo: x.card_reg_no, status: x.status, expiresAt: x.expires_at, updatedAt: x.updated_at, issuedBy: x.issued_by ?? null, issuedAt: x.issued_at ?? null }));
   });
   app.get(`${base}/register.csv`, async (req, reply) => {
     const hotelId = hid(req);
     const op = await requirePerm(req, hotelId, 'keycards.read');
-    const rows = await many(pool, `SELECT label, department, staff_type, holder_name, card_reg_no, status, updated_at FROM keycard_register WHERE hotel_id=$1 ORDER BY label`, [hotelId]);
+    const rows = await many(pool, `SELECT g.label, g.department, g.staff_type, g.holder_name, g.card_reg_no, g.status, g.updated_at, COALESCE(vl_issuer_label(g.hotel_id, g.card_reg_no), ib.display_name || CASE WHEN q.issue_method='encoder' THEN ' (encoded from the portal)' WHEN q.issue_method='visionline_desk' THEN ' (recorded in the portal' || COALESCE(', Visionline operator ' || q.vl_operator, '') || ')' ELSE '' END) AS issued_by, q.issued_at FROM keycard_register g LEFT JOIN keycard_requests q ON q.id=g.request_id LEFT JOIN operators ib ON ib.id=q.issued_by WHERE g.hotel_id=$1 ORDER BY g.label`, [hotelId]);
     const cell = (v: unknown) => { let s = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'keycard.register_exported', details: { rows: rows.length } });
     reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="keycard-register.csv"');
-    return '﻿' + ['Card,Department,Type,Holder,Visionline card,Status,Updated', ...rows.map((r) => [r.label, r.department, r.staff_type, r.holder_name, r.card_reg_no, r.status, r.updated_at?.toISOString?.()].map(cell).join(','))].join('\r\n');
+    return '﻿' + ['Card,Department,Type,Holder,Visionline card,Status,Issued by,Issued,Updated', ...rows.map((r) => [r.label, r.department, r.staff_type, r.holder_name, r.card_reg_no, r.status, r.issued_by, r.issued_at?.toISOString?.(), r.updated_at?.toISOString?.()].map(cell).join(','))].join('\r\n');
   });
   /** Staff keycards that end soon (renewal reminders) and people holding more than one valid card. */
   app.get(`${base}/attention`, async (req) => {
@@ -594,7 +611,7 @@ export function keycardRoutes(app: FastifyInstance) {
       doorGroups: [...groups.entries()].map(([g, ds]) => ({ name: g, doors: ds })),
       locks: doors.map((d) => ({ name: d.name, group: d.data?.doorGroup ?? null, category: d.data?.doorCategory ?? null, online: d.data?.online ?? null })),
       timeSchedules: res.filter((r) => r.kind === 'timeschedule').map((t) => t.name),
-      keycardTypes: [['Staff keycard', 'Encoded at an encoder or the Visionline desk; one per person (override cancels older cards)'], ['Daily staff keycard', `Valid ${pol?.keycards?.dailyHours ?? 14} hours`],
+      keycardTypes: [['Staff keycard', 'Encoded at an encoder from the portal or issued from Visionline; one per person (override cancels older cards)'], ['Daily staff keycard', `Valid ${pol?.keycards?.dailyHours ?? 14} hours`],
         ['Emergency card', 'All doors, also with the deadbolt on; always valid until cancelled'], ['Stand-open card', 'Keeps chosen doors open'], ['Clearance card', 'Clears guest access from a lock'],
         ['One-time card', 'Opens chosen doors once'], ['Blocking card (unpaid guest)', 'Guest card for one room, override, expires after a minute'], ['Staff mobile key', 'On the staff app; issued through Visionline']],
       access: ops.map((o) => ({ name: o.display_name, email: o.email, roles: (o.roles as string[]).map((r) => (ROLE_LABELS as Record<string, string>)[r] ?? r), mfa: o.mfa_enabled, lastSignIn: o.last_sign_in_at })),

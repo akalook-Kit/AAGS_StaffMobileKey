@@ -8,9 +8,10 @@ import { queryEvents } from './event-log.ts';
  * Issued by:
  *   - mobile keys: the portal user who requested the key;
  *   - keycards encoded or recorded through the portal's Keycards page: the person who handled the request;
- *   - other keycards in Visionline's card list: "Visionline desk". The Visionline Web API does not say which desk
- *     operator encoded a card; Visionline's own card log does.
- *   - cards not in the staff card list (normally guest cards): "Visionline desk (guest card)"; when the hotel's
+ *   - other keycards in Visionline's card list: "Issued from Visionline", with the Visionline operator (and the portal
+ *     user linked to that operator) when known: recorded on the Keycards page, or from an imported card log. The
+ *     Visionline Web API does not say which operator encoded a card.
+ *   - cards not in the staff card list (normally guest cards): "Issued from Visionline (guest card)"; when the hotel's
  *     in-house list has a stay in that room on that day, the guest's name is shown as the likely holder.
  *
  * Lock events reach the platform when Visionline has them: online locks at once, offline locks when their audit
@@ -34,8 +35,8 @@ export async function roomCardUsage(hotelId: string, f: { from: Date; to: Date; 
   const cards = [...new Set(r.events.filter((e) => e.id.startsWith('v')).map((e) => e.card).filter((c): c is string => Boolean(c)))];
   // Keycards handled on the portal's Keycards page (encoded at an encoder, or recorded as encoded at the desk).
   const portal = cards.length ? await many(pool, `SELECT DISTINCT ON (k.card_reg_no) k.card_reg_no, k.issue_method, o.display_name,
-      NULLIF(trim(coalesce(k.given_name,'') || ' ' || coalesce(k.surname,'')), '') AS holder, k.department
-    FROM keycard_requests k LEFT JOIN operators o ON o.id=k.handled_by
+      NULLIF(trim(coalesce(k.given_name,'') || ' ' || coalesce(k.surname,'')), '') AS holder, k.department, k.vl_operator
+    FROM keycard_requests k LEFT JOIN operators o ON o.id=COALESCE(k.issued_by, k.handled_by)
     WHERE k.hotel_id=$1 AND k.card_reg_no = ANY($2::text[]) AND k.status IN ('ISSUED','COLLECTED') ORDER BY k.card_reg_no, k.updated_at DESC`, [hotelId, cards]) : [];
   const byPortal = new Map(portal.map((p) => [p.card_reg_no, p]));
   // In-house list (breakfast / occupancy import), to name the likely holder of a guest card.
@@ -64,10 +65,11 @@ export async function roomCardUsage(hotelId: string, f: { from: Date; to: Date; 
       const kind: RoomCardRow['kind'] = m?.kind === 'mobile' ? 'mobile' : m?.kind === 'card' || p ? 'staff card' : 'guest / other card';
       const guest = kind === 'guest / other card' ? guestAt(e.door, e.at) : null;
       const fromPortal = m?.issuedBy && !/^Visionline/.test(m.issuedBy) ? m.issuedBy : null;
-      const issuedBy = p ? `${p.display_name ?? fromPortal ?? 'Portal user'} (${p.issue_method === 'encoder' ? 'encoded from the portal' : 'recorded in the portal, encoded at the Visionline desk'})`
+      const issuedBy = p && p.issue_method !== 'encoder' && m?.issuedBy?.startsWith('Issued from Visionline · ') ? `${m.issuedBy}, recorded by ${p.display_name ?? 'a portal user'}`
+        : p ? `${p.display_name ?? fromPortal ?? 'Portal user'} (${p.issue_method === 'encoder' ? 'encoded from the portal' : `recorded in the portal, issued from Visionline${p.vl_operator ? ` by ${p.vl_operator}` : ''}`})`
         : fromPortal ? `${fromPortal} (${m?.kind === 'mobile' ? 'mobile key' : 'encoded from the portal'})`
-        : m?.issuedBy?.startsWith('Visionline: ') ? m.issuedBy
-        : m?.kind === 'mobile' ? 'Visionline (mobile key)' : kind === 'staff card' ? 'Visionline desk' : 'Visionline desk (guest card)';
+        : m?.issuedBy?.startsWith('Issued from Visionline') ? m.issuedBy
+        : m?.kind === 'mobile' ? 'Visionline (mobile key)' : kind === 'staff card' ? 'Issued from Visionline' : 'Issued from Visionline (guest card)';
       c = {
         card: e.card, kind, holder: e.person ?? p?.holder ?? (guest ? `In-house guest: ${guest}` : null), group: m?.group ?? p?.department ?? null,
         issuedBy, entries: 0, refused: 0, first: e.at, last: e.at, validThen: m?.validThen ?? null,

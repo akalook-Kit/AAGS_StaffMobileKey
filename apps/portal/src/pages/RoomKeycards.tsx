@@ -88,7 +88,7 @@ export function RoomKeycardsPage() {
           </table>
         )}
         <p className="small muted" style={{ marginTop: 12 }}>
-          <strong>Issued by:</strong> mobile keys and keycards handled on the Keycards page show the portal user. Other keycards show "Visionline desk": the Visionline Web API does not say which desk operator encoded a card (Visionline's own card log does). Guest cards are matched to the in-house list when it is imported.
+          <strong>Issued by:</strong> mobile keys and keycards handled on the Keycards page show the portal user. Other keycards show "Issued from Visionline", with the Visionline operator and the person linked to that operator when known (recorded on the Keycards page, or from Visionline's card log imported in the Setup report). Guest cards are matched to the in-house list when it is imported.
         </p>
       </div>
     </>
