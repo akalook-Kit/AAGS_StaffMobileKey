@@ -18,8 +18,34 @@ mkdirSync(out, { recursive: true });
 const tools = join(out, 'tools');
 mkdirSync(tools, { recursive: true });
 if (!existsSync('/usr/bin/mcs')) throw new Error('mcs (Mono C# compiler) is needed: sudo apt-get install mono-mcs');
-execFileSync('mcs', ['-target:winexe', '-optimize+', `-out:${join(pkg, 'run-hidden.exe')}`, join(root, 'installer/msi/tools/RunHidden.cs')], { stdio: 'inherit' });
-execFileSync('mcs', ['-target:winexe', '-optimize+', `-out:${join(tools, 'ask-setup.exe')}`, '-r:System.Windows.Forms.dll', '-r:System.Drawing.dll', '-r:System.Security.dll',
+// 2.17.1 Compiled against the .NET Framework 4.0 reference assemblies, not Mono's own libraries: with Mono's mscorlib
+// the compiler picked String.TrimEnd(char), which .NET Framework does not have ("Method not found ... TrimEnd(Char)").
+// Now the compiler refuses anything Windows' .NET Framework 4 lacks. The assemblies (MIT, .NET Foundation) are fetched
+// once from github.com/mono/reference-assemblies at a fixed commit and checked against these SHA-256 values.
+const REF_COMMIT = '02349172cfa5732cdf2c6c5aa5d1dd2315213b70';
+const REFS = {
+  'mscorlib.dll': '57dad5c007d52244b7681eacbbf83f9cf03824e83b86884e84f3461bf40cccdf',
+  'System.dll': '49636283124d77cad96631b219e99933c9fbc6f521d50efc9ecc80073147d9ae',
+  'System.Core.dll': '1859548ac9f909fb2f117fb099e22a2981694feec1a8bebac848365e90367fc9',
+  'System.Drawing.dll': '497a784112eec5ba04534c7ec383e2bb7d4faa6b6e819c208d2d8eea3c6e8576',
+  'System.Windows.Forms.dll': '5ac34d5b214bfa6bf1d38f9c9222915f69524dcbd66c3953abec0735cd5bcaa7',
+  'System.Security.dll': '0e68b4aa350528d6777c2638cca5229886c9045a82ca1dbabb506bb2c7028aa7',
+};
+const refDir = join(root, 'dist/netfx40-refs');
+mkdirSync(refDir, { recursive: true });
+for (const [n, sha] of Object.entries(REFS)) {
+  const f = join(refDir, n);
+  const ok = () => existsSync(f) && createHash('sha256').update(readFileSync(f)).digest('hex') === sha;
+  if (!ok()) {
+    const r = await fetch(`https://raw.githubusercontent.com/mono/reference-assemblies/${REF_COMMIT}/v4.0/${n}`);
+    if (!r.ok) throw new Error(`Downloading the reference assembly ${n} failed (${r.status}).`);
+    writeFileSync(f, Buffer.from(await r.arrayBuffer()));
+    if (!ok()) throw new Error(`The reference assembly ${n} does not have the expected SHA-256.`);
+  }
+}
+const netfx = (...names) => ['-noconfig', '-nostdlib', ...['mscorlib.dll', 'System.dll', ...names].map((n) => `-r:${join(refDir, n)}`)];
+execFileSync('mcs', ['-target:winexe', '-optimize+', ...netfx(), `-out:${join(pkg, 'run-hidden.exe')}`, join(root, 'installer/msi/tools/RunHidden.cs')], { stdio: 'inherit' });
+execFileSync('mcs', ['-target:winexe', '-optimize+', ...netfx('System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll', 'System.Security.dll'), `-out:${join(tools, 'ask-setup.exe')}`,
   join(root, 'installer/msi/tools/AskSetup.cs')], { stdio: 'inherit' });
 const files = [];
 const walk = (d) => { for (const n of readdirSync(d)) { const p = join(d, n); statSync(p).isDirectory() ? walk(p) : files.push(relative(pkg, p)); } };
