@@ -20,13 +20,17 @@ events, which reach Visionline and are read by the connector's watch (`/callback
 | 1056–1081 "Battery level below X volts" (6.0–9.0 V and 3.0–4.8 V, in 0.2 V steps) | A **reading**. It becomes Low or Critical only if the hotel sets voltage thresholds (Settings → Battery & maintenance). |
 
 **2.18:** "Below 4.8 V" (or 9.0 V) is the reading of new batteries: it counts as a battery change and closes the alert and
-its request. In the 30 days after a change (Settings → Battery & maintenance), 304 / 306 "battery level low" alerts
-are **ignored** (no alert, no request, noted in the audit trail as `battery.low_alert_ignored`) unless a reading at or
-below the low threshold (or 4.2 V / 8.4 V when none is set) came after the change: locks can keep logging the alert
-with cards for a while after new batteries.
+its request.
+
+**2.19 (firmware fault):** a battery alarm of any kind (304, 305, 529, 530…) from 10 minutes before to 14 days after a
+battery change (setting "stillAlarmingDays") is a **firmware fault** unless a reading since the change is at or below
+the site's Low threshold (else its Critical threshold, else 4.0 V): no battery alert and no "replace battery" request;
+the portal opens "Program the lock and upload firmware" (once; repeated alarms add nothing) and records
+`battery.firmware_suspected`. **Default threshold:** 3–4.8 V locks are critical at 3.6 V (migration 024 sets it on
+sites that had no threshold).
 
 Every door the platform knows is shown, including doors that have **never reported**. A reading becomes
-**no recent report** after the number of days set by the hotel (30 by default).
+**No battery report available** after the number of days set by the hotel (30 by default).
 
 > **Offline locks** (all 449 doors at the JW Marriott test system are offline) only report when their
 > events reach Visionline, for example when the lock is read with a programming unit. Expect *never
@@ -93,7 +97,7 @@ These settings are part of the versioned hotel policy, so each save can be rolle
 
 | Setting | Default |
 |---|---|
-| Days without a report before "no recent report" | 30 |
+| Days without a report before "No battery report available" | 30 |
 | Automatic maintenance request for | Critical alarms |
 | Voltage thresholds (6–9 V packs, 3–4.8 V cells) | empty: readings only |
 | Due time per priority (hours) | urgent 4, high 24, normal 72, low 168 |

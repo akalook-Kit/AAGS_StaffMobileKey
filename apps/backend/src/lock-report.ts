@@ -10,6 +10,16 @@ import { decodeReport, parseTable } from './vl-reports.ts';
  * numbers and "issued by" in the report are read past and never stored.
  */
 export type DateOrder = 'MDY' | 'DMY' | 'YMD';
+
+/** 2.19 The lock models on the sites (Armel, 27 Oct); chosen at upload and remembered per door. */
+export const LOCK_MODELS = [
+  { id: 'signature-rfid', name: 'VingCard Signature RFID' },
+  { id: 'essence', name: 'VingCard Essence' },
+  { id: 'classic-rfid', name: 'VingCard Classic RFID' },
+  { id: 'allure', name: 'VingCard Allure' },
+  { id: 'other', name: 'Other / not sure' },
+] as const;
+export const lockModelName = (id: string | null | undefined) => LOCK_MODELS.find((m) => m.id === id)?.name ?? null;
 export interface LockEvent { t: string | null; code: number; name: string; mark: boolean; card: string; seq?: number | null }
 export interface ParsedLockReport {
   events: LockEvent[];
@@ -173,10 +183,20 @@ export interface BatteryPeriod {
   from: string; to: string; startedBy: 'exchange' | 'reading' | 'report'; firstVolts: number | null; lowestVolts: number | null;
   lowestAt: string | null; days: number; dropPer30Days: number | null; openings: number; dropPer1000Openings: number | null; alarms: number;
   /** 2.18 Days from the start of the period to the first reading at or below each level (null = not reached). */
-  reached: { volts: number; days: number | null }[]; ignoredLowAlerts: number;
+  reached: { volts: number; days: number | null }[]; firmwareAlarms: number;
 }
 
-export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<Pick<ParsedLockReport, 'duplicates' | 'invalidTimes' | 'dateOrder'>>, now = Date.now()) {
+/** 2.19 One step of the elimination method. */
+export interface Step { id: string; title: string; check: string; suggests: 'likely' | 'possible' | 'unlikely' | 'unknown'; evidence: string }
+
+export interface AnalysisOptions {
+  /** The reading that confirms a battery alarm after new batteries (the site's Low, else Critical threshold). */
+  confirmVolts?: number | null;
+  /** Days after a battery change in which an unconfirmed battery alarm is a firmware fault (site setting, 14). */
+  firmwareDays?: number;
+}
+
+export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<Pick<ParsedLockReport, 'duplicates' | 'invalidTimes' | 'dateOrder'>>, now = Date.now(), opt: AnalysisOptions = {}) {
   const all = p.events;
   // Times before 2000 (or in the future) come from a lock whose clock was lost: counted, kept out of the timeline.
   const bogus = (t: string | null) => !t || t < '2000' || ms(t) > now + 2 * DAY;
@@ -250,7 +270,9 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   const scaleHigh = mainScale === 'high';
   const readings = raw.filter((r) => !nearBusy(r.t) && (r.volts >= 6) === scaleHigh && r.t >= (wFrom ?? ''));
   const ignoredReadings = raw.length - readings.length;
-  const top = scaleHigh ? 9.0 : 4.8, confirmLevel = scaleHigh ? 8.4 : 4.2, alarmLevel = scaleHigh ? 7.2 : 4.0;
+  const top = scaleHigh ? 9.0 : 4.8, alarmLevel = scaleHigh ? 7.2 : 4.0;
+  const confirmLevel = !scaleHigh && opt.confirmVolts != null && opt.confirmVolts < 6 ? opt.confirmVolts : scaleHigh && opt.confirmVolts != null && opt.confirmVolts >= 6 ? opt.confirmVolts : alarmLevel;
+  const firmwareDays = opt.firmwareDays ?? 14;
   const exchanges = recent.filter((e) => isIn(e.code, C.exchanged)).map((e) => ({ t: e.t!, how: 'Battery exchanged (event)' }));
   // A reading at the top of the scale after lower ones also means new batteries (when no exchange event is near).
   for (let i = 1; i < readings.length; i++) {
@@ -262,18 +284,18 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   exchanges.sort((a, b) => (a.t < b.t ? -1 : 1));
   // Restarts right after new batteries are expected (the lock starts again when the batteries go in).
   const nearChange = (t: string) => exchanges.some((x) => ms(t) >= ms(x.t) - 15 * MIN && ms(t) <= ms(x.t) + 15 * MIN);
-  // 2.18 "Alert, Battery level low" logged with cards: after new batteries the lock can keep logging it for a while,
-  // so within 30 days of a change it counts only when a reading at or below the confirm level came after the change.
-  const lowAlerts = recent.filter((e) => isIn(e.code, C.cardLowAlert));
+  // 2.19 (Armel, 27 Oct) A battery alarm after new batteries, even a single one, is a firmware fault unless a reading
+  // since the change confirms low batteries: it is not counted as a battery alarm. From 10 minutes before the change
+  // (same-minute events can be listed in any order) to firmwareDays after it.
   const lastChangeBefore = (t: string) => [...exchanges].reverse().find((x) => ms(x.t) - 10 * MIN <= ms(t));
-  const falseAlerts: string[] = [], realAlerts: { t: string; code: number; name: string }[] = [];
-  for (const a of lowAlerts) {
+  const firmwareAlarms: { t: string; code: number; name: string; changedAt: string }[] = [], alarms: { t: string; code: number; name: string }[] = [];
+  for (const a of recent.filter((e) => isIn(e.code, [...C.lockAlarm, ...C.cardLowAlert]))) {
     const ch = lastChangeBefore(a.t!);
-    const inGrace = ch && ms(a.t!) - ms(ch.t) <= 30 * DAY;
+    const inWindow = ch && firmwareDays > 0 && ms(a.t!) - ms(ch.t) <= firmwareDays * DAY;
     const confirmed = ch ? readings.some((r) => r.t >= ch.t && r.t <= a.t! && r.volts <= confirmLevel + 1e-6) : true;
-    if (inGrace && !confirmed) falseAlerts.push(a.t!); else realAlerts.push({ t: a.t!, code: a.code, name: a.name });
+    if (inWindow && !confirmed) firmwareAlarms.push({ t: a.t!, code: a.code, name: a.name, changedAt: ch!.t });
+    else alarms.push({ t: a.t!, code: a.code, name: a.name });
   }
-  const alarms = [...recent.filter((e) => isIn(e.code, C.lockAlarm)).map((e) => ({ t: e.t!, code: e.code, name: e.name })), ...realAlerts].sort((a, b) => (a.t < b.t ? -1 : 1));
   const alarmDays = new Set(alarms.map((a) => a.t.slice(0, 10))).size;
 
   const cuts = [wFrom, ...exchanges.map((x) => x.t)].filter(Boolean) as string[];
@@ -299,14 +321,14 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
     periods.push({ from: a, to: b, startedBy, firstVolts: first?.volts ?? null, lowestVolts: lowest?.volts ?? null, lowestAt: lowest?.t ?? null, days: r1(d),
       dropPer30Days: drop, openings: op, dropPer1000Openings: per1000, alarms: alarms.filter((x) => x.t >= a && x.t < end).length,
       reached: levels.map((v) => { const h = rs.find((r) => r.volts <= v + 1e-6); return { volts: v, days: h && startedBy !== 'report' ? r1((ms(h.t) - ms(a)) / DAY) : null }; }),
-      ignoredLowAlerts: falseAlerts.filter((t) => t >= a && t < end).length });
+      firmwareAlarms: firmwareAlarms.filter((x) => x.t >= a && x.t < end).length });
   }
   const rates = periods.map((x) => x.dropPer30Days).filter((x): x is number => x != null && x > 0);
   const avgDrop = rates.length ? r2(rates.reduce((s, x) => s + x, 0) / rates.length) : null;
   const estimatedDays = avgDrop ? Math.round(((top - alarmLevel) / avgDrop) * 30) : null;
   const lastReading = readings[readings.length - 1] ?? null;
   const battery = { readings, ignoredReadings, alarms, alarmDays, exchanges, periods, avgDropPer30Days: avgDrop, estimatedDaysPerSet: estimatedDays,
-    scale: scaleHigh ? '6-9 V' : '3-4.8 V', alarmLevel, confirmLevel, lastReading, lowAlerts: { total: lowAlerts.length, ignoredAfterChange: falseAlerts.length, counted: realAlerts.length } };
+    scale: scaleHigh ? '6-9 V' : '3-4.8 V', alarmLevel, confirmLevel, firmwareDays, lastReading, firmwareAlarms };
 
   // ---- Faults ------------------------------------------------------------------------------------------------------
   const restartsAll = all.filter((e) => isIn(e.code, C.restart));
@@ -372,16 +394,12 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   if (fast.length) f.push({ area: 'battery', level: 'high', title: fast.length === 1 ? `New batteries down to ${levels[0]!.toFixed(1)} V in ${fastest < 1 ? 'less than a day' : nd(Math.round(fastest))}` : `New batteries drained fast ${fast.length} times`,
     detail: `${fast.map((x) => x[0]!.toUpperCase() + x.slice(1)).join('; ')}. A good set normally lasts many months.`,
     action: 'Check that the batteries are new, of the type the lock requires (alkaline or lithium as specified, not rechargeable), all from the same pack, and that the contacts are clean and tight. Then look at the lock and door findings below: a lock that restarts, keeps its motor running, or a door that rubs or is left open, drains batteries.' });
-  for (const x of periods) {
-    if (x.startedBy === 'report') continue;
-    const after = alarms.filter((a) => a.t > x.from && ms(a.t) - ms(x.from) < 14 * DAY);
-    if (after.length) f.push({ area: 'battery', level: 'high', title: 'Battery alarm again soon after the change',
-      detail: `${after.length} battery alarm(s) within 14 days of the change on ${dt(x.from)}, confirmed by the readings (first: ${after[0]!.name}, ${after[0]!.t.replace('T', ' ')}).`,
-      action: 'Program the lock and upload its firmware with the service tool, then read it again.' });
+  if (firmwareAlarms.length) {
+    const changes = [...new Set(firmwareAlarms.map((x) => x.changedAt))];
+    f.push({ area: 'lock', level: 'high', title: `Battery alarm after new batteries: firmware fault (${firmwareAlarms.length} time${firmwareAlarms.length === 1 ? '' : 's'})`,
+      detail: `After the battery change${changes.length === 1 ? '' : 's'} on ${changes.map(dt).join(', ')} the lock raised a battery alarm (first: ${firmwareAlarms[0]!.name}, ${firmwareAlarms[0]!.t.replace('T', ' ')}) while its readings stayed above ${confirmLevel.toFixed(1)} V. A battery alarm after new batteries, even once, is a firmware fault, not a battery problem; it is not counted as a battery alarm here.`,
+      action: 'Program the lock and upload its firmware with the service tool, then read the lock again and check that the alarm has cleared.' });
   }
-  if (falseAlerts.length) f.push({ area: 'battery', level: 'info', title: `${falseAlerts.length} "Battery level low" alert${falseAlerts.length === 1 ? '' : 's'} after new batteries ignored`,
-    detail: `The lock kept logging "Alert, Battery level low" with cards after the batteries were changed, while its readings stayed above ${confirmLevel.toFixed(1)} V. These are not a battery problem and are left out of the alarms.`,
-    action: 'Nothing to do if the readings stay high. If the alerts continue for weeks, program the lock with the service tool to clear the flag.' });
   if (faults.accessDeniedBattery) f.push({ area: 'battery', level: 'high', title: 'The lock refused cards because of its battery', detail: `${faults.accessDeniedBattery} time(s) the lock switched to "access denied" for low battery.`, action: 'Replace the batteries now.' });
   if (!exchanges.length && lastReading && lastReading.volts <= confirmLevel + 1e-6)
     f.push({ area: 'battery', level: lastReading.volts <= alarmLevel + 1e-6 ? 'high' : 'medium', title: `Batteries at ${lastReading.volts.toFixed(1)} V at the end of the report`, detail: `Last reading ${lastReading.t.replace('T', ' ')}; the lock's usual low-battery level is ${alarmLevel.toFixed(1)} V.`, action: 'Plan a battery change.' });
@@ -425,13 +443,48 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   for (const x of f) if (x.action && x.level !== 'info' && !actions.some((a) => a.text === x.action)) actions.push({ level: x.level, text: x.action });
   const verdict = f.some((x) => x.level === 'high') ? 'attention' : f.some((x) => x.level === 'medium') ? 'check' : 'ok';
 
+  // ---- Elimination, step by step (2.19) ------------------------------------------------------------------------------
+  // The usual causes of a lock that drains its batteries or misbehaves, simplest first. Each step says what the report
+  // shows; the technician checks it on the door and marks it OK or problem found, until the cause is left.
+  const fastDrain = fast.length > 0;
+  const per1000 = periods.map((x) => x.dropPer1000Openings).filter((x): x is number => x != null);
+  const restartsNow = faults.restarts;
+  const S = (id: string, title: string, check: string, suggests: Step['suggests'], evidence: string): Step => ({ id, title, check, suggests, evidence });
+  const steps: Step[] = [
+    S('batteries', 'Batteries', 'Are the batteries new, of the type the lock requires (not rechargeable), all from the same pack and fitted the right way round?',
+      fastDrain ? 'likely' : alarms.length ? 'possible' : 'unlikely',
+      fastDrain ? `New batteries drained fast ${fast.length} time(s).` : alarms.length ? `${alarms.length} battery alarm(s) that count.` : 'No fast drain in the report.'),
+    S('contacts', 'Battery holder and contacts', 'Are the battery springs and contacts clean, tight and not corroded; is the cable to the door unit firmly connected?',
+      restartsNow >= 5 || clockLost > 0 ? 'likely' : restartsNow > 0 ? 'possible' : 'unlikely',
+      `${restartsNow} restart(s) not explained by a battery change${clockLost ? `, clock lost (${clockLost} events before 2000)` : ''}.`),
+    S('door', 'Door and lock mechanics', 'Is the door aligned; do latch and strike engage without rubbing; does the closer shut and latch the door; does the deadbolt turn freely?',
+      ajarPerDay >= 0.5 || door.openedWithoutCredential.length >= 3 ? 'likely' : door.leftOpenRecent > 0 ? 'possible' : 'unlikely',
+      `Left open too long ${door.leftOpenRecent} time(s) in ${Math.round(spanDays)} days (up to ${door.longestOpenMinutes ?? 0} min); opened from outside with no card or key ${door.openedWithoutCredential.length} time(s).`),
+    S('use', 'How much the door is used', 'Is this door unusually busy (staff corridor, service door), so the batteries simply work harder?',
+      usage.perDay >= 40 ? 'possible' : 'unlikely',
+      `${usage.perDay} openings a day${per1000.length ? `; ${per1000.map((x) => x.toFixed(1)).join(' / ')} V per 1,000 openings` : ''}.`),
+    S('reader', 'Card reader', 'Is the reader clean and undamaged; do different cards fail, or only some?',
+      faults.cardReading >= 5 ? 'likely' : faults.cardReading > 0 ? 'possible' : 'unlikely', `${faults.cardReading} card reading error(s).`),
+    S('bluetooth', 'Bluetooth (mobile keys)', 'Is Bluetooth on at this lock; are mobile keys used here; is the BLE module and its firmware up to date?',
+      faults.ble >= 3 ? 'likely' : faults.ble > 0 ? 'possible' : 'unlikely', `${faults.ble} Bluetooth error(s).`),
+    S('radio', 'Online radio and gateway', 'Online locks keep a radio link to their gateway: is the signal to the gateway good, and the gateway online? A weak link makes the lock retry and use more battery.',
+      online.pings > 0 && fastDrain ? 'possible' : online.pings > 0 ? 'unknown' : 'unlikely', online.pings ? `Online lock: ${online.pings} ping(s) from the server, last ${online.lastPing?.replace('T', ' ')}.` : 'No server pings: the lock works offline.'),
+    S('electronics', 'Door unit electronics', 'If internal errors continue after programming, the door unit (electronics) must be checked or replaced.',
+      faults.internal >= 5 ? 'likely' : faults.internal > 0 ? 'possible' : 'unlikely', `${faults.internal} internal error(s) (1975).`),
+    S('firmware', 'Firmware', 'Program the lock and upload the firmware with the service tool; read the lock again afterwards. Firmware faults cause false battery alarms and can also drain the batteries.',
+      firmwareAlarms.length || faults.internal >= 5 ? 'likely' : fastDrain ? 'possible' : 'unknown',
+      `${firmwareAlarms.length} battery alarm(s) after new batteries with good readings; ${faults.internal} internal error(s); program uploaded ${service.programDownloads} time(s)${service.lastProgram ? `, last ${service.lastProgram.replace('T', ' ')}` : ''}.`),
+    S('environment', 'Location and climate', 'Is the lock outdoors, in a humid or very cold or hot place (pool, kitchen, near heating, direct sun)? Batteries lose capacity there.',
+      'unknown', 'The report cannot tell; check on site.'),
+  ];
+
   // Event names, most frequent first (for the "all events" table).
   const byName = new Map<string, { code: number; name: string; n: number; last: string | null; meaning: string | null; internal: boolean }>();
   for (const e of all) { const k = String(e.code); const x = byName.get(k) ?? { code: e.code, name: e.name, n: 0, last: null, meaning: meaning(e.code), internal: /door unit internal/i.test(e.card) }; x.n++; if (e.t && !bogus(e.t) && (!x.last || e.t > x.last)) x.last = e.t; byName.set(k, x); }
   return {
     period: { from, to, days: from && to ? r1((ms(to) - ms(from)) / DAY) : 0 }, window, events: all.length, clockLost, verdict, actions,
     quality: { duplicates: p.duplicates ?? 0, invalidTimes: p.invalidTimes ?? 0, clockLost, future, dateOrder: p.dateOrder ?? null, ignoredReadings },
-    usage, refusedBy, door, faults, service, online, battery, weekly, daily: days, findings: f,
+    usage, refusedBy, door, faults, service, online, battery, weekly, daily: days, findings: f, steps,
     eventTypes: [...byName.values()].sort((a, b) => b.n - a.n).slice(0, 120),
   };
 }

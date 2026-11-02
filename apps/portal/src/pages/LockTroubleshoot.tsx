@@ -11,7 +11,9 @@ import { Drawer, ErrorNote, PageHead, fmt, useApi } from '../ui';
  * which faults it reports and what to do. Names, user IDs and card numbers in the file are never kept.
  */
 interface Finding { level: 'high' | 'medium' | 'info'; title: string; detail: string; action?: string; area?: 'battery' | 'lock' | 'door' | 'use' | 'security' | 'data' }
-interface Period { from: string; to: string; startedBy: 'exchange' | 'reading' | 'report'; firstVolts: number | null; lowestVolts: number | null; lowestAt: string | null; days: number; dropPer30Days: number | null; openings: number; dropPer1000Openings: number | null; alarms: number; reached?: { volts: number; days: number | null }[]; ignoredLowAlerts?: number }
+interface Period { from: string; to: string; startedBy: 'exchange' | 'reading' | 'report'; firstVolts: number | null; lowestVolts: number | null; lowestAt: string | null; days: number; dropPer30Days: number | null; openings: number; dropPer1000Openings: number | null; alarms: number; reached?: { volts: number; days: number | null }[]; firmwareAlarms?: number }
+interface Step { id: string; title: string; check: string; suggests: 'likely' | 'possible' | 'unlikely' | 'unknown'; evidence: string }
+type Checks = Record<string, { result: 'ok' | 'problem'; note: string | null; by: string | null; at: string }>;
 interface Week { week: string; openings: number; refused: number; leftOpen: number; internal: number; cardReading: number; restarts: number; batteryAlarms: number; lowest: number | null }
 interface Analysis {
   period: { from: string | null; to: string | null; days: number }; window: { from: string | null; to: string | null; days: number; earlier: number };
@@ -25,10 +27,10 @@ interface Analysis {
   service: { readouts: number; parametersRead?: number; timeSet: number; programDownloads: number; initialisations: number; lastReadout?: string | null; lastTimeSet?: string | null; lastProgram?: string | null };
   online?: { pings: number; lastPing: string | null; longestGapHours: number | null };
   battery: { readings: { t: string; volts: number }[]; ignoredReadings: number; alarms: { t: string; code: number; name: string }[]; exchanges: { t: string; how: string }[]; periods: Period[]; avgDropPer30Days: number | null; estimatedDaysPerSet: number | null; scale: string; alarmLevel: number;
-    confirmLevel?: number; lastReading?: { t: string; volts: number } | null; lowAlerts?: { total: number; ignoredAfterChange: number; counted: number } };
-  weekly?: Week[]; daily: { day: string; openings: number }[]; findings: Finding[]; eventTypes: { code: number; name: string; n: number; last?: string | null; meaning?: string | null; internal?: boolean }[];
+    confirmLevel?: number; firmwareDays?: number; lastReading?: { t: string; volts: number } | null; firmwareAlarms?: { t: string; code: number; name: string; changedAt: string }[] };
+  steps?: Step[]; weekly?: Week[]; daily: { day: string; openings: number }[]; findings: Finding[]; eventTypes: { code: number; name: string; n: number; last?: string | null; meaning?: string | null; internal?: boolean }[];
 }
-interface ReportRow { id: string; doorId: string; doorName: string; fileName: string; from: string | null; to: string | null; events: number; uploadedAt: string; uploadedBy: string | null; avgDropPer30Days: number | null; perDay: number | null; high: number; medium: number; top: string | null }
+interface ReportRow { id: string; doorId: string; doorName: string; lockModel?: string | null; stepsLeft?: number; problemsFound?: number; fileName: string; from: string | null; to: string | null; events: number; uploadedAt: string; uploadedBy: string | null; avgDropPer30Days: number | null; perDay: number | null; high: number; medium: number; top: string | null }
 
 /** Lock times are the lock's own wall-clock times ("2026-10-24T13:52"), shown as they are. */
 const lt = (t: string | null | undefined, withTime = true) => {
@@ -40,6 +42,7 @@ const LEVEL: Record<Finding['level'], { label: string; cls: string }> = { high: 
 const AREA: Record<NonNullable<Finding['area']>, string> = { battery: 'Battery', lock: 'Lock', door: 'Door', use: 'Use', security: 'Security', data: 'Service & data' };
 const VERDICT = { attention: { cls: 'bad', text: 'This lock needs attention' }, check: { cls: 'warn', text: 'A few things to check' }, ok: { cls: 'ok', text: 'Nothing wrong found' } } as const;
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const SUGGESTS: Record<Step['suggests'], { label: string; cls: string }> = { likely: { label: 'Likely', cls: 'bad' }, possible: { label: 'Possible', cls: 'warn' }, unlikely: { label: 'Unlikely', cls: 'ok' }, unknown: { label: 'Check on site', cls: '' } };
 const toB64 = (f: File) => new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] ?? ''); r.onerror = () => rej(r.error); r.readAsDataURL(f); });
 
 export function LockTroubleshootPage() {
@@ -79,13 +82,14 @@ function ReportList() {
       {rows.length > 0 && (
         <div className="panel" style={{ padding: 0 }}>
           <table className="grid">
-            <thead><tr><th>Door</th><th>Events from – to</th><th>Findings</th><th className="num">Openings a day</th><th className="num">Battery use (V / 30 days)</th><th>Uploaded</th></tr></thead>
+            <thead><tr><th>Door and lock</th><th>Events from – to</th><th>Findings</th><th>Causes left</th><th className="num">Openings a day</th><th className="num">Battery use (V / 30 days)</th><th>Uploaded</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td><Link to={`/lock-troubleshoot/${r.id}`}><strong>{r.doorName}</strong></Link><div className="small muted">{r.fileName}</div></td>
+                  <td><Link to={`/lock-troubleshoot/${r.id}`}><strong>{r.doorName}</strong></Link><div className="small muted">{r.lockModel ?? 'model not given'} · {r.fileName}</div></td>
                   <td className="small">{lt(r.from, false)} – {lt(r.to, false)}</td>
                   <td><div className="badges">{r.high > 0 && <span className="badge bad">{r.high} act now</span>}{r.medium > 0 && <span className="badge warn">{r.medium} to check</span>}{!r.high && !r.medium && <span className="badge ok">nothing found</span>}</div>{r.top && <div className="small muted" style={{ marginTop: 3 }}>{r.top}</div>}</td>
+                  <td className="small">{r.problemsFound ? <span className="badge bad">{r.problemsFound} found</span> : null} {r.stepsLeft != null ? `${r.stepsLeft} to check` : '—'}</td>
                   <td className="num">{r.perDay ?? '—'}</td>
                   <td className="num">{r.avgDropPer30Days != null ? Number(r.avgDropPer30Days).toFixed(2) : '—'}</td>
                   <td className="small">{fmt.dt(r.uploadedAt)}{r.uploadedBy ? <div className="muted">{r.uploadedBy}</div> : null}</td>
@@ -100,7 +104,7 @@ function ReportList() {
   );
 }
 
-interface Preview { doors?: { id: string; name: string; group: string | null }[]; duplicates?: number; events: number; dateOrder: 'MDY' | 'DMY' | 'YMD'; invalidTimes: number; period: { from: string | null; to: string | null; days: number }; window: { from: string | null; to: string | null }; clockLost: number; rooms: { room: string; n: number }[]; suggestedDoor: { id: string; name: string } | null; sample: { t: string; event: string }[]; findings: number }
+interface Preview { models?: Record<string, string>; lockModels?: { id: string; name: string }[]; doors?: { id: string; name: string; group: string | null }[]; duplicates?: number; events: number; dateOrder: 'MDY' | 'DMY' | 'YMD'; invalidTimes: number; period: { from: string | null; to: string | null; days: number }; window: { from: string | null; to: string | null }; clockLost: number; rooms: { room: string; n: number }[]; suggestedDoor: { id: string; name: string } | null; sample: { t: string; event: string }[]; findings: number }
 
 function UploadDrawer({ onClose }: { onClose: () => void }) {
   const { base } = useHotel();
@@ -108,16 +112,18 @@ function UploadDrawer({ onClose }: { onClose: () => void }) {
   const [file, setFile] = useState<{ name: string; data: string } | null>(null);
   const [order, setOrder] = useState<Preview['dateOrder'] | null>(null);
   const [pv, setPv] = useState<Preview | null>(null);
-  const [door, setDoor] = useState('');
+  const [door, setDoor0] = useState('');
+  const [model, setModel] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const setDoor = (d: string, p: Preview | null = pv) => { setDoor0(d); const m = p?.models?.[d]; if (m) setModel(m); };
   const known = (pv?.doors ?? []).map((d) => ({ doorId: d.id, name: d.name, doorGroup: d.group })).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   const preview = async (f: { name: string; data: string }, o: Preview['dateOrder'] | null) => {
     setBusy(true); setError(null); setPv(null);
     try {
       const p = await api<Preview>(`${base}/lock-reports/preview`, { body: { fileName: f.name, data: f.data, ...(o ? { dateOrder: o } : {}) } });
       setPv(p); setOrder(p.dateOrder);
-      if (!door && p.suggestedDoor) setDoor(p.suggestedDoor.id);
+      if (!door && p.suggestedDoor) setDoor(p.suggestedDoor.id, p);
     } catch (e) { setError(e); } finally { setBusy(false); }
   };
   const pick = async (f: File | undefined) => {
@@ -127,15 +133,15 @@ function UploadDrawer({ onClose }: { onClose: () => void }) {
     setFile(x); setDoor(''); void preview(x, null);
   };
   const confirm = async () => {
-    if (!file || !door) return;
+    if (!file || !door || !model) return;
     setBusy(true); setError(null);
     try {
-      const r = await api<{ id: string }>(`${base}/lock-reports`, { body: { fileName: file.name, data: file.data, dateOrder: order, doorId: door, doorName: known.find((d) => d.doorId === door)?.name } });
+      const r = await api<{ id: string }>(`${base}/lock-reports`, { body: { fileName: file.name, data: file.data, dateOrder: order, doorId: door, doorName: known.find((d) => d.doorId === door)?.name, lockModel: model } });
       nav(`/lock-troubleshoot/${r.id}`);
     } catch (e) { setError(e); setBusy(false); }
   };
   return (
-    <Drawer title="Upload a lock report" onClose={onClose} footer={<><span /><div className="row"><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy || !pv || !door} onClick={confirm}>{busy && pv ? 'Analysing…' : 'Confirm and analyse'}</button></div></>}>
+    <Drawer title="Upload a lock report" onClose={onClose} footer={<><span /><div className="row"><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy || !pv || !door || !model} onClick={confirm}>{busy && pv ? 'Analysing…' : 'Confirm and analyse'}</button></div></>}>
       <Steps />
       <div className="field"><label htmlFor="lr-file">Lock event report (.xls as saved by Visionline, .txt or .csv)</label>
         <input id="lr-file" type="file" accept=".xls,.txt,.csv,.tsv,text/plain,text/csv" onChange={(e) => pick(e.target.files?.[0])} /></div>
@@ -159,7 +165,14 @@ function UploadDrawer({ onClose }: { onClose: () => void }) {
               {known.map((d) => <option key={d.doorId} value={d.doorId}>{d.name}{d.doorGroup ? ` · ${d.doorGroup}` : ''}</option>)}
             </select>
             <span className="hint">{pv.suggestedDoor ? <>Suggested from the file: <strong>{pv.suggestedDoor.name}</strong> (the room most cards in it belong to).</> : pv.rooms.length ? <>Rooms named in the file: {pv.rooms.slice(0, 3).map((r) => r.room).join(', ')}.</> : 'The file does not name the room.'}</span></div>
-          <p className="small muted">Names, user IDs, card numbers and "issued by" in the file are not kept: only times, events and card types.</p>
+          <div className="field"><label htmlFor="lr-model">Which lock model?</label>
+            <select id="lr-model" value={model} onChange={(e) => setModel(e.target.value)}>
+              <option value="">Choose the model…</option>
+              {(pv.lockModels ?? []).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+            <span className="hint">{door && pv.models?.[door] ? 'Remembered from an earlier report of this door.' : 'Remembered for this door next time.'}</span></div>
+          {door && pv.rooms[0] && known.find((d) => d.doorId === door)?.name !== pv.rooms[0].room && <div className="alert warn">The file is mostly about <strong>{pv.rooms[0].room}</strong>, not the door chosen. Check that this is the right lock.</div>}
+          <p className="small muted">Names, user IDs, card numbers, card serial numbers and "issued by" in the file are not kept: only times, events and card types.</p>
         </>
       )}
     </Drawer>
@@ -169,7 +182,7 @@ function UploadDrawer({ onClose }: { onClose: () => void }) {
 function ReportView({ id }: { id: string }) {
   const { base, can, hotel } = useHotel();
   const nav = useNavigate();
-  const r = useApi<{ id: string; doorId: string; doorName: string; fileName: string; uploadedAt: string; uploadedBy: string | null; analysis: Analysis; others: { id: string; uploadedAt: string; to: string | null; avgDropPer30Days: number | null }[] }>(`${base}/lock-reports/${id}`, [id]);
+  const r = useApi<{ id: string; doorId: string; doorName: string; lockModel: string | null; lockModelName: string | null; checks: Checks; fileName: string; uploadedAt: string; uploadedBy: string | null; analysis: Analysis; others: { id: string; uploadedAt: string; to: string | null; avgDropPer30Days: number | null }[] }>(`${base}/lock-reports/${id}`, [id]);
   const att = useApi<any>(`${base}/attention`, []);
   const [error, setError] = useState<unknown>(null);
   const [ticket, setTicket] = useState<{ number: number; id: string } | null>(null);
@@ -190,7 +203,7 @@ function ReportView({ id }: { id: string }) {
   const del = async () => { if (!confirm('Delete this lock report?')) return; try { await api(`${base}/lock-reports/${id}`, { method: 'DELETE' }); nav('/lock-troubleshoot'); } catch (e) { setError(e); } };
   return (
     <div className="lock-report">
-      <PageHead title={`Lock ${r.data.doorName}`} intro={<>Events from {lt(x.period.from, false)} to {lt(x.period.to, false)} ({x.events.toLocaleString()} events, file {r.data.fileName}). Uploaded {fmt.dt(r.data.uploadedAt)}{r.data.uploadedBy ? ` by ${r.data.uploadedBy}` : ''}.{x.window.earlier > 0 && <> Rates use the last {Math.round(x.window.days)} days ({lt(x.window.from, false)} onwards); {x.window.earlier} older events are counted in the totals only.</>}</>}>
+      <PageHead title={`Lock ${r.data.doorName}`} intro={<><strong>{r.data.lockModelName ?? 'Lock model not given'}</strong> · door {r.data.doorName}. Events from {lt(x.period.from, false)} to {lt(x.period.to, false)} ({x.events.toLocaleString()} events, file {r.data.fileName}). Uploaded {fmt.dt(r.data.uploadedAt)}{r.data.uploadedBy ? ` by ${r.data.uploadedBy}` : ''}.{x.window.earlier > 0 && <> Rates use the last {Math.round(x.window.days)} days ({lt(x.window.from, false)} onwards); {x.window.earlier} older events are counted in the totals only.</>}</>}>
         <Link className="btn no-print" to="/lock-troubleshoot">All lock reports</Link>
         <button className="btn no-print" onClick={() => window.print()}>Print</button>
         {can('maintenance.work') && att.data?.maintenance && act.length > 0 && (ticket
@@ -230,17 +243,20 @@ function ReportView({ id }: { id: string }) {
           ))}
         </div>
       </section>
+      {(x.steps ?? []).length > 0 && <Elimination id={id} steps={x.steps!} initial={r.data.checks ?? {}} canMark={can('maintenance.work')} />}
       <h2 className="section-title">Battery</h2>
       <div className="grid12">
         <VizCard span={12} title="Battery readings" sub={`"Battery level below X volts" events of the lock (${b.scale} scale). Dashed lines: new batteries.${b.ignoredReadings ? ` ${b.ignoredReadings} readings taken while the lock was being programmed or restarting are left out.` : ''}`}
           chart={<VoltChart a={x} />}
           table={<DataTable head={['Lock time', 'Below (V)']} numeric={[1]} rows={[...b.readings].reverse().map((p) => [lt(p.t), p.volts.toFixed(1)])} />} />
-        <VizCard span={12} title="Battery periods" sub={<>From one battery change to the next. Consumption = drop from the first to the lowest reading of the period.{b.lowAlerts && b.lowAlerts.total > 0 && <> “Alert, Battery level low”: {b.lowAlerts.total} in the report, {b.lowAlerts.ignoredAfterChange} ignored because they came right after new batteries while the readings stayed above {(b.confirmLevel ?? 4.2).toFixed(1)} V.</>}</>}
-          chart={<DataTable head={['From', 'Started by', 'Days', 'First (V)', 'Lowest (V)', ...(b.periods[0]?.reached ?? []).map((r) => `Days to ${r.volts.toFixed(1)} V`), 'V / 30 days', 'Openings', 'V / 1,000 openings', 'Battery alarms', 'Low alerts ignored']}
+        <VizCard span={12} title="Battery periods" sub={<>From one battery change to the next. Consumption = drop from the first to the lowest reading of the period.{(b.firmwareAlarms ?? []).length > 0 && <> {b.firmwareAlarms!.length} battery alarm(s) came within {b.firmwareDays ?? 14} days after new batteries while the readings stayed above {(b.confirmLevel ?? 3.6).toFixed(1)} V: a firmware fault, not counted as battery alarms.</>}</>}
+          chart={<DataTable head={['From', 'Started by', 'Days', 'First (V)', 'Lowest (V)', ...(b.periods[0]?.reached ?? []).map((r) => `Days to ${r.volts.toFixed(1)} V`), 'V / 30 days', 'Openings', 'V / 1,000 openings', 'Battery alarms', 'Alarms from firmware']}
             numeric={[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]}
             rows={b.periods.map((p) => [lt(p.from, false), p.startedBy === 'exchange' ? 'Battery exchanged' : p.startedBy === 'reading' ? 'Reading back at the top' : 'Start of the report', p.days, p.firstVolts?.toFixed(1) ?? null, p.lowestVolts?.toFixed(1) ?? null,
-              ...(p.reached ?? []).map((r) => (p.startedBy === 'report' ? '—' : r.days ?? 'not reached')), p.dropPer30Days?.toFixed(2) ?? null, p.openings, p.dropPer1000Openings?.toFixed(2) ?? null, p.alarms, p.ignoredLowAlerts ?? 0])} />} />
-        {b.alarms.length > 0 && <VizCard span={12} title="Battery alarms that count" sub="The lock's own battery alarms, and low-battery alerts confirmed by the readings."
+              ...(p.reached ?? []).map((r) => (p.startedBy === 'report' ? '—' : r.days ?? 'not reached')), p.dropPer30Days?.toFixed(2) ?? null, p.openings, p.dropPer1000Openings?.toFixed(2) ?? null, p.alarms, p.firmwareAlarms ?? 0])} />} />
+        {(b.firmwareAlarms ?? []).length > 0 && <VizCard span={12} title="Battery alarms after new batteries (firmware fault)" sub="Not a battery problem: program the lock and upload its firmware."
+          chart={<DataTable head={['Lock time', 'Event', 'Batteries changed']} rows={[...b.firmwareAlarms!].reverse().slice(0, 60).map((a) => [lt(a.t), `${a.name} (${String(a.code).padStart(4, '0')})`, lt(a.changedAt)])} />} />}
+        {b.alarms.length > 0 && <VizCard span={12} title="Battery alarms that count" sub="Battery alarms before a battery change, or confirmed by a low reading."
           chart={<DataTable head={['Lock time', 'Event']} rows={[...b.alarms].reverse().slice(0, 60).map((a) => [lt(a.t), `${a.name} (${String(a.code).padStart(4, '0')})`])} />} />}
       </div>
       <h2 className="section-title">Lock and door</h2>
@@ -327,5 +343,54 @@ function VoltChart({ a }: { a: Analysis }) {
       </svg>
       {hp && <div className="viz-tip" style={{ left: Math.min(x(hp.t) + 10, w - 190), top: 4 }} role="status"><div className="viz-tip-t">{lt(hp.t)}</div><div className="viz-tip-r"><strong>below {hp.volts.toFixed(1)} V</strong></div></div>}
     </div>
+  );
+}
+
+/** 2.19 Elimination method: the usual causes, simplest first; the technician marks each one checked on the door. */
+function Elimination({ id, steps, initial, canMark }: { id: string; steps: Step[]; initial: Checks; canMark: boolean }) {
+  const { base } = useHotel();
+  const [checks, setChecks] = useState<Checks>(initial);
+  const [notes, setNotes] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(initial).map(([k, v]) => [k, v.note ?? ''])));
+  const [error, setError] = useState<unknown>(null);
+  const mark = async (step: string, result: 'ok' | 'problem' | 'not_checked') => {
+    setError(null);
+    try { const r = await api<{ checks: Checks }>(`${base}/lock-reports/${id}/checks/${step}`, { method: 'PUT', body: { result, note: notes[step] || undefined } }); setChecks(r.checks); }
+    catch (e) { setError(e); }
+  };
+  const found = steps.filter((x) => checks[x.id]?.result === 'problem');
+  const left = steps.filter((x) => !checks[x.id] && (x.suggests === 'likely' || x.suggests === 'possible' || x.suggests === 'unknown'));
+  const done = steps.filter((x) => checks[x.id]?.result === 'ok').length;
+  return (
+    <section className="panel elim">
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <h2 style={{ margin: 0 }}>Find the cause, step by step</h2>
+        <span className="small muted">{done} ruled out · {found.length} problem{found.length === 1 ? '' : 's'} found · {left.length} left to check</span>
+      </div>
+      <p className="small muted" style={{ margin: '6px 0 10px' }}>Check each point on the door, simplest first, and mark it. What the report shows is given for each; a firmware fault can also drain batteries, so rule out the other causes before blaming the batteries.</p>
+      {found.length > 0 && <div className="alert bad">Problem found: {found.map((x) => x.title).join(', ')}. Fix it, then upload a new report of this lock in a few weeks to confirm.</div>}
+      <ErrorNote error={error} />
+      <ol className="elim-steps">
+        {steps.map((st) => {
+          const c = checks[st.id];
+          return (
+            <li key={st.id} className={`elim-step${c ? ` is-${c.result}` : ''}`}>
+              <div className="elim-head"><strong>{st.title}</strong><span className={`badge ${SUGGESTS[st.suggests].cls}`}>{SUGGESTS[st.suggests].label}</span>
+                {c && <span className={`badge ${c.result === 'ok' ? 'ok' : 'bad'}`}>{c.result === 'ok' ? 'Ruled out' : 'Problem found'}</span>}</div>
+              <p className="small" style={{ margin: '4px 0' }}><b>The report:</b> {st.evidence}</p>
+              <p className="small" style={{ margin: '4px 0' }}><b>Check:</b> {st.check}</p>
+              {c && <p className="small muted" style={{ margin: '4px 0' }}>{c.by ?? 'Someone'} · {fmt.dt(c.at)}{c.note ? ` · ${c.note}` : ''}</p>}
+              {canMark && (
+                <div className="row no-print" style={{ marginTop: 6 }}>
+                  <input className="search" style={{ flex: '1 1 220px' }} placeholder="Note (optional)" maxLength={500} value={notes[st.id] ?? ''} onChange={(e) => setNotes({ ...notes, [st.id]: e.target.value })} aria-label={`Note for ${st.title}`} />
+                  <button className="btn small" onClick={() => mark(st.id, 'ok')} aria-pressed={c?.result === 'ok'}>OK, ruled out</button>
+                  <button className="btn small" onClick={() => mark(st.id, 'problem')} aria-pressed={c?.result === 'problem'}>Problem found</button>
+                  {c && <button className="btn small ghost" onClick={() => mark(st.id, 'not_checked')}>Undo</button>}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }

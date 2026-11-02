@@ -17,6 +17,7 @@ import { AuditPage } from './pages/Audit';
 import { AccountPage } from './pages/Account';
 import { BatteryPage } from './pages/Battery';
 import { LockTroubleshootPage } from './pages/LockTroubleshoot';
+import { OnlineLocksPage } from './pages/OnlineLocks';
 import { MaintenancePage } from './pages/Maintenance';
 import { InsightsPage } from './pages/Insights';
 import { EventLogPage } from './pages/EventLog';
@@ -118,7 +119,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // 2.16.1 Menu groups fold away (remembered on this computer); the group of the page you are on stays open.
   const [navClosed0, setNavClosed] = useState<Set<string>>(() => { try { return new Set(JSON.parse(localStorage.getItem('smk.nav.closed') ?? '[]')); } catch { return new Set(); } });
   const activeGroup = /^\/(muster|emergency)/.test(loc.pathname) ? 'safety' : /^\/(visionline|keycards|idcards|staff|keys|attendance|breakfast)/.test(loc.pathname) ? 'people'
-    : /^\/(battery|maintenance|lock-troubleshoot)/.test(loc.pathname) ? 'building' : /^\/(operators|connector|branding|settings|audit|usage|setup-report)/.test(loc.pathname) ? 'admin' : '';
+    : /^\/(battery|maintenance|lock-troubleshoot|locks-online)/.test(loc.pathname) ? 'building' : /^\/(operators|connector|branding|settings|audit|usage|setup-report)/.test(loc.pathname) ? 'admin' : '';
   const navClosed = new Set([...navClosed0].filter((g) => g !== activeGroup));
   const toggleGroup = (g: string) => setNavClosed((cur) => {
     const n = new Set(cur); if (navClosed.has(g)) n.delete(g); else n.add(g);
@@ -133,7 +134,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     ['/muster', 'Live occupancy', can('muster.read')], ['/emergency', 'Emergency', can('muster.read')],
     ['/visionline', 'Visionline cards & people', can('reports.read')], ['/visionline?tab=lookup', 'Card lookup', can('reports.read')], ['/idcards', 'Staff ID cards', can('idcards.manage')], ['/keycards', 'Staff keycards', can('keycards.request') || can('keycards.read') || can('lockout.request') || can('lockout.approve')], ['/staff', 'Staff', can('staff.read')], ['/keys', 'Mobile keys', can('key.read')],
     ['/attendance', 'Time & attendance', can('attendance.clock')], ['/breakfast', 'Breakfast', can('breakfast.read') && Boolean(attention.data?.breakfast) && hotel.kind !== 'institution'],
-    ['/battery', 'Battery status', can('battery.read') && Boolean(attention.data?.batteryMonitoring)], ['/lock-troubleshoot', 'Lock troubleshooting', can('battery.read')], ['/maintenance', 'Maintenance', can('maintenance.read') && Boolean(attention.data?.maintenance)],
+    ['/battery', 'Battery status', can('battery.read') && Boolean(attention.data?.batteryMonitoring)], ['/lock-troubleshoot', 'Lock troubleshooting', can('battery.read')], ['/locks-online', 'Online locks & gateways', can('resources.read')], ['/maintenance', 'Maintenance', can('maintenance.read') && Boolean(attention.data?.maintenance)],
     ['/operators', 'Users', can('operators.manage')], ['/connector', 'Connector health', can('connector.read')], ['/branding', 'Branding and logo', can('branding.manage')],
     ['/settings', 'Settings', can('settings.manage')], ['/settings?tab=licence', 'Licence', can('settings.manage')], ['/audit', 'Audit trail', can('audit.read')], ['/usage', 'Usage', can('settings.manage')], ['/setup-report', 'System setup report', can('settings.manage')], ['/help', 'Help and manual', true], ['/account', 'My account', true],
   ] as [string, string, boolean][]).filter((x) => x[2]).map(([to, label]) => ({ to, label }));
@@ -180,9 +181,10 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             {vis('/attendance') && can('attendance.clock') && <NavLink to="/attendance">Time & attendance</NavLink>}
             {vis('/breakfast') && can('breakfast.read') && attention.data?.breakfast && hotel.kind !== 'institution' && <NavLink to="/breakfast">Breakfast</NavLink>}
             </div>
-            {((can('battery.read') && attention.data?.batteryMonitoring) || (can('maintenance.read') && attention.data?.maintenance)) && <button type="button" className="group" aria-expanded={!navClosed.has('building')} onClick={() => toggleGroup('building')}>Building<span aria-hidden>{navClosed.has('building') ? '▸' : '▾'}</span></button>}
+            {(can('battery.read') || can('resources.read') || (can('maintenance.read') && attention.data?.maintenance)) && <button type="button" className="group" aria-expanded={!navClosed.has('building')} onClick={() => toggleGroup('building')}>Building<span aria-hidden>{navClosed.has('building') ? '▸' : '▾'}</span></button>}
             <div className="navgroup" hidden={navClosed.has('building')}>
             {vis('/battery') && can('battery.read') && attention.data?.batteryMonitoring && <NavLink to="/battery">Battery status {(attention.data.battery?.critical ?? 0) > 0 && <span className="count" title="Critical lock batteries">{attention.data.battery.critical}</span>}</NavLink>}
+            {vis('/locks-online') && can('resources.read') && <NavLink to="/locks-online">Online locks &amp; gateways {(attention.data?.offlineLocks ?? 0) > 0 && <span className="count" title="Locks or gateways offline">{attention.data.offlineLocks}</span>}</NavLink>}
             {vis('/lock-troubleshoot') && can('battery.read') && <NavLink to="/lock-troubleshoot">Lock troubleshooting</NavLink>}
             {vis('/maintenance') && can('maintenance.read') && attention.data?.maintenance && <NavLink to="/maintenance">Maintenance {(attention.data.maintenance?.open ?? 0) > 0 && <span className="count" title="Open requests">{attention.data.maintenance.open}</span>}</NavLink>}
             </div>
@@ -232,6 +234,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <Route path="/monitoring" element={<MonitoringPage />} />
             <Route path="/battery" element={<BatteryPage />} />
             <Route path="/battery/:doorId" element={<BatteryPage />} />
+            <Route path="/locks-online" element={<OnlineLocksPage />} />
             <Route path="/lock-troubleshoot" element={<LockTroubleshootPage />} />
             <Route path="/lock-troubleshoot/:reportId" element={<LockTroubleshootPage />} />
             <Route path="/maintenance" element={<MaintenancePage />} />

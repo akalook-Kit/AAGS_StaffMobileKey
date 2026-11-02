@@ -73,6 +73,8 @@ export function phase2Routes(app: FastifyInstance) {
           count(*) FILTER (WHERE priority='urgent')::int AS urgent
         FROM maintenance_tickets WHERE hotel_id=$1 AND status = ANY($2)`, [hotelId, OPEN_STATUSES]);
     }
+    // 2.19 Locks and gateways offline right now (menu badge of Online locks & gateways).
+    if (perms.has('resources.read')) out.offlineLocks = (await one(pool, `SELECT count(*)::int AS n FROM monitor_alerts WHERE hotel_id=$1 AND kind IN ('door_offline','gateway_offline') AND resolved_at IS NULL`, [hotelId]))?.n ?? 0;
     return out;
   });
 

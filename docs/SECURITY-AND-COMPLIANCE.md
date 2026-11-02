@@ -1,4 +1,4 @@
-# Security and compliance pack (for hotel groups and institutions, e.g. Marriott vendor review) — Access Monitoring Tool 2.18
+# Security and compliance pack (for hotel groups and institutions, e.g. Marriott vendor review) — Access Monitoring Tool 2.19
 
 **What this is.** The answers a hotel group's IT security team asks of a vendor, prepared in advance. **Approval itself
 can only come from the group** (for Marriott: its third-party / vendor risk assessment, normally a questionnaire,
@@ -102,6 +102,15 @@ e-mails it. The software never "phones home".
   and the card type are stored; names, user IDs, card numbers, card serial numbers (S/N) and "issued by" are discarded
   while reading (the sequence number is used only to drop rows read twice). Upload,
   analysis and deletion are in the audit trail.
+
+## 3f. New in 2.19
+
+- **Gateways**: name, EEID, address, location and the doors behind each gateway are stored per site; adding, changing,
+  importing and removing need `settings.manage`, reading needs `resources.read`, and all changes are in the audit trail.
+  Imported files are parsed as text (5 MB limit). No credentials of the gateways or of the network integrator are
+  stored.
+- **Lock troubleshooting checks**: the technician's results (OK / problem found, short note, name, time) are stored with
+  the report; marking needs `maintenance.work` and is audited (`lock.check_marked`).
 
 ## 4. Hosting the database (on-premises)
 

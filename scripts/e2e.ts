@@ -1156,14 +1156,13 @@ async function main() {
     const ch = await until('206 change inferred', () => bd('206'), (d) => d?.lastChange);
     ok(ch?.lastChange?.source === 'inferred' && /3\.6 V to 4\.6 V/.test(ch.lastChange.detail ?? ''), 'batteries counted as changed from the voltage jump (3.6 V -> 4.6 V), without a "battery exchanged" event', ch?.lastChange);
     ok((await bd('Linen Store'))?.lastChange?.source === 'event', 'Linen Store: last change from the lock\'s "battery exchanged" event');
-    // 2.18: the lock's own "Battery alarm in lock" (0529) counts; a card "Battery level low" alert (0304) right after
-    // new batteries would not (feedback 27 Oct, tested in the 2.18 section).
-    await bat('206', { kind: 'low', code: 529 });
+    // 2.19 (Armel, 27 Oct): a battery alarm after new batteries, even once, is a firmware fault, not a battery problem.
+    await bat('206', { kind: 'low' });
     const rp = await until('206 reprogram', () => bd('206'), (d) => d?.reprogram);
-    ok(rp?.state === 'LOW' && rp.reprogram?.number > 0 && rp.ticket?.id === rp.reprogram.ticketId, `still alarming after the change -> request #${rp?.reprogram?.number} "program the lock and upload firmware"`, rp);
+    ok(rp?.state === 'GOOD' && !rp.alert && rp.reprogram?.number > 0, `alarm after the change -> request #${rp?.reprogram?.number} "program the lock and upload firmware", no battery alarm`, rp);
     const rt = (await call('GET', `${H}/maintenance/tickets/${rp?.reprogram?.ticketId}`, maint15)).json;
     ok(/Program lock and upload firmware/.test(rt.title) && /service tool/.test(rt.description) && rt.category === 'lock', 'the request tells the technician to program the lock and upload the firmware', rt.title);
-    await bat('206', { kind: 'low', code: 529 });
+    await bat('206', { kind: 'low' });
     await new Promise((r) => setTimeout(r, 2500));
     const tickets = (await call('GET', `${H}/maintenance/tickets?status=open`, maint15)).json;
     const list = Array.isArray(tickets) ? tickets : tickets.tickets ?? tickets.items ?? [];
@@ -1333,8 +1332,9 @@ async function main() {
     await new Promise((res) => setTimeout(res, 6000));
     const after = await bd('208');
     ok(after?.state === 'GOOD' && !after.alert, '"Alert, Battery level low" right after new batteries is not a battery alarm', after);
-    const ign = (await call('GET', `${H}/audit?action=battery.low_alert_ignored`, admin)).json;
-    ok(JSON.stringify(ign).includes('battery.low_alert_ignored'), 'it is noted in the audit trail as ignored');
+    ok(after?.reprogram?.number > 0, `it is a firmware fault: request #${after?.reprogram?.number} "program the lock and upload firmware"`, after);
+    const ign = (await call('GET', `${H}/audit?action=battery.firmware_suspected`, admin)).json;
+    ok(JSON.stringify(ign).includes('battery.firmware_suspected'), 'it is noted in the audit trail as a suspected firmware fault');
     await bat('208', { kind: 'volts', volts: 4.2 });
     await bat('208', { kind: 'low' });
     const conf = await until('208 low confirmed', () => bd('208'), (d) => d?.state === 'LOW' || d?.state === 'CRITICAL');
@@ -1359,7 +1359,7 @@ async function main() {
     ok(pv.json.suggestedDoor?.name === '205', 'the door is suggested from the file');
     ok(!JSON.stringify(pv.json).includes('Topsecret'), 'the preview shows no names');
     ok((await call('POST', `${H}/lock-reports/preview`, maint18, { fileName: 'x.txt', data: Buffer.from('Name\tGroup\r\nA\tB\r\n').toString('base64') })).json.error?.code === 'NOT_A_LOCK_REPORT', 'another kind of file is refused with an explanation');
-    const sv = await call('POST', `${H}/lock-reports`, maint18, { fileName: '205.xls', data, doorId: pv.json.suggestedDoor.id });
+    const sv = await call('POST', `${H}/lock-reports`, maint18, { fileName: '205.xls', data, doorId: pv.json.suggestedDoor.id, lockModel: 'essence' });
     ok(sv.status === 200 && sv.json.id, 'step 2: confirmed for the door and analysed');
     const rep18 = (await call('GET', `${H}/lock-reports/${sv.json.id}`, tech18)).json;
     const titles = (rep18.analysis?.findings ?? []).map((f: any) => f.title);
@@ -1372,6 +1372,79 @@ async function main() {
     ok(!raw18.includes('Topsecret'), 'no name from the file is stored or returned');
     ok((await call('GET', `${H}/lock-reports/${sv.json.id}`, lakeAdmin)).status === 403, 'another hotel cannot read it');
     ok((await call('DELETE', `${H}/lock-reports/${sv.json.id}`, tech18)).status === 403 && (await call('DELETE', `${H}/lock-reports/${sv.json.id}`, maint18)).status === 200, 'only battery managers delete a lock report');
+  }
+
+  console.log('\n2.19: battery alarm after new batteries = firmware; lock models and elimination; online locks and gateways');
+  {
+    const maint19 = await login('maint@khb.test'); const tech19 = await login('tech@khb.test');
+    const pol19 = (await call('GET', `${H}/config/policy`, admin)).json.data;
+    // K Hotel Bana's thresholds were set by earlier tests; a site that never set them shows the new default.
+    const lakeId = (await call('GET', `${API}/api/v1/me`, lakeAdmin)).json.hotels?.[0]?.id;
+    const lakePol = (await call('GET', `${API}/api/v1/hotels/${lakeId}/config/policy`, lakeAdmin)).json.data;
+    ok(lakePol?.battery?.voltage?.lowRange?.critical === 3.6, 'default threshold for 3-4.8 V locks: critical at 3.6 V', lakePol?.battery);
+    // Lock report: the model is required and remembered for the door; the elimination steps can be marked.
+    const L: string[] = ['Door\tUser group\tCard name\tS/N\tRegistration No.\tEvent time\tEvent\tRead-out time\tUser ID\tLast name\tFirst name\tIssued by\tSeq.No'];
+    let seq = 1;
+    const r = (t: string, ev: string, card = 'Door Unit Internal') => L.push(`205\tn/a\t${card}\t\t\t${t}\t${ev}\t10/26/2026 11:00 AM\t\tSecretperson\t\t\t${seq++}`);
+    r('10/26/2026 10:20 AM', 'Alert, Battery level low (0304)', 'Staff');
+    r('10/26/2026 10:05 AM', 'Battery level below 4.8 volts (1081)');
+    r('10/26/2026 10:04 AM', 'Battery exchanged (0528)');
+    for (let d = 25; d >= 10; d--) { r(`10/${d}/2026 9:00 AM`, 'The door is opened (0912)'); r(`10/${d}/2026 8:59 AM`, 'Staff card accepted (0064)', 'Staff'); }
+    r('10/9/2026 9:00 AM', 'Battery level below 4.0 volts (1077)');
+    const data = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(L.join('\r\n'), 'utf16le')]).toString('base64');
+    const pv = (await call('POST', `${H}/lock-reports/preview`, maint19, { fileName: '205-new.xls', data })).json;
+    ok(pv.lockModels?.length === 5 && pv.suggestedDoor?.name === '205', 'preview offers the 5 lock models and suggests the door from the "Door" column');
+    ok((await call('POST', `${H}/lock-reports`, maint19, { fileName: '205-new.xls', data, doorId: pv.suggestedDoor.id })).json.error?.code === 'LOCK_MODEL', 'the lock model must be chosen');
+    const sv = (await call('POST', `${H}/lock-reports`, maint19, { fileName: '205-new.xls', data, doorId: pv.suggestedDoor.id, lockModel: 'signature-rfid' })).json;
+    const rep = (await call('GET', `${H}/lock-reports/${sv.id}`, tech19)).json;
+    ok(rep.lockModelName === 'VingCard Signature RFID', `the report says which lock it is: ${rep.doorName}, ${rep.lockModelName}`);
+    ok(rep.analysis.findings.some((f: any) => /firmware fault/.test(f.title)) && rep.analysis.battery.firmwareAlarms.length === 1 && rep.analysis.battery.alarms.length === 0,
+      'the battery alarm after new batteries is a firmware finding, not a battery alarm');
+    ok(rep.analysis.steps?.length === 10 && rep.analysis.steps.find((x: any) => x.id === 'firmware')?.suggests === 'likely', 'ten elimination steps, firmware marked likely');
+    ok((await call('PUT', `${H}/lock-reports/${sv.id}/checks/batteries`, tech19, { result: 'ok', note: 'New Energizer, same pack' })).status === 200, 'a technician marks "batteries" ruled out');
+    ok((await call('PUT', `${H}/lock-reports/${sv.id}/checks/firmware`, tech19, { result: 'problem' })).json.checks?.firmware?.result === 'problem', 'and "firmware" as the problem found');
+    const pv2 = (await call('POST', `${H}/lock-reports/preview`, maint19, { fileName: '205-new.xls', data })).json;
+    ok(pv2.models?.[pv.suggestedDoor.id] === 'signature-rfid', 'the model is remembered for the door');
+    ok((await call('GET', `${H}/lock-reports`, tech19)).json.find((x: any) => x.id === sv.id)?.problemsFound === 1, 'the list shows the problem found');
+
+    // Online locks and gateways.
+    const p19 = (await call('GET', `${H}/config/policy`, admin)).json.data;
+    await call('PUT', `${H}/config/policy`, admin, { ...p19, monitoring: { ...p19.monitoring, notify: { ...p19.monitoring.notify, cooldownMinutes: 0, sendResolved: true }, doorOffline: { ...p19.monitoring.doorOffline, enabled: true, offlineEventCodes: [9001], onlineEventCodes: [9002] } } });
+    ok((await call('POST', `${H}/gateways`, tech19, { name: 'GW 1' })).status === 403, 'a technician cannot add gateways');
+    const g1 = await call('POST', `${H}/gateways`, admin, { name: 'GW Floor 1', eeid: '000D6F0012AB34CD', address: '10.0.5.21', location: 'Floor 1', doors: ['101', '102'] });
+    ok(g1.status === 200, 'an administrator adds gateway GW Floor 1 with its EEID and two locks');
+    ok((await call('POST', `${H}/gateways`, admin, { name: 'Copy', eeid: '000d6f0012ab34cd' })).json.error?.code === 'DUPLICATE_EEID', 'the same EEID cannot be listed twice');
+    const csv = 'Name;EEID;IP address;Location;Doors\r\nGW Floor 2;000D6F00AAAA0002;10.0.5.22;Floor 2;201, 202, 203\r\nGW Floor 1;000D6F0012AB34CD;10.0.5.21;Floor 1 east;\r\n';
+    const ip = (await call('POST', `${H}/gateways/import`, admin, { fileName: 'gateways.csv', data: Buffer.from(csv).toString('base64'), preview: true })).json;
+    ok(ip.added === 1 && ip.updated === 1 && ip.columns.eeid === 'EEID', `import preview: ${ip.added} new, ${ip.updated} updated (matched on EEID)`, ip);
+    await call('POST', `${H}/gateways/import`, admin, { fileName: 'gateways.csv', data: Buffer.from(csv).toString('base64') });
+    let ol = (await call('GET', `${H}/online-locks`, tech19)).json;
+    const gw1 = ol.gateways.find((g: any) => g.eeid === '000D6F0012AB34CD');
+    ok(ol.gateways.length === 2 && gw1.location === 'Floor 1 east' && gw1.doors.length === 2, 'two gateways listed with their EEIDs; the import updated the location and kept the locks');
+    ok(ol.locks.some((l: any) => l.name === '101' && l.gateway?.eeid === '000D6F0012AB34CD'), 'each online lock shows its gateway and EEID');
+    // Both locks of GW Floor 1 go offline -> the gateway is offline; one comes back -> the alarm closes by itself.
+    const gwAlert = () => call('GET', `${H}/monitoring`, gm).then((x) => x.json.alerts.find((a: any) => a.kind === 'gateway_offline'));
+    await until('gateway offline', async () => {
+      for (const d of ['101', '102']) await call('POST', `${SIM}/sim/doors/${d}/event`, undefined, { code: 9001 });
+      await sleep(2500); await call('POST', `${H}/monitoring/check`, admin, {});
+      return gwAlert();
+    }, (a) => Boolean(a), 120_000);
+    const ga = await gwAlert();
+    ok(/GW Floor 1/.test(ga.title) && /000D6F0012AB34CD/.test(ga.title), `gateway offline alarm: ${ga.title} (${ga.detail})`);
+    ol = (await call('GET', `${H}/online-locks`, tech19)).json;
+    ok(ol.summary.gatewaysOffline === 1 && ol.locks.filter((l: any) => l.state === 'offline').length >= 2, 'the page shows the gateway and its locks offline');
+    ok(((await call('GET', `${H}/attention`, tech19)).json.offlineLocks ?? 0) >= 3, 'the menu counts the locks and gateway offline');
+    await until('gateway back', async () => {
+      await call('POST', `${SIM}/sim/doors/101/event`, undefined, { code: 9002 });
+      await sleep(2500); await call('POST', `${H}/monitoring/check`, admin, {});
+      return gwAlert();
+    }, (a) => !a, 60_000);
+    ok(true, 'a lock behind the gateway reports again: the gateway alarm closes by itself');
+    await call('POST', `${SIM}/sim/doors/102/event`, undefined, { code: 9002 });
+    ol = (await call('GET', `${H}/online-locks`, tech19)).json;
+    ok(ol.recentlyResolved.some((x: any) => /Gateway offline: GW Floor 1/.test(x.title)), 'it is listed under "back online"');
+    ok((await call('GET', `${H}/online-locks`, lakeAdmin)).status === 403, 'another site cannot see them');
+    await call('PUT', `${H}/config/policy`, admin, p19);
   }
 
   console.log('\nGate: every request is traceable without exposing secrets');

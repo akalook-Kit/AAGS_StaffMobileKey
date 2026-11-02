@@ -99,7 +99,7 @@ export const SCHEMAS = {
     assetLimitsKb: z.object({ logo: z.number().int().default(500), heroImage: z.number().int().default(1500) }).default({ logo: 500, heroImage: 1500 }),
     /** Phase 2 battery monitoring. Alarms come from the locks' own battery events [Web API §7.14.1]. */
     battery: z.object({
-      /** A door's battery reading shows "no recent report" when nothing was reported for this many days. */
+      /** A door's battery reading shows "No battery report available" when nothing was reported for this many days. */
       staleAfterDays: z.number().int().min(1).max(365).default(30),
       /** Open a maintenance request automatically for: critical alarms, any alarm, or never. */
       autoTicket: z.enum(['critical', 'any', 'off']).default('critical'),
@@ -107,23 +107,19 @@ export const SCHEMAS = {
        *  value only. Set them from the lock models' documentation (hotel-defined, not from the Web API). */
       voltage: z.object({
         highRange: z.object({ low: z.number().min(6).max(9).nullable().default(null), critical: z.number().min(6).max(9).nullable().default(null) }).default({ low: null, critical: null }),
-        lowRange: z.object({ low: z.number().min(3).max(4.8).nullable().default(null), critical: z.number().min(3).max(4.8).nullable().default(null) }).default({ low: null, critical: null }),
-      }).default({ highRange: { low: null, critical: null }, lowRange: { low: null, critical: null } }),
+        // 2.19 (Armel, 27 Oct) 3-4.8 V locks: a reading of 3.6 V or lower is critical (replace the batteries).
+        lowRange: z.object({ low: z.number().min(3).max(4.8).nullable().default(null), critical: z.number().min(3).max(4.8).nullable().default(3.6) }).default({ low: null, critical: 3.6 }),
+      }).default({ highRange: { low: null, critical: null }, lowRange: { low: null, critical: 3.6 } }),
       /** 2.15 Batteries count as changed when a lock's "below X volts" reading rises by at least this much at once
        *  (e.g. 3.5 V -> 4.5 V), even when the lock never sent "Battery exchanged". */
       changeJumpVolts: z.number().min(0.3).max(3).default(0.8),
-      /** 2.15 A battery alarm this many days after a battery change means the lock must be programmed and its
-       *  firmware uploaded with the service tool (a maintenance request is opened). 0 = off. */
+      /** 2.15/2.19 A battery alarm from the lock within this many days after a battery change, not confirmed by a low
+       *  reading, is a firmware fault: the lock must be programmed and its firmware uploaded with the service tool (a
+       *  maintenance request is opened, no battery alarm). 0 = off. */
       stillAlarmingDays: z.number().int().min(0).max(90).default(14),
       /** 2.18 A reading at the top of the scale (4.8 V / 9.0 V) means new batteries and closes the alarm. */
       fullReadingMeansNew: z.boolean().default(true),
-      /** 2.18 After new batteries a lock can keep logging "Alert, Battery level low" (0304) with each card for a while.
-       *  For this many days after a battery change such alerts are not a battery problem (no alarm, no request),
-       *  unless a voltage reading at or below the low level confirms it. 0 = always count them. */
-      lowAlertGraceDays: z.number().int().min(0).max(120).default(30),
-      /** 2.18 The events treated that way: 304 "Alert, Battery level low", 306 "IR battery level low". */
-      lowAlertCodes: z.array(z.number().int()).default([304, 306]),
-    }).default({ staleAfterDays: 30, autoTicket: 'critical', voltage: { highRange: { low: null, critical: null }, lowRange: { low: null, critical: null } }, changeJumpVolts: 0.8, stillAlarmingDays: 14, fullReadingMeansNew: true, lowAlertGraceDays: 30, lowAlertCodes: [304, 306] }),
+    }).default({ staleAfterDays: 30, autoTicket: 'critical', voltage: { highRange: { low: null, critical: null }, lowRange: { low: null, critical: 3.6 } }, changeJumpVolts: 0.8, stillAlarmingDays: 14, fullReadingMeansNew: true }),
     /** 2.6 event log: door entrances are lock events too. The connector's Visionline watch also asks for these codes
      *  [Web API §7.14.1; 64 = staff card accepted]. Add others (e.g. guest card accepted) from the hotel's lock
      *  documentation; switch off to receive refused entries and battery events only. */

@@ -47,7 +47,7 @@ describe('lock event report (2.18 troubleshooting)', () => {
     expect(a.battery.avgDropPer30Days).toBeGreaterThan(1);
   });
 
-  it('reads the newer report (Event time, Read-out time, Seq.No), drops duplicates and ignores low alerts after new batteries', () => {
+  it('reads the newer report (Event time, Read-out time, Seq.No), drops duplicates and treats battery alarms after new batteries as a firmware fault', () => {
     const H2 = 'Door\tUser group\tCard name\tS/N\tRegistration No.\tEvent time\tEvent\tRead-out time\tUser ID\tLast name\tFirst name\tIssued by\tSeq.No';
     const r2 = (t: string, ev: string, seq: number, card = 'Staff', name = 'Secretname') => `314\tGrand Master\t${card}\t043d46f2811290ff\t100103\t${t}\t${ev}\t10/26/2026 11:00 AM\tAfratech\t${name}\tArmel\tSym\t${seq}`;
     const lines = [H2,
@@ -68,10 +68,12 @@ describe('lock event report (2.18 troubleshooting)', () => {
     expect(JSON.stringify(p.events)).not.toMatch(/Secretname|Armel|043d46/);
     const a = analyseLockReport(p, Date.parse('2026-10-27T00:00:00Z'));
     expect(a.battery.exchanges.length).toBe(1);
-    expect(a.battery.lowAlerts.ignoredAfterChange).toBe(3); // incl. 10:03, minutes before the change
-    expect(a.battery.lowAlerts.counted).toBe(0);
-    expect(a.findings.some((f) => /again soon after the change/.test(f.title))).toBe(false);
-    expect(a.findings.some((f) => /after new batteries ignored/.test(f.title))).toBe(true);
+    // 2.19: a battery alarm after new batteries (readings fine) is a firmware fault, not a battery alarm.
+    expect(a.battery.firmwareAlarms.length).toBe(3); // incl. 10:03, minutes before the change
+    expect(a.battery.alarms.length).toBe(0);
+    expect(a.findings.some((f) => /firmware fault/.test(f.title) && f.level === 'high')).toBe(true);
+    const fw = a.steps.find((x) => x.id === 'firmware')!;
+    expect(fw.suggests).toBe('likely');
   });
 
   it('refuses a file that is not a lock event report', () => {

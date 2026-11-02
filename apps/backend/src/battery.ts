@@ -26,11 +26,11 @@ export const batteryEventName = (code: number) => {
 };
 /** 2.18 The highest "below X volts" step of each scale: what a lock reads with new batteries. */
 export const isFullReading = (volts: number) => Math.abs(volts - 4.8) < 1e-6 || Math.abs(volts - 9.0) < 1e-6;
-const falseLowAlertCodes = (ctx: BatteryContext) => (ctx.policy.battery.lowAlertCodes ?? [304, 306]) as number[];
-/** 2.18 The reading that confirms a low-battery alert: the hotel's "low" threshold, else 4.2 V (or 8.4 V for 6-9 V packs). */
+/** 2.19 The reading that confirms a battery alarm after new batteries: the hotel's Low threshold, else its Critical
+ *  threshold, else the level at which the locks raise their own alarm (4.0 V; 7.2 V for 6-9 V packs). */
 export function confirmLowVolts(volts: number, v: VoltagePolicy) {
   const r = volts >= 6 ? v.highRange : v.lowRange;
-  return r.low ?? (volts >= 6 ? 8.4 : 4.2);
+  return r.low ?? r.critical ?? (volts >= 6 ? 7.2 : 4.0);
 }
 export const isBatteryEvent = (code: number) => (VL.batteryEventCodes as readonly number[]).includes(code);
 
@@ -103,21 +103,24 @@ export async function applyBatteryEvent(c: pg.PoolClient, hotelId: string, ctx: 
     if (open || ['LOW', 'CRITICAL'].includes(prev?.state) || lower)
       change = { source: 'inferred', detail: `New batteries: the lock reads ${volts!.toFixed(1)} V, the top of its scale` };
   }
-  // 2.18 "Alert, Battery level low" shortly after new batteries is not a battery problem (the lock keeps the flag for a
-  // while): no alarm and no request, unless a voltage reading since the change is at or below the low level.
-  if (!change && (state === 'LOW') && falseLowAlertCodes(ctx).includes(ev.eventCode)) {
-    const st = await one(c, 'SELECT last_change_at FROM battery_status WHERE hotel_id=$1 AND door_id=$2', [hotelId, doorId]);
+  // 2.19 (Armel, 27 Oct) A battery alarm from the lock after new batteries is a firmware fault, even if it comes only
+  // once, unless a voltage reading since the change confirms low batteries. It is not a battery problem: no battery
+  // alert, no "replace battery" request, the battery stays Good; the lock gets "Program the lock and upload firmware".
+  // From 10 minutes before the change (same-minute events are listed in any order) to stillAlarmingDays after it.
+  if (!change && volts == null && (state === 'LOW' || state === 'CRITICAL')) {
+    const st = await one(c, 'SELECT * FROM battery_status WHERE hotel_id=$1 AND door_id=$2 FOR UPDATE', [hotelId, doorId]);
     const since = st?.last_change_at ? new Date(st.last_change_at) : null;
-    const grace = ctx.policy.battery.lowAlertGraceDays ?? 30;
-    if (since && grace > 0 && at.getTime() >= since.getTime() - 10 * 60_000 && at.getTime() - since.getTime() <= grace * 86_400_000) {
+    const days = ctx.policy.battery.stillAlarmingDays;
+    if (since && days > 0 && at.getTime() >= since.getTime() - 10 * 60_000 && at.getTime() - since.getTime() <= days * 86_400_000) {
       const conf = await one(c, `SELECT volts_below FROM battery_readings WHERE hotel_id=$1 AND door_id=$2 AND volts_below IS NOT NULL AND reported_at >= $3 AND reported_at <= $4
         ORDER BY reported_at DESC, id DESC LIMIT 1`, [hotelId, doorId, since, at]);
       if (!(conf && Number(conf.volts_below) <= confirmLowVolts(Number(conf.volts_below), ctx.policy.battery.voltage) + 1e-6)) {
         await c.query(`INSERT INTO battery_readings (hotel_id, door_id, event_code, state, volts_below, reported_at, visionline_event_id, reporting_registration_number, change_inferred)
           VALUES ($1,$2,$3,'REPORTED',NULL,$4,$5,$6,false)`, [hotelId, doorId, ev.eventCode, at, visionlineEventId, reg]);
-        await audit(c, { hotelId, actorType: 'connector', action: 'battery.low_alert_ignored', targetType: 'door', targetId: doorId,
-          details: { eventCode: ev.eventCode, at: at.toISOString(), batteriesChanged: since.toISOString(), lastReading: conf ? Number(conf.volts_below) : null } });
-        return { doorId, state: 'REPORTED' as BatteryState, applied: false };
+        await audit(c, { hotelId, actorType: 'connector', action: 'battery.firmware_suspected', targetType: 'door', targetId: doorId,
+          details: { eventCode: ev.eventCode, event: batteryEventName(ev.eventCode), at: at.toISOString(), batteriesChanged: since.toISOString(), lastReading: conf ? Number(conf.volts_below) : null } });
+        await raiseReprogram(c, hotelId, doorId, doorName, door?.group ?? null, st, ev.eventCode, at, null);
+        return { doorId, state: st.state as BatteryState, applied: false };
       }
     }
   }

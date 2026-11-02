@@ -4,6 +4,7 @@ import { pool, many, one } from '../db.ts';
 import { audit } from '../audit.ts';
 import { getConfig, SCHEMAS } from '../hotel-config.ts';
 import { isOnline } from '../routes/portal.ts';
+import { classifyGateway, gatewayFacts, setGatewayState } from '../gateways.ts';
 import { classifyDoor, type DoorFacts } from './doors.ts';
 import { maskRecipient, sendEmail, sendSms, type Channels } from './channels.ts';
 
@@ -12,15 +13,16 @@ import { maskRecipient, sendEmail, sendSms, type Channels } from './channels.ts'
  * by e-mail and/or SMS.
  *
  *   doors   door_offline        a lock lost contact (explicit event, Visionline alarm, or silence)
+ *           gateway_offline     a gateway of the online locks is offline (2.19; see gateways.ts)
  *   vip     vip_entrance        first entrance at a watched door
  *   locks   lock_alarm, battery_critical
  *   system  connector_offline, visionline_unreachable, disk_low (red until fixed), db_large
  */
 export const CATEGORIES = ['doors', 'vip', 'locks', 'system'] as const;
 export type Category = (typeof CATEGORIES)[number];
-export const CATEGORY_LABELS: Record<Category, string> = { doors: 'Doors offline', vip: 'Watched doors (VIP)', locks: 'Lock alarms and batteries', system: 'System (server, disk, database, connector)' };
+export const CATEGORY_LABELS: Record<Category, string> = { doors: 'Doors and gateways offline', vip: 'Watched doors (VIP)', locks: 'Lock alarms and batteries', system: 'System (server, disk, database, connector)' };
 const KIND_CATEGORY: Record<string, Category> = {
-  door_offline: 'doors', vip_entrance: 'vip', lock_alarm: 'locks', battery_critical: 'locks',
+  door_offline: 'doors', gateway_offline: 'doors', vip_entrance: 'vip', lock_alarm: 'locks', battery_critical: 'locks',
   connector_offline: 'system', visionline_unreachable: 'system', disk_low: 'system', db_large: 'system', test: 'system',
 };
 export const categoryOf = (kind: string): Category => KIND_CATEGORY[kind] ?? 'system';
@@ -202,6 +204,7 @@ export async function checkHotel(hotelId: string, now = new Date()) {
   // Doors
   if (pol.doorOffline.enabled) await checkDoors(hotelId, pol, conns, now);
   else await clearOthers(hotelId, 'door_offline', []);
+  await checkGateways(hotelId);
 
   // Lock alarms (Visionline) and critical batteries
   const alarms = await many(pool, `SELECT alarm_id, COALESCE(type_name, alarm_type, 'Alarm') AS t, alarm_text, COALESCE(door_id, door_raw) AS door FROM vl_alarms
@@ -272,6 +275,21 @@ async function checkDoors(hotelId: string, pol: Awaited<ReturnType<typeof monito
   }
   // Doors with an open alert but no facts any more (e.g. alarm completed and no events): resolve.
   await clearOthers(hotelId, 'door_offline', offline.concat([...facts.entries()].filter(([, f]) => classifyDoor(f, d, now, watchRunning).state === 'unknown').map(([k]) => k)));
+}
+
+/** 2.19 Gateways: offline from a Visionline alarm or when all their locks are offline; the alert closes by itself. */
+async function checkGateways(hotelId: string) {
+  const offline: string[] = [];
+  for (const { gateway: g, facts } of await gatewayFacts(hotelId)) {
+    const v = classifyGateway(facts);
+    await setGatewayState(g.id, v);
+    const label = `${g.name}${g.eeid ? ` (EEID ${g.eeid})` : ''}`;
+    if (v.state === 'offline') {
+      offline.push(g.id);
+      await raise(hotelId, { kind: 'gateway_offline', subject: g.id, severity: 'critical', title: `Gateway offline: ${label}`, detail: v.reason, data: { eeid: g.eeid, doors: g.doors.length } });
+    } else await clear(hotelId, 'gateway_offline', g.id, v.state === 'online' ? 'The gateway is back: its locks are reporting again.' : undefined);
+  }
+  await clearOthers(hotelId, 'gateway_offline', offline);
 }
 
 /** Called for each lock event (visionline-events.ts): watched doors announce their first entrance. */

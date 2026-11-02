@@ -14,11 +14,17 @@ WHAT THE SERVER NEEDS
   - .NET Framework 4.8 (part of Windows)
   - 2 GB free disk space (more as the database grows; Monitoring warns below 50 GB)
 
+NEW IN 2.19
+  A battery alarm after new batteries (within 14 days), not confirmed by a low reading, is a firmware fault: no
+  battery alarm, the portal asks to "Program the lock and upload firmware". 3-4.8 V locks are critical at 3.6 V.
+  "No battery report available" for locks not heard from. Lock troubleshooting asks for the lock model (Signature
+  RFID, Essence, Classic RFID, Allure), remembered per door, and guides the technician through the causes step by step
+  (elimination method). New page Online locks & gateways: online locks in contact or offline, gateways with their EEID
+  (added or imported), offline alarms that close by themselves when the lock or gateway is back.
+
 NEW IN 2.18
   New batteries close the battery alarm by themselves: the reading a lock gives right after new batteries ("below
-  4.8 volts", or 9.0 V) resolves the alarm and its maintenance request. "Alert, Battery level low" (0304) logged in the
-  30 days after a battery change is not treated as a battery problem unless a voltage reading confirms it. "Stale" is
-  now "No recent report". Lock troubleshooting (Building -> Lock troubleshooting): upload the event report of one lock
+  4.8 volts", or 9.0 V) resolves the alarm and its maintenance request. Lock troubleshooting (Building -> Lock troubleshooting): upload the event report of one lock
   exported from Visionline (older or newer column layout), confirm the door, and get a verdict, what to do in order,
   battery periods and consumption, faults week by week, door problems (left open, opened with no card, mechanical key),
   refusals, use by hour/weekday and card type, service history and online pings. Names, card and serial numbers in the

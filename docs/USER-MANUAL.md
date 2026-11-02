@@ -59,17 +59,37 @@ Every lock event received from Visionline (entrances, refused entries, alarms, b
 system events, with filters (period, type, door, person, known/unknown card). **Print** makes a PDF with a
 fingerprint (SHA-256) that can be checked later under *Verify a PDF*: any change to the file shows.
 
+### 5c. New in 2.19
+
+- **A battery alarm after new batteries is a firmware fault.** If a lock raises a battery alarm (even once) within 14
+  days (Settings → Battery & maintenance) after its batteries were changed, and its voltage readings since the change do
+  not confirm low batteries, it is not a battery problem: no battery alarm and no "replace battery" request. The portal
+  opens **Program the lock and upload firmware** instead, and notes it in the audit trail (`battery.firmware_suspected`).
+- **3.6 V threshold.** On 3–4.8 V locks a reading of 3.6 V or lower is critical: a battery alarm and a "replace
+  battery" request. Change it in Settings → Battery & maintenance.
+- **"No battery report available"** is shown for a lock that has not reported for the number of days set in Settings.
+- **Lock troubleshooting** now asks which lock it is: the door (suggested from the file) and the **lock model**
+  (VingCard Signature RFID, Essence, Classic RFID, Allure, or other), remembered for the door. The report says which
+  door and model it is about, and warns when the file is about another room.
+  - **Find the cause, step by step** (elimination method): batteries, battery holder and contacts, door and lock
+    mechanics, how much the door is used, card reader, Bluetooth, online radio and gateway, door unit electronics,
+    firmware, location and climate. Each step shows what the report says (likely / possible / unlikely / check on site)
+    and what to check on the door; the technician marks it *OK, ruled out* or *Problem found*, with a note. A firmware
+    fault can also drain batteries, so the other causes are ruled out first.
+- **Online locks & gateways** (Building → Online locks & gateways): the locks Visionline runs online, whether each is in
+  contact (with its last contact, gateway, lock model and battery), and the **gateways** with their **EEID**, address,
+  location and the locks behind them. Administrators add gateways or import the list (a table with Name, EEID, IP /
+  Address, Location, Doors). A gateway is offline when a Visionline alarm names it (its EEID, or its name with
+  "gateway"/"offline"…) or when all its locks are offline. **Offline locks and gateways raise an alarm in Monitoring
+  that closes by itself when they are back**; the page lists what came back. Live gateway state from the network
+  integrator (Ruckus, Cisco…) will be added once their system can be read.
+
 ### 5b. New in 2.18
 
 - **New batteries close the alarm by themselves.** Right after new batteries, a lock reads the top of its scale
   ("Battery level below 4.8 volts", or 9.0 V for 6–9 V packs). That reading now closes the battery alarm and resolves
   its maintenance request, and counts as a battery change. Settings → Battery & maintenance can switch this off.
-- **"Alert, Battery level low" after new batteries is not a battery problem.** A lock can keep logging this alert
-  (0304) with each card for a while after the batteries were changed. For 30 days after a change (setting) such
-  alerts raise no alarm and open no request, unless a voltage reading at or below the low level (your threshold, or
-  4.2 V / 8.4 V) confirms it. Each ignored alert is noted in the audit trail.
-- **"No recent report"** replaces the word "stale" on Battery status: nothing has been heard from the lock for the
-  number of days set in Settings, so its last reading may be out of date.
+- *(2.19 changed how battery alarms after new batteries and the "stale" wording are handled; see 5c.)*
 - **Lock troubleshooting** (Building → Lock troubleshooting, or *Troubleshoot a lock* on Battery status), mainly for
   offline locks. It works whether or not battery monitoring is switched on.
   1. Read the lock with the service device and upload its events to Visionline as usual.
