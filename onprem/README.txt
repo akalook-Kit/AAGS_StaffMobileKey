@@ -14,6 +14,9 @@ WHAT THE SERVER NEEDS
   - .NET Framework 4.8 (part of Windows)
   - 2 GB free disk space (more as the database grows; Monitoring warns below 50 GB)
 
+NEW IN 2.22
+  Verify a keycard with Visionline now: Card lookup (Verify with Visionline) and Staff keycards (Verify keycard).
+
 NEW IN 2.21
   Connector 0.15.0: no more false "Visionline cannot be reached: read ECONNRESET" alarms (idle connections closed
   first, a read is resent once, the alarm needs 3 minutes without Visionline). "Issued from Visionline" with the

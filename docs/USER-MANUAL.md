@@ -59,6 +59,14 @@ Every lock event received from Visionline (entrances, refused entries, alarms, b
 system events, with filters (period, type, door, person, known/unknown card). **Print** makes a PDF with a
 fingerprint (SHA-256) that can be checked later under *Verify a PDF*: any change to the file shows.
 
+### 5f. New in 2.22: Verify a keycard
+
+**Verify with Visionline** (Visionline cards & people → Card lookup) and **Verify keycard** (Staff keycards → a request
+with a Visionline card number) ask Visionline *now* whether the card is valid, its end date and its doors. The lists in
+the portal are read on request, so they can be older than Visionline; Verify reads only that card's holder (one person),
+which is light for Visionline. The same card can be verified again after 30 seconds. A card that was never read from
+Visionline cannot be verified by its holder: read it on an encoder (Card lookup) or press Refresh from Visionline.
+
 ### 5e. New in 2.21
 
 - **"Issued from Visionline"** replaces "Visionline desk" for keycards made in Visionline. When the Visionline operator

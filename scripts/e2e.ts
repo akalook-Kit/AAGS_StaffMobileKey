@@ -1530,6 +1530,15 @@ async function main() {
     ok(/Eric Supervisor \(encoded from the portal\)/.test(hk7?.issuedBy ?? ''), 'a card encoded from the portal shows the user who encoded it', hk7);
     await call('PUT', `${H}/visionline/operators/link`, admin, { vlOperator: 'jdoe', operatorId: null });
     ok(JSON.stringify((await call('GET', `${H}/visionline/cards/${desk.json.regNo}/lookup`, admin)).json).includes('Issued from Visionline · jdoe"'), 'unlinked: the operator alone is shown');
+    // 2.22 Verify a keycard: Visionline is asked now about this card only (its holder's cards are read again).
+    const vf = await call('POST', `${H}/visionline/cards/${desk.json.regNo}/verify`, gm, {});
+    ok(vf.status === 200 && vf.json.syncId, 'Verify: hotel management can ask Visionline about one keycard', vf.json);
+    const vr = await until('verify done', () => call('GET', `${H}/visionline/cards/${desk.json.regNo}/verify/${vf.json.syncId}`, gm), (x) => ['SUCCEEDED', 'FAILED', 'EXPIRED'].includes(x.json?.status), 60_000);
+    ok(vr.json.status === 'SUCCEEDED' && vr.json.card?.valid === true && vr.json.card.inVisionline, `Verify: Visionline confirms card ${desk.json.regNo} is valid`, vr.json);
+    ok((await call('POST', `${H}/visionline/cards/${desk.json.regNo}/verify`, gm, {})).status === 429, 'the same card is not asked again within 30 seconds');
+    ok((await call('POST', `${H}/visionline/cards/99999999/verify`, gm, {})).json.error?.code === 'NO_HOLDER', 'a card not read from Visionline cannot be verified by its holder (read it on an encoder)');
+    ok((await call('POST', `${H}/visionline/cards/${desk.json.regNo}/verify`, rest, {})).status === 403, 'the restaurant cannot verify keycards');
+    ok((await call('POST', `${H}/visionline/cards/${desk.json.regNo}/verify`, lakeAdmin, {})).status === 403, 'another site cannot verify K Hotel Bana keycards');
     // A keycard in a generic name: the administrators get an e-mail (once per card).
     const gen = await call('POST', `${SIM}/sim/desk/cards`, undefined, { userId: `vl-st-${Date.now() % 100000}`, givenName: 'Staff', surname: '2', userGroup: 'Housekeeping', days: 30 });
     await until('generic card read', () => call('GET', `${H}/keycards/attention`, admin), (x) => x.json?.generic?.some((g: any) => g.regNo === String(gen.json.regNo)), 60_000);

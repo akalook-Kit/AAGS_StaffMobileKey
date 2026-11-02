@@ -6,7 +6,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { sharedVisionlineOperator } from '@smk/shared';
 import { pool, one, many } from '../db.ts';
-import { requirePerm } from '../auth.ts';
+import { permsIn, requireOperator, requirePerm } from '../auth.ts';
 import { getConfig } from '../hotel-config.ts';
 import { requestDirectorySync } from '../directory.ts';
 import { readyConnector, requestDiscovery } from '../visionline-sync.ts';
@@ -163,6 +163,45 @@ export function visionlineDataRoutes(app: FastifyInstance) {
         uniformAccess: Boolean(r.data?.uniformAccess), doors: ops.reduce((n, o) => n + (o.doors?.length ?? 0), 0), doorGroups: ops.reduce((n, o) => n + (o.doorGroups?.length ?? 0), 0),
         people: r.people, validCards: r.valid_cards, readAt: r.discovered_at };
     });
+  });
+
+  // ---- 2.22 Verify a keycard with Visionline now -------------------------------------------------------------------
+  // The lists are read on request (2.20), so what the portal shows can be older than Visionline. "Verify" asks Visionline
+  // again for the card's holder only (one person, their keycards): light enough for any time, unlike a full read.
+  const verifyPerm = async (req: FastifyRequest, hotelId: string) => {
+    const op = await requireOperator(req);
+    const perms = permsIn(op, hotelId);
+    if (!perms.has('reports.read') && !perms.has('keycards.read') && !perms.has('keycards.manage')) throw new ApiError(403, 'FORBIDDEN', 'Missing permission: reports.read or keycards.read');
+    return op;
+  };
+  app.post(`${P}/hotels/:hotelId/visionline/cards/:regNo/verify`, async (req) => {
+    const hotelId = hid(req);
+    const op = await verifyPerm(req, hotelId);
+    const regNo = z.string().trim().regex(/^\d{1,20}$/, 'Card number: digits only').parse((req.params as any).regNo);
+    const k = await one(pool, `SELECT card_holder, key_id, mobile FROM vl_cards WHERE hotel_id=$1 AND reg_no=$2`, [hotelId, regNo]);
+    if (!k?.card_holder) throw new ApiError(409, 'NO_HOLDER', 'This card is not in the list read from Visionline, so its holder is unknown. Read it on an encoder, or use Refresh from Visionline.');
+    // Spare Visionline: the same card at most every 30 s, at most 30 checks per site in 5 minutes.
+    const recent = await one(pool, `SELECT count(*) FILTER (WHERE target_id=$2 AND at > now() - interval '30 seconds')::int AS same, count(*)::int AS n
+      FROM audit_log WHERE hotel_id=$1 AND action='visionline.card_verified' AND at > now() - interval '5 minutes'`, [hotelId, regNo]);
+    if (recent?.same) throw new ApiError(429, 'VERIFIED_RECENTLY', 'This card was checked with Visionline less than 30 seconds ago.');
+    if ((recent?.n ?? 0) >= 30) throw new ApiError(429, 'TOO_MANY_CHECKS', 'Many cards were checked in the last 5 minutes; try again in a few minutes.');
+    const before = await one(pool, `SELECT expires_at, active, cancelled, discarded, overridden, expired, door_count FROM vl_cards WHERE hotel_id=$1 AND reg_no=$2`, [hotelId, regNo]);
+    const r = await requestDirectorySync(hotelId, op.id, { userIds: [k.card_holder] });
+    await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'visionline.card_verified', targetType: 'card', targetId: regNo, details: { syncId: r.syncId, alreadyRunning: r.alreadyRunning } });
+    return { syncId: r.syncId, alreadyRunning: r.alreadyRunning, before };
+  });
+  app.get(`${P}/hotels/:hotelId/visionline/cards/:regNo/verify/:syncId`, async (req) => {
+    const hotelId = hid(req);
+    await verifyPerm(req, hotelId);
+    const regNo = z.string().trim().regex(/^\d{1,20}$/).parse((req.params as any).regNo);
+    const syncId = z.string().uuid().parse((req.params as any).syncId);
+    const c = await one(pool, `SELECT status, error, completed_at FROM commands WHERE id=$1 AND hotel_id=$2 AND type='SYNC_DIRECTORY'`, [syncId, hotelId]);
+    if (!c) throw notFound('Check');
+    const k = await one(pool, `SELECT reg_no, expires_at, active, cancelled, discarded, overridden, expired, door_count, last_seen_at,
+        active AND NOT (cancelled OR discarded OR overridden OR expired) AND (starts_at IS NULL OR starts_at <= now()) AND (expires_at IS NULL OR expires_at > now()) AS valid
+      FROM vl_cards WHERE hotel_id=$1 AND reg_no=$2`, [hotelId, regNo]);
+    return { status: c.status, error: c.error?.message ?? null, completedAt: c.completed_at,
+      card: k ? { valid: Boolean(k.valid), inVisionline: Boolean(k.active), cancelled: k.cancelled, expiresAt: k.expires_at, doorCount: k.door_count, checkedAt: k.last_seen_at } : null };
   });
 
   // ---- 2.12 Card lookup: everything known about one keycard; optionally read from an encoder (pilot) ------------------

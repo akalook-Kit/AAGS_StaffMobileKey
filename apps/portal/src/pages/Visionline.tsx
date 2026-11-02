@@ -1,4 +1,5 @@
 import { RefreshVisionline } from '../components/RefreshVisionline';
+import { VerifyCard } from '../components/VerifyCard';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
@@ -250,6 +251,8 @@ function Lookup({ encoders, canRead }: { encoders: string[]; canRead: boolean })
         <div className="cols">
           <div className="panel">
             <div className="row" style={{ justifyContent: 'space-between' }}><h2 style={{ margin: 0 }}>{x.card.kind} <span className="mono">{x.regNo}</span></h2>{x.card.valid ? <span className="pill ok">Valid</span> : <span className="pill bad">Not valid</span>}</div>
+            {!x.card.mobile && <div style={{ marginTop: 10 }}><VerifyCard key={x.regNo} regNo={x.regNo} onDone={() => void r.reload()} />
+              <span className="small muted">{x.card.lastSeen ? `Last read from Visionline ${fmt.dt(x.card.lastSeen)}.` : ''} Verify asks Visionline now about this card only.</span></div>}
             <dl className="kv" style={{ marginTop: 12 }}>
               <dt>Holder</dt><dd>{x.card.holderId ? <Link to={`/access?holder=${encodeURIComponent(x.card.holderId)}`}>{x.card.holder}</Link> : x.card.holder ?? '—'}</dd>
               <dt>User group</dt><dd>{x.card.group ?? '—'}</dd>

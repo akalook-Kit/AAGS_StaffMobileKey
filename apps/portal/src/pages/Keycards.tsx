@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { VerifyCard } from '../components/VerifyCard';
 import { useHotel, useTerms } from '../App';
 import { api, download } from '../api';
 import { Drawer, ErrorNote, PageHead, Status, fmt, useApi, waitForCommand } from '../ui';
@@ -203,6 +204,7 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
         <dt>Department</dt><dd>{r.department}{r.jobTitle ? ` · ${r.jobTitle}` : ''}</dd>
         <dt>Employee no.</dt><dd>{r.employeeNo ?? '—'}</dd>
         <dt>Card</dt><dd>{r.cardLabel ?? '—'}{r.cardRegNo ? ` · Visionline ${r.cardRegNo}` : ''}</dd>
+        {r.cardRegNo && (can('reports.read') || can('keycards.read')) ? <><dt>In Visionline</dt><dd><VerifyCard key={r.cardRegNo} regNo={r.cardRegNo} label="Verify keycard" /></dd></> : null}
         {r.issuedBy && <><dt>Issued by</dt><dd>{r.issuedBy}{r.issuedAt ? ` · ${fmt.dt(r.issuedAt)}` : ''} · {r.issueMethod === 'encoder' ? 'encoded from the portal' : r.issueMethod === 'visionline_desk' ? `issued from Visionline${r.vlOperator ? ` by operator ${r.vlOperator}` : ''}` : 'existing keycard linked'}</dd></>}
         <dt>Manager</dt><dd>{r.managerName}</dd>
         <dt>Reason</dt><dd>{r.reason}</dd>
