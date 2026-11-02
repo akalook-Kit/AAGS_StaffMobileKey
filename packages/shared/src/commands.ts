@@ -96,6 +96,8 @@ export const SyncDirectoryPayload = z.object({
   /** UTC; alarms updated after this moment [§5.3.2 updatedSince]. */
   alarmsSince: z.string().datetime().optional(),
   maxUsers: z.number().int().min(1).max(20000).default(3000),
+  /** 2.10 Read only these Visionline users (a card was just issued or changed for them). Never ends with a full snapshot. */
+  userIds: z.array(z.string().min(1).max(200)).max(200).optional(),
 });
 export type SyncDirectoryPayload = z.infer<typeof SyncDirectoryPayload>;
 /** One part of a directory snapshot, posted by the connector to /connector/v1/directory while the sync runs. */

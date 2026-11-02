@@ -28,6 +28,7 @@ export const EVENT_NAMES: Record<number, string> = {
 export async function processVisionlineBatch(hotelId: string, b: VisionlineEventsBatch) {
   const summary = { cards: 0, events: 0, revoked: 0, wrongDoor: 0, autoCancelled: 0, ignored: 0, battery: 0 };
   const seen: { doorId: string | null; code: number; reg: string | null }[] = [];
+  const reRead = new Set<string>();
   let entranceCodes: number[] = [64];
   let tz = 'UTC';
   await tx(async (c) => {
@@ -38,6 +39,10 @@ export async function processVisionlineBatch(hotelId: string, b: VisionlineEvent
     entranceCodes = policy?.eventLog?.entranceEventCodes ?? [64];
     tz = (await getConfig(c, hotelId, 'property'))?.timezone ?? 'UTC';
     let battery: BatteryContext | null | undefined;
+    // 2.10 Every keycard Visionline reports (made, changed, cancelled at the desk) is recorded straight away when the
+    // hotel reads its people and cards; the holder is then re-read for the card's doors and validity.
+    const vlCfg = await getConfig(c, hotelId, 'visionline');
+    const recordCards = Boolean(vlCfg?.directorySync?.enabled);
 
     for (const card of b.cards) {
       const status = card.status ?? (card.cancelled ? 0 : undefined);
@@ -46,6 +51,21 @@ export async function processVisionlineBatch(hotelId: string, b: VisionlineEvent
         [hotelId, b.batchId, b.source, card.registrationNumber, status ?? null, card.cancelTime || null, `card:${card.registrationNumber}:${status ?? '?'}:${card.cancelTime ?? ''}`]);
       if (!row) { summary.ignored++; continue; }
       summary.cards++;
+      if (recordCards) {
+        const st = status;
+        const holder = card.cardHolder && card.cardHolder !== '0' ? card.cardHolder : null;
+        const valid = st === undefined || st === 1;
+        let exp: Date | null = null;
+        if (card.expireTime) { try { exp = fromVisionlineLocal(card.expireTime, tz); } catch { exp = null; } }
+        await c.query(`INSERT INTO vl_cards (hotel_id, reg_no, card_holder, expires_at, cancelled, discarded, overridden, expired, not_issued, key_id, active, source, last_seen_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,(SELECT id FROM key_requests WHERE hotel_id=$1 AND card_reg_no=$2 ORDER BY created_at DESC LIMIT 1),$10,'live',now())
+          ON CONFLICT (hotel_id, reg_no) DO UPDATE SET card_holder=COALESCE(EXCLUDED.card_holder, vl_cards.card_holder), expires_at=COALESCE(EXCLUDED.expires_at, vl_cards.expires_at),
+            cancelled=EXCLUDED.cancelled, discarded=EXCLUDED.discarded, overridden=EXCLUDED.overridden, expired=EXCLUDED.expired, not_issued=EXCLUDED.not_issued,
+            key_id=COALESCE(vl_cards.key_id, EXCLUDED.key_id), active=EXCLUDED.active, last_seen_at=now()`,
+          [hotelId, card.registrationNumber, holder, exp, st === 0, st === 6, st === 2 || st === 5, st === 4, st === 3, valid]);
+        if (holder) await c.query(`UPDATE vl_cards k SET user_group=u.user_group FROM vl_users u WHERE k.hotel_id=$1 AND k.reg_no=$2 AND u.hotel_id=k.hotel_id AND u.user_id=k.card_holder`, [hotelId, card.registrationNumber]);
+        if (holder && valid) reRead.add(holder);
+      }
       const key = await keyByRegNo(c, hotelId, card.registrationNumber);
       if (!key) continue; // a card the platform did not issue (e.g. a plastic staff card)
       await c.query('UPDATE visionline_events SET key_id=$2 WHERE id=$1', [row.id, key.id]);
@@ -98,6 +118,11 @@ export async function processVisionlineBatch(hotelId: string, b: VisionlineEvent
       }
     }
   });
+  // 2.10 Re-read the holders of new or changed cards (doors, validity, name, group), a few seconds later.
+  if (reRead.size) {
+    try { await (await import('./directory.ts')).requestDirectorySync(hotelId, null, { userIds: [...reRead] }); }
+    catch { /* connector busy with a full sync (it reads them anyway) or an older connector: the next sync catches up */ }
+  }
   // Watched (VIP) doors: announced after the batch is saved, outside the hotel lock (sending can take seconds).
   for (const e of seen as any[]) {
     if (!entranceCodes.includes(e.code)) continue;

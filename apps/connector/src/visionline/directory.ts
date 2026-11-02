@@ -40,7 +40,10 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
 
   // ---- users
   let ids: string[] = [];
-  if (p.userGroups === null) {
+  if (p.userIds?.length) {
+    // 2.10 A card was just issued or changed for these people: read only them (no alarms, no full snapshot).
+    ids = p.userIds;
+  } else if (p.userGroups === null) {
     ids = ((await vl.request<{ id: unknown }[]>('GET', VL.paths.users)) ?? []).map((u) => firstText(u.id)).filter((x): x is string => Boolean(x));
   } else {
     for (const g of p.userGroups) {
@@ -101,7 +104,7 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
 
   // ---- alarms (needs the Visionline option "Web service for checking and confirming alarms")
   const alarms: DirectoryChunk['alarms'] = [];
-  if (p.includeAlarms) {
+  if (p.includeAlarms && !p.userIds?.length) {
     try {
       const types = new Map<string, string>();
       try { for (const t of (await vl.request<any[]>('GET', '/alarmTypes')) ?? []) { const k = firstText(t?.id); if (k) types.set(k, firstText(t?.name) ?? k); } } catch (e) { if (!isNotFound(e)) throw e; }

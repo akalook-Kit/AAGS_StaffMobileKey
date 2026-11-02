@@ -34,15 +34,15 @@ const GENERIC: Record<string, { intro: string; fields: Field[] }> = {
     { k: 'requireApprovalForBroad', label: 'Broad access needs a second person to approve', type: 'bool' },
     { k: 'wrongDoorLimit', label: 'Cancel the card after more than this many wrong-door attempts', type: 'number', hint: 'Visionline lock events 320 “No access to this room” and 323 “Common rooms only”, reported by the connector. 0 switches it off. Usual value: 5.' },
   ] },
-  credential_services: { intro: 'ASSA ABLOY Credential Services (SEOS) tenant used for phone set-up. Use the same URL, user and System ID as the Mobile Access account in Visionline (Options → Mobile Access → account → Server). The password is referenced by secret name, never stored here.', fields: [
+  credential_services: { intro: 'ASSA ABLOY Credential Services (SEOS) tenant used for phone set-up. Use the same URL, user and System ID as the Mobile Access account in Visionline (Options → Mobile Access → account → Server). The user and password are entered under Passwords and keys (stored encrypted, never shown again).', fields: [
     { k: 'baseUrl', label: 'URL', hint: 'Visionline accounts use https://hospitality.credential-services.api.assaabloy.com. The test setup uses the simulator.' },
     { k: 'systemId', label: 'System ID', type: 'number', hint: 'Must match the Visionline Mobile Access account (checked on Connector health).' },
-    { k: 'tenantUserRef', label: 'Tenant user secret name' }, { k: 'tenantPasswordRef', label: 'Tenant password secret name' },
   ] },
   features: { intro: 'Modules can be switched on only when they are released, licensed and supported by the connector.', fields: [
     { k: 'staffMobileKeys', label: 'Staff mobile keys', type: 'bool' },
     { k: 'mobileKeysVisibleTo', label: 'Mobile keys module visible to', type: 'select', options: [{ v: 'everyone', l: 'Everyone whose role allows it' }, { v: 'administrators', l: 'Hotel administrators only (while it is being finalised)' }], hint: 'Hides mobile keys, staff phones, app settings and the key settings tabs from everyone except hotel administrators. Per person: Operators -> Modules.' },
     { k: 'timeAttendance', label: 'Time & attendance', type: 'bool', hint: 'Check-in desk, timesheets, leave, payroll exports. Door entrances count when attendance doors are set (Time & attendance -> Setup).' },
+    { k: 'breakfast', label: 'Breakfast', type: 'bool', hint: 'In-house guest list (imported from the PMS report or typed), restaurant check-off by room, daily report. Role "Restaurant (breakfast)" for the restaurant team.' },
     { k: 'batteryMonitoring', label: 'Battery monitoring', type: 'bool', hint: 'Lock battery alarms from Visionline, read by the connector (version 0.5.0 or newer, with its Visionline watch on).' },
     { k: 'maintenance', label: 'Maintenance requests', type: 'bool', hint: 'Requests from the portal, the staff app and battery alarms; tasks for technicians in the app.' },
     { k: 'guestKeys', label: 'Guest keys (phase 3)', type: 'bool', disabled: true }, { k: 'pmsOccupancy', label: 'Room occupancy from PMS (phase 3)', type: 'bool', disabled: true },
@@ -63,6 +63,7 @@ const TABS = [
   { id: 'thresholds', label: 'Alert thresholds' },
   { id: 'credential_services', label: 'Credential Services' },
   { id: 'features', label: 'Modules' },
+  { id: 'backups', label: 'Backups' },
 ];
 
 /** Settings tabs that belong to the mobile keys module (hidden with it). */
@@ -84,7 +85,9 @@ export function SettingsPage() {
       {tab === 'visionline' ? <VisionlineSettings />
         : tab === 'templates' ? <TemplatesSettings />
         : tab === 'reports' ? <ConfigForm key="reports" kind="visionline" intro="Insights can read people, valid keycards and lock alarms from Visionline, read-only. Each save is a new version of the Visionline settings." render={(d, set) => <ReportsSync data={d} set={set} />} aside={<SyncHistory />} />
-        : tab === 'alerts' ? <ConfigForm key="alerts" kind="notifications" intro="How alerts reach people. Passwords and API keys are never entered here: they are kept on the server (set-platform-secrets.ps1 on the server, or the hosting's secret settings)." render={(d, set) => <ChannelsEditor data={d} set={set} />} aside={<AlertContacts />} />
+        : tab === 'alerts' ? <ConfigForm key="alerts" kind="notifications" intro="How alerts reach people. The mail server password and the SMS key are entered under Passwords and keys below: stored encrypted on the server and never shown again." render={(d, set) => <ChannelsEditor data={d} set={set} />} aside={<><SecretsPanel areas={['email', 'sms']} /><AlertContacts /></>} />
+        : tab === 'credential_services' ? <ConfigForm key="cs" kind="credential_services" intro={GENERIC.credential_services!.intro} fields={GENERIC.credential_services!.fields} aside={<SecretsPanel areas={['credential_services']} />} />
+        : tab === 'backups' ? <BackupsPanel />
         : tab === 'thresholds' ? <ConfigForm key="thresholds" kind="policy" intro="When Monitoring raises an alert. Part of the hotel policy; each save is a new policy version." render={(d, set) => <ThresholdsEditor data={d} set={set} />} />
         : tab === 'eventlog' ? <ConfigForm key="eventlog" kind="policy" intro="Which lock events the connector records for the Event log. Refused entries and battery events are always recorded. Part of the hotel policy; each save is a new policy version." render={(d, set) => <EventLogPolicy data={d} set={set} />} />
         : tab === 'battery' ? <ConfigForm key="battery" kind="policy" intro="How battery alarms and maintenance requests are handled. Part of the hotel policy; each save is a new policy version." render={(d, set) => <Phase2Policy data={d} set={set} />} />
@@ -330,7 +333,7 @@ function VisionlineFields({ data, set, accounts, discovered, onDiscovered }: {
         <span>Operators must use their own Visionline credentials to issue keys<span className="hint" style={{ display: 'block' }}>Each operator adds them under Your account → Visionline credentials. Keys are then recorded in Visionline under that operator’s name.</span></span></label>
 
       <h3 className="section-title">Staff user groups</h3>
-      <p className="small muted">The Visionline user groups staff can belong to. Each group’s doors (set in Visionline) can be added to a key or a template. Uniform-access groups always get exactly the group’s doors.</p>
+      <p className="small muted">The Visionline user groups staff can belong to. They are read from Visionline by themselves (every few hours, and whenever a new group appears on Visionline people); you only remove a group here if staff keys should never use it. Each group’s doors (set in Visionline) can be added to a key or a template. Uniform-access groups always get exactly the group’s doors.</p>
       <ErrorNote error={error} />
       <ul className="listed">
         {groups.map((g) => {
@@ -340,7 +343,7 @@ function VisionlineFields({ data, set, accounts, discovered, onDiscovered }: {
           return (
             <li key={g}>
               <div><strong>{g}</strong>{g === data.defaultUserGroup && <span className="small muted"> · default</span>}
-                <div className="meta">{r ? <>In Visionline{r.data?.uniformAccess ? ' · uniform access' : ''}{nDoors || nGroups ? ` · ${nDoors ? `${nDoors} ${nDoors === 1 ? "door" : "doors"}` : ''}${nDoors && nGroups ? ', ' : ''}${nGroups ? `${nGroups} door ${nGroups === 1 ? "group" : "groups"}` : ''}` : ' · no doors set'}</> : 'Not found in Visionline yet (run discovery, or create it)'}</div></div>
+                <div className="meta">{r ? <>In Visionline{r.data?.uniformAccess ? ' · uniform access' : ''}{nDoors || nGroups ? ` · ${nDoors ? `${nDoors} ${nDoors === 1 ? "door" : "doors"}` : ''}${nDoors && nGroups ? ', ' : ''}${nGroups ? `${nGroups} door ${nGroups === 1 ? "group" : "groups"}` : ''}` : ' · no doors set'}</> : 'Not found in Visionline (it is checked every few hours; or create it)'}</div></div>
               <div className="row">
                 {!r && can('settings.manage') && <button className="btn" disabled={busy === g} onClick={() => create(g, false)}>{busy === g ? 'Creating…' : 'Create in Visionline'}</button>}
                 {g !== data.defaultUserGroup && <button className="btn" onClick={() => set({ userGroups: groups.filter((x) => x !== g) })} title="Stop using this group here. It stays in Visionline.">Remove</button>}
@@ -552,7 +555,7 @@ function ChannelsEditor({ data, set }: { data: any; set: (patch: any) => void })
         <div className="field"><label htmlFor="es">Security</label><select id="es" value={e.security} disabled={!e.enabled} onChange={(x) => setE({ security: x.target.value })}><option value="starttls">STARTTLS (usually port 587)</option><option value="tls">TLS (usually port 465)</option><option value="none">None (internal relay only)</option></select></div>
       </div>
       <div className="field-row">
-        <div className="field"><label htmlFor="eu">User name</label><input id="eu" value={e.user} disabled={!e.enabled} autoComplete="off" onChange={(x) => setE({ user: x.target.value.trim() })} /><span className="hint">Empty for a relay without sign-in. The password is the server secret <code>SMTP_PASSWORD</code>.</span></div>
+        <div className="field"><label htmlFor="eu">User name</label><input id="eu" value={e.user} disabled={!e.enabled} autoComplete="off" onChange={(x) => setE({ user: x.target.value.trim() })} /><span className="hint">Empty for a relay without sign-in. The password goes under Passwords and keys.</span></div>
         <div className="field"><label htmlFor="ef">Sender</label><input id="ef" value={e.from} disabled={!e.enabled} placeholder="Hotel alerts <alerts@yourhotel.com>" onChange={(x) => setE({ from: x.target.value })} /></div>
       </div>
       <h3 style={{ marginTop: 16 }}>SMS</h3>
@@ -563,7 +566,7 @@ function ChannelsEditor({ data, set }: { data: any; set: (patch: any) => void })
           <option value="android-gateway">Android phone in the hotel (SMS Gateway for Android)</option><option value="africastalking">Africa's Talking</option><option value="http">Other SMS service (HTTP)</option></select></div>
         {m.provider !== 'africastalking' && <div className="field"><label htmlFor="mu">Address</label><input id="mu" value={m.url} disabled={!m.enabled} placeholder={m.provider === 'android-gateway' ? 'http://192.168.1.50:8080' : 'https://api.example.com/sms'} onChange={(x) => setM({ url: x.target.value.trim() })} />
           <span className="hint">{m.provider === 'android-gateway' ? 'Shown in the app under "Local server". Give the phone a fixed address on the hotel Wi-Fi.' : 'The service\'s send address.'}</span></div>}
-        <div className="field"><label htmlFor="mn">User name</label><input id="mn" value={m.username} disabled={!m.enabled} autoComplete="off" onChange={(x) => setM({ username: x.target.value.trim() })} /><span className="hint">The password / API key is the server secret <code>SMS_API_KEY</code>.</span></div>
+        <div className="field"><label htmlFor="mn">User name</label><input id="mn" value={m.username} disabled={!m.enabled} autoComplete="off" onChange={(x) => setM({ username: x.target.value.trim() })} /><span className="hint">The password or API key goes under Passwords and keys.</span></div>
         {m.provider === 'africastalking' && <div className="field"><label htmlFor="ms">Sender ID</label><input id="ms" value={m.sender} disabled={!m.enabled} maxLength={20} onChange={(x) => setM({ sender: x.target.value })} /><span className="hint">Optional; must be registered with Africa's Talking.</span></div>}
       </div>
       {m.provider === 'http' && (
@@ -709,6 +712,98 @@ function SyncHistory() {
             <div className="small">{x.users} people, {x.cards} valid cards, {x.alarms} alarms{x.error ? ` · ${x.error}` : ''}</div>
             {(x.notes ?? []).map((n: string, i: number) => <div key={i} className="small muted">{n}</div>)}</div>
         </li>))}</ul> : <p className="muted small">Not read yet.</p>}
+    </div>
+  );
+}
+
+
+/**
+ * 2.9 Passwords and keys (Credential Services account, SMTP password, SMS key): entered here, stored
+ * encrypted on the server, never shown again. Values set in the server's own settings are shown as such.
+ */
+function SecretsPanel({ areas }: { areas: ('credential_services' | 'email' | 'sms')[] }) {
+  const { base } = useHotel();
+  const s = useApi<any>(`${base}/secrets`);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [value, setValue] = useState('');
+  const [error, setError] = useState<unknown>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const list = (s.data?.secrets ?? []).filter((x: any) => areas.includes(x.area));
+  const save = async (ref: string) => {
+    setError(null); setOk(null);
+    try { await api(`${base}/secrets/${ref}`, { method: 'PUT', body: { value } }); setValue(''); setEditing(null); setOk('Saved. It is stored encrypted and will not be shown again.'); await s.reload(); } catch (e) { setError(e); }
+  };
+  const remove = async (ref: string, label: string) => {
+    if (!confirm(`Remove the ${label}?`)) return;
+    setError(null); setOk(null);
+    try { await api(`${base}/secrets/${ref}`, { method: 'DELETE' }); setOk('Removed.'); await s.reload(); } catch (e) { setError(e); }
+  };
+  return (
+    <div className="panel">
+      <h2>Passwords and keys</h2>
+      <p className="muted small" style={{ marginTop: 0 }}>Typed here once, stored encrypted on this server and never shown again, not even to administrators. To change one, enter the new value.</p>
+      <ErrorNote error={error ?? s.error} />
+      {ok && <div className="alert ok">{ok}</div>}
+      {s.data && !s.data.storeEnabled && <div className="alert warn">This server keeps passwords in its own settings (environment), not in the portal.</div>}
+      <ul className="checklist">
+        {list.map((x: any) => (
+          <li key={x.ref} style={{ gridTemplateColumns: '1fr auto' }}>
+            <div>
+              <strong>{x.label}</strong>
+              <div className="small muted">
+                {x.source === 'server' ? 'Set in the server\'s own settings (cannot be changed here)'
+                  : x.source === 'portal' ? `Set${x.updatedAt ? ` ${fmt.dt(x.updatedAt)}` : ''}${x.updatedBy ? ` by ${x.updatedBy}` : ''}`
+                  : x.source === 'unreadable' ? 'Stored with another server key: enter it again'
+                  : 'Not set'}
+              </div>
+              {editing === x.ref && (
+                <form className="row" style={{ marginTop: 8 }} onSubmit={(e) => { e.preventDefault(); void save(x.ref); }}>
+                  <input type={x.masked ? 'password' : 'text'} value={value} onChange={(e) => setValue(e.target.value)} autoComplete="new-password" spellCheck={false} autoFocus aria-label={x.label} style={{ flex: 1, minWidth: 180, border: '1px solid var(--line)', borderRadius: 'var(--radius)', padding: '7px 10px' }} />
+                  <button className="btn primary" disabled={!value}>Save</button>
+                  <button type="button" className="btn" onClick={() => { setEditing(null); setValue(''); }}>Cancel</button>
+                </form>
+              )}
+            </div>
+            {x.source !== 'server' && s.data?.storeEnabled && editing !== x.ref && (
+              <div className="row">
+                <button className="btn small" onClick={() => { setEditing(x.ref); setValue(''); setOk(null); }}>{x.source ? 'Change' : 'Set'}</button>
+                {x.source === 'portal' && <button className="btn small danger" onClick={() => void remove(x.ref, x.label)}>Remove</button>}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** 2.9 Database copies on this server: daily copy, Back up now, the list of copies. */
+function BackupsPanel() {
+  const { base } = useHotel();
+  const b = useApi<any>(`${base}/backups`);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const mb = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} kB` : `${(n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`);
+  const now = async () => {
+    setBusy(true); setError(null); setOk(null);
+    try { const r = await api(`${base}/backups`, { body: {} }); setOk(`Copy ${r.name} made (${mb(r.bytes)}, ${r.rows} rows).`); await b.reload(); } catch (e) { setError(e); } finally { setBusy(false); }
+  };
+  if (!b.data) return <ErrorNote error={b.error} />;
+  if (!b.data.enabled) return <div className="panel"><h2>Backups</h2><p className="muted">Copies of this platform's database are made by the hosting provider.</p></div>;
+  return (
+    <div className="panel">
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <h2 style={{ margin: 0 }}>Database copies on this server</h2>
+        <button className="btn primary" onClick={now} disabled={busy}>{busy ? 'Making a copy…' : 'Back up now'}</button>
+      </div>
+      <p className="muted small">A complete copy is made every day at {b.data.dailyAt} (server time); the newest {b.data.keep} daily copies are kept, copies made with “Back up now” until removed. Database size: {mb(b.data.databaseBytes)}. Folder on the server: <code>{b.data.folder}</code>. Copy that folder to another disk or the head office regularly; to put a copy back, use <code>database-tools.ps1 -Action Restore</code> on the server.</p>
+      <ErrorNote error={error} />
+      {ok && <div className="alert ok">{ok}</div>}
+      {b.data.copies.length ? (
+        <div style={{ overflowX: 'auto' }}><table className="grid"><thead><tr><th>Copy</th><th>Kind</th><th>Made</th><th className="num">Size</th><th>Fingerprint</th></tr></thead>
+          <tbody>{b.data.copies.map((c: any) => <tr key={c.name}><td className="nowrap"><code>{c.name}</code></td><td>{/-manual\./.test(c.name) ? 'Back up now' : /-pre-upgrade\./.test(c.name) ? 'Before an upgrade' : /-before-restore\./.test(c.name) ? 'Before a restore' : 'Daily'}</td><td className="nowrap">{fmt.dt(c.madeAt)}</td><td className="num">{mb(c.bytes)}</td><td>{c.fingerprint ? 'Saved (.sha256)' : '—'}</td></tr>)}</tbody></table></div>
+      ) : <p className="muted">No copy yet. The first daily copy is made within a few minutes after {b.data.dailyAt}; or press Back up now.</p>}
     </div>
   );
 }

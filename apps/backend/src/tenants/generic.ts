@@ -54,6 +54,10 @@ export function genericProfile(env: NodeJS.ProcessEnv = process.env): HotelProfi
         defaultUserGroup: 'Housekeeping', userGroups: ['Housekeeping', 'Maintenance', 'Security', 'Management', 'Front Office'],
         accountName: env.HOTEL_VL_ACCOUNT?.trim() || null, keyLabel: null, mobileAccessUuid: Number.isInteger(uuid) ? uuid : null,
         revokeMode: 'overridden', requirePersonalCredentials: false,
+        // 2.10 Everything comes from Visionline by itself: user groups replace these placeholders once read,
+        // and people and keycards are synced every 6 hours (and within seconds of a card being made).
+        discoveryEveryHours: 6,
+        directorySync: { enabled: true, scope: 'all', includeCards: true, includeAlarms: true, everyHours: 6, maxUsers: 5000 },
       },
       credential_services: { baseUrl: env.CS_BASE_URL?.trim() || CS_PRODUCTION_URL, systemId, tenantUserRef: 'CS_TENANT_USER', tenantPasswordRef: 'CS_TENANT_PASSWORD' },
       app_policy: { privacyText: `${name} uses your work account to deliver door keys to this phone. No location is collected.`, supportEscalation: 'Call the duty manager if a door will not open.', partnerLinks: [], allowedLinkHosts: [] },

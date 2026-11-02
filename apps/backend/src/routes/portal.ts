@@ -17,6 +17,7 @@ import { getCallbackState } from '../jobs.ts';
 import { config } from '../config.ts';
 import { hashToken } from './connector.ts';
 import { TemplateBody } from './portal-admin.ts';
+import { requestDiscovery } from '../visionline-sync.ts';
 import { ApiError, badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 
 const P = '/api/v1';
@@ -183,13 +184,9 @@ export function portalRoutes(app: FastifyInstance) {
   app.post(`${P}/hotels/:hotelId/resources/discover`, async (req) => {
     const hotelId = hid(req);
     const op = await requirePerm(req, hotelId, 'resources.discover');
-    const corr = newCorrelationId();
-    const vl = (await getConfigWithVersion(hotelId, 'visionline')).data;
-    const groups = await many(pool, `SELECT DISTINCT visionline_user_group AS g FROM staff WHERE hotel_id=$1 AND visionline_user_group IS NOT NULL`, [hotelId]);
-    const userGroups = [...new Set([vl?.defaultUserGroup, ...(vl?.userGroups ?? []), ...groups.map((g) => g.g)].filter(Boolean))] as string[];
-    const cmd = await enqueue(pool, { hotelId, type: 'DISCOVER_RESOURCES', payload: { userGroups }, idempotencyKey: `discover:${randomUUID()}`, correlationId: corr, ttlSec: 300 });
-    await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'resources.discovery_requested', targetType: 'command', targetId: cmd.id, correlationId: corr });
-    return { commandId: cmd.id };
+    // 2.10 Same request as the automatic one: every group name known from settings, staff and Visionline people.
+    const r = await requestDiscovery(pool, hotelId, op.id, 'by hand');
+    return { commandId: r.commandId };
   });
   app.post(`${P}/hotels/:hotelId/connector/validate`, async (req) => {
     const hotelId = hid(req);

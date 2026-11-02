@@ -19,6 +19,9 @@ import { EventLogPage } from './pages/EventLog';
 import { MonitoringPage } from './pages/Monitoring';
 import { AttendancePage } from './pages/Attendance';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { SetupPage } from './pages/Setup';
+import { VisionlinePage } from './pages/Visionline';
+import { BreakfastPage } from './pages/Breakfast';
 
 export interface Me {
   id: string; email: string; displayName: string; isPlatformAdmin: boolean; mfaEnabled: boolean;
@@ -33,12 +36,17 @@ export const useHotel = () => useContext(HotelCtx)!;
 export function App() {
   const [token, setToken] = useState(auth.token);
   const [me, setMe] = useState<Me | null>(null);
+  // 2.9 A new on-premises installation opens on the first-run setup page until the hotel is set up.
+  const [setup, setSetup] = useState<any>(undefined);
+  useEffect(() => { api('/api/v1/setup').then(setSetup).catch(() => setSetup(null)); }, []);
   useEffect(() => {
     const out = () => { setToken(null); setMe(null); };
     window.addEventListener('smk:signed-out', out);
     return () => window.removeEventListener('smk:signed-out', out);
   }, []);
   useEffect(() => { if (token) api<Me>('/api/v1/me').then(setMe).catch(() => setToken(null)); }, [token]);
+  if (setup === undefined && !token) return <div className="empty">Loading…</div>;
+  if (setup?.needed) return <SetupPage info={setup} />;
   if (!token) return <Login onSignedIn={(t) => { auth.set(t); setToken(t); }} />;
   if (!me) return <div className="empty">Loading…</div>;
   if (!me.hotels.length) return <div className="empty">Your account is not a member of any hotel yet. Ask a hotel administrator to add you.</div>;
@@ -53,7 +61,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const branding = useApi<any>(`${base}/config/branding`, [hotel.id]);
   const pending = useApi<any[]>(hotel.permissions.includes('key.approve_broad') ? `${base}/keys?status=PENDING_APPROVAL` : null, [hotel.id], 15_000);
   // Phase 2 modules appear only when the hotel has them switched on and the role allows them.
-  const attention = useApi<any>(hotel.permissions.includes('resources.read') ? `${base}/attention` : null, [hotel.id], 30_000);
+  const attention = useApi<any>(hotel.permissions.includes('resources.read') || hotel.permissions.includes('breakfast.read') ? `${base}/attention` : null, [hotel.id], 30_000);
   const mon = useApi<any>(hotel.permissions.includes('alerts.read') ? `${base}/monitoring/summary` : null, [hotel.id], 30_000);
   // Red band on every page while a critical system alert (disk space, connector, Visionline) is open.
   const banner = useApi<any[]>(hotel.permissions.includes('alerts.read') ? `${base}/monitoring/banner` : null, [hotel.id], 60_000);
@@ -86,6 +94,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <nav aria-label="Main">
             <NavLink to="/" end>Overview</NavLink>
             {can('reports.read') && <NavLink to="/insights">Insights</NavLink>}
+            {can('reports.read') && <NavLink to="/visionline">Visionline cards & people</NavLink>}
             {can('staff.read') && <NavLink to="/staff">Staff</NavLink>}
             {can('key.read') && <NavLink to="/keys">Mobile keys {pendingCount > 0 && <span className="count" title="Awaiting approval">{pendingCount}</span>}</NavLink>}
             {can('operators.manage') && <NavLink to="/operators">Operators</NavLink>}
@@ -95,6 +104,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             {can('alerts.read') && <NavLink to="/monitoring">Monitoring {(mon.data?.alerts?.critical ?? 0) > 0 && <span className="count bad" title="Critical alerts">{mon.data.alerts.critical}</span>}</NavLink>}
             {can('events.read') && <NavLink to="/events">Event log</NavLink>}
             {can('attendance.clock') && <NavLink to="/attendance">Time & attendance</NavLink>}
+            {can('breakfast.read') && attention.data?.breakfast && <NavLink to="/breakfast">Breakfast</NavLink>}
             {can('audit.read') && <NavLink to="/audit">Audit trail</NavLink>}
             {can('battery.read') && attention.data?.batteryMonitoring && <NavLink to="/battery">Battery status {(attention.data.battery?.critical ?? 0) > 0 && <span className="count" title="Critical lock batteries">{attention.data.battery.critical}</span>}</NavLink>}
             {can('maintenance.read') && attention.data?.maintenance && <NavLink to="/maintenance">Maintenance {(attention.data.maintenance?.open ?? 0) > 0 && <span className="count" title="Open requests">{attention.data.maintenance.open}</span>}</NavLink>}
@@ -111,7 +121,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           ))}
           <ErrorBoundary key={loc.pathname} label="This page">
           <Routes>
-            <Route path="/" element={<Overview />} />
+            <Route path="/" element={!can('resources.read') && can('breakfast.read') ? <Navigate to="/breakfast" replace /> : <Overview />} />
             <Route path="/staff" element={<StaffPage />} />
             <Route path="/keys" element={<KeysPage />} />
             <Route path="/keys/:keyId" element={<KeysPage />} />
@@ -129,6 +139,8 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <Route path="/maintenance" element={<MaintenancePage />} />
             <Route path="/maintenance/:ticketId" element={<MaintenancePage />} />
             <Route path="/attendance" element={<AttendancePage />} />
+            <Route path="/visionline" element={<VisionlinePage />} />
+            <Route path="/breakfast" element={<BreakfastPage />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
           </ErrorBoundary>

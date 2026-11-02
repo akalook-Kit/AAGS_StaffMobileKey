@@ -2,18 +2,20 @@
  * Builds the on-premises package for the Vingcard / Visionline server:
  *   app/platform.mjs, app/admin.mjs, app/gateway.mjs, app/cs-check.mjs  (one file each, all dependencies included)
  *   migrations/, portal/ (built web portal), brand/, service/NodeService.cs, the PowerShell scripts,
- *   connector/ (the Windows connector package), VERSION, README.txt
+ *   connector/ (the Windows connector package), runtime/ (Node.js + PostgreSQL for Windows, see windows-runtime.mjs),
+ *   Install.cmd / Uninstall.cmd, VERSION, README.txt
  *
  *   npm run build:portal && npm run package:connector && npm run package:onprem
  *     -> dist/onprem/staff-mobile-key-onprem/  (+ staff-mobile-key-onprem-<version>.zip when "zip" exists)
  *
- * The server needs Node.js 22 LTS and PostgreSQL only: no npm install, no third-party service wrapper.
+ * 2.9: the server needs nothing installed beforehand. Double-click Install.cmd.
  */
 import { build } from 'esbuild';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildWindowsRuntime } from './windows-runtime.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const version = readFileSync(join(root, 'VERSION'), 'utf8').trim();
@@ -36,15 +38,24 @@ const be = join(root, 'apps/backend/src');
 for (const [entry, file] of [['main.ts', 'platform.mjs'], ['tools/admin.ts', 'admin.mjs'], ['gateway/gateway.ts', 'gateway.mjs'], ['tools/cs-check.ts', 'cs-check.mjs']])
   await build({ ...common, entryPoints: [join(be, entry)], outfile: join(out, 'app', file) });
 
+// A module with a top-level await inside an import cycle never finishes loading in a bundle (2.9 lesson):
+// the bundles must not await any module initialiser.
+for (const f of ['platform.mjs', 'admin.mjs', 'gateway.mjs', 'cs-check.mjs'])
+  if (/^await init_/m.test(readFileSync(join(out, 'app', f), 'utf8'))) throw new Error(`${f}: a bundled module uses top-level await; remove it.`);
+
 cpSync(join(root, 'apps/backend/migrations'), join(out, 'migrations'), { recursive: true });
 cpSync(join(root, 'apps/portal/dist'), join(out, 'portal'), { recursive: true });
 cpSync(join(root, 'brand'), join(out, 'brand'), { recursive: true });
 const op = join(root, 'onprem');
 cpSync(join(op, 'service'), join(out, 'service'), { recursive: true });
-for (const f of ['install-onprem.ps1', 'backup-onprem.ps1', 'database-tools.ps1', 'set-platform-secrets.ps1', 'set-external-access.ps1', 'rollback-onprem.ps1', 'uninstall-onprem.ps1', 'README.txt', 'gateway.config.template.json'])
-  cpSync(join(op, f), join(out, f));
+// Windows tools: CRLF line endings (cmd.exe needs them; Notepad shows them right).
+const crlf = (t) => t.replace(/\r?\n/g, '\r\n');
+for (const f of ['Install.cmd', 'Uninstall.cmd', 'install-onprem.ps1', 'database-tools.ps1', 'set-platform-secrets.ps1', 'set-external-access.ps1', 'rollback-onprem.ps1', 'uninstall-onprem.ps1', 'README.txt', 'gateway.config.template.json'])
+  writeFileSync(join(out, f), /\.(cmd|ps1|txt)$/.test(f) ? crlf(readFileSync(join(op, f), 'utf8')) : readFileSync(join(op, f)));
 cpSync(connectorDir, join(out, 'connector'), { recursive: true });
 writeFileSync(join(out, 'VERSION'), `${version}\r\n`);
+const rt = buildWindowsRuntime(join(out, 'runtime'));
+console.log(`Windows runtime: ${rt.files} program files checked and included.`);
 
 if (existsSync('/usr/bin/zip')) {
   const zip = join(outRoot, `staff-mobile-key-onprem-${version}.zip`);

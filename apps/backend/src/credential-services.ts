@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { CS } from '@smk/shared';
-import { config, getSecret } from './config.ts';
+import { config } from './config.ts';
+import { getSecret } from './secret-store.ts';
 import { getConfig } from './hotel-config.ts';
 import { pool, one } from './db.ts';
 import { ApiError } from './lib/errors.ts';
@@ -52,9 +53,9 @@ export class CredentialServicesClient {
 export async function csForHotel(hotelId: string) {
   const c = await getConfig(pool, hotelId, 'credential_services');
   if (!c) throw new ApiError(503, 'CS_NOT_CONFIGURED', 'Credential Services is not configured for this hotel.');
-  const user = getSecret(c.tenantUserRef);
-  const pw = getSecret(c.tenantPasswordRef);
-  if (!user || !pw) throw new ApiError(503, 'CS_SECRET_MISSING', 'Credential Services credentials are not available in the secret store.');
+  const user = getSecret(c.tenantUserRef, hotelId);
+  const pw = getSecret(c.tenantPasswordRef, hotelId);
+  if (!user || !pw) throw new ApiError(503, 'CS_SECRET_MISSING', 'Credential Services account is not set yet: Settings -> Credential Services (user and password).');
   return { client: new CredentialServicesClient(c.baseUrl, user, pw), systemId: c.systemId as number };
 }
 

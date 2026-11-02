@@ -106,8 +106,8 @@ async function announce(hotelId: string, alert: any, phase: 'opened' | 'resolved
   let sent = 0, failed = 0;
   for (const c of contacts) {
     const jobs: ['email' | 'sms', string, () => Promise<void>][] = [];
-    if (c.by_email && c.email && ch.email.enabled) jobs.push(['email', c.email, () => sendEmail(ch.email, c.email, m.subject, m.text)]);
-    if (c.by_sms && c.phone && ch.sms.enabled) jobs.push(['sms', c.phone, () => sendSms(ch.sms, c.phone, m.sms)]);
+    if (c.by_email && c.email && ch.email.enabled) jobs.push(['email', c.email, () => sendEmail(ch.email, c.email, m.subject, m.text, hotelId)]);
+    if (c.by_sms && c.phone && ch.sms.enabled) jobs.push(['sms', c.phone, () => sendSms(ch.sms, c.phone, m.sms, fetch, hotelId)]);
     for (const [channel, to, run] of jobs) {
       let error: string | null = null;
       try { await run(); sent++; } catch (e) { error = (e as Error).message.slice(0, 300); failed++; }

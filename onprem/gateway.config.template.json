@@ -1,6 +1,6 @@
 {
   "_comment": "Written by install-onprem.ps1 to C:\\ProgramData\\StaffMobileKey\\Platform\\gateway.config.json. Edit there, then Restart-Service StaffMobileKeyGateway.",
-  "upstream": "http://127.0.0.1:4000",
+  "upstream": "http://127.0.0.1:47300",
   "secretPath": "/k-<generated, at least 20 random characters>",
   "cookieKeyEnv": "GATEWAY_COOKIE_KEY",
   "passHours": 12,

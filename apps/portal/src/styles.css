@@ -422,3 +422,22 @@ table.desk td { vertical-align: middle; } table.desk .btn { min-width: 104px; }
 tr.clickable { cursor: pointer; } tr.clickable:hover td { background: var(--line-2, #f4efec); }
 tr.warning td { background: #fff8e6; }
 .mon-tile[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--brand); }
+
+/* ---- First-run setup (2.9) ---------------------------------------------------------------------- */
+.setup { min-height: 100%; background: var(--bg, #f7f5f0); padding: 40px 16px 60px; }
+.setup-card { max-width: 760px; margin: 0 auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px 32px 24px; }
+.setup-card h1 { margin: 0 0 6px; }
+.setup-kicker { margin: 0 0 6px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
+.setup-mark { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--ok-bg); color: #0f4a33; font-size: 22px; margin-bottom: 12px; }
+.setup-next { margin: 10px 0 20px; padding-left: 20px; line-height: 1.7; }
+.setup-more { margin: 2px 0 6px; font-size: 14px; color: var(--ink-2); }
+.setup-more summary { cursor: pointer; }
+@media (max-width: 600px) { .setup-card { padding: 20px 16px; } }
+
+/* ---- Breakfast (2.11) ------------------------------------------------------------------------------------------ */
+.bf-rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.bf-room { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: var(--radius); padding: 10px 12px; }
+.bf-room.done { border-left-color: var(--st-good); opacity: .75; } .bf-room.partly { border-left-color: var(--st-warn); } .bf-room.waiting { border-left-color: var(--brand); }
+.bf-room-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.bf-room-head strong { font-size: 22px; }
+.bf-room .btn { padding: 8px 14px; }

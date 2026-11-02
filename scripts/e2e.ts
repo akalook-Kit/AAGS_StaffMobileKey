@@ -726,6 +726,104 @@ async function main() {
   await call('PUT', `${H}/config/features`, admin, { ...f28, timeAttendance: true });
   ok((await call('GET', `${H}/attendance/today`, lakeAdmin)).status === 403, 'another hotel cannot see K Hotel Bana attendance');
 
+  console.log('\n2.9: first-run setup, passwords in the portal, database copies');
+  const su29 = await call('GET', `${API}/api/v1/setup`);
+  ok(su29.status === 200 && su29.json.needed === false, 'an installation that is set up does not offer the setup page');
+  ok((await call('POST', `${API}/api/v1/setup`, undefined, { code: 'AAAA-BBBB-CCCC', admin: { name: 'X Y', email: 'x@y.test', password: 'Long-enough-pass-1' } })).status === 409, 'the setup cannot be run again');
+  const sec29 = await call('GET', `${H}/secrets`, admin);
+  const csPw29 = sec29.json.secrets?.find((x: any) => x.ref === 'CS_TENANT_PASSWORD');
+  ok(sec29.status === 200 && csPw29?.source === 'server', 'Credential Services password set on the server shows as such', sec29.json);
+  ok(!JSON.stringify(sec29.json).includes('dev-tenant-password') && !JSON.stringify(sec29.json).includes('dev-smtp-password'), 'no password value is ever returned');
+  ok((await call('PUT', `${H}/secrets/CS_TENANT_PASSWORD`, admin, { value: 'other' })).status === 409, 'a value set on the server cannot be overridden in the portal');
+  ok((await call('GET', `${H}/secrets`, issuer)).status === 403, 'only administrators see the passwords page');
+  ok((await call('PUT', `${H}/secrets/JWT_SECRET`, admin, { value: 'x' })).status === 404, 'only the passwords the settings refer to can be set');
+  const nt29 = (await call('GET', `${H}/config/notifications`, admin)).json.data;
+  ok((await call('PUT', `${H}/config/notifications`, admin, { ...nt29, sms: { ...nt29.sms, secretRef: 'CS_TENANT_PASSWORD' } })).status === 400, 'settings cannot point the SMS key at the Credential Services password');
+  const bk29 = await call('GET', `${H}/backups`, admin);
+  ok(bk29.status === 200 && typeof bk29.json.enabled === 'boolean', 'backup page answers');
+  if (bk29.json.enabled) {
+    const made29 = await call('POST', `${H}/backups`, admin, {});
+    ok(made29.status === 200 && made29.json.bytes > 1000 && /^[0-9a-f]{64}$/.test(made29.json.sha256), `Back up now makes a checked copy (${made29.json.rows} rows)`);
+    ok((await call('GET', `${H}/backups`, admin)).json.copies.some((c: any) => c.name === made29.json.name && c.fingerprint), 'the copy is listed with its fingerprint');
+  }
+  ok((await call('POST', `${H}/backups`, auditor, {})).status === 403, 'only administrators make copies');
+
+  console.log('\n2.10: Visionline data arrives by itself (user groups, doors, people, keycards)');
+  const ug10 = await until('Engineering group read from Visionline', () => call('GET', `${H}/visionline/user-groups`, gm),
+    (r) => r.json?.some?.((g: any) => g.name === 'Engineering' && g.inVisionline), 90_000);
+  const eng10 = ug10.json.find?.((g: any) => g.name === 'Engineering');
+  ok(eng10?.inVisionline && eng10.people >= 2 && eng10.doors >= 1, `a user group that exists only in Visionline reached the portal by itself (Engineering: ${eng10?.people} people, ${eng10?.doors} doors)`, ug10.json);
+  const vl10 = (await call('GET', `${H}/config/visionline`, admin)).json.data;
+  ok(vl10.userGroups.includes('Engineering'), 'it joined the staff user groups without anyone typing it', vl10.userGroups);
+  const ov10 = await call('GET', `${H}/visionline/overview`, gm);
+  ok(ov10.status === 200 && ov10.json.counts.doors > 0 && ov10.json.counts.people > 0 && ov10.json.counts.validCards > 0 && ov10.json.connector?.liveCards, `overview: ${ov10.json.counts?.doors} doors, ${ov10.json.counts?.people} people, ${ov10.json.counts?.validCards} valid keycards; new cards live`, ov10.json);
+  const desk10 = await call('POST', `${SIM}/sim/desk/cards`, undefined, { userId: `vl-en-${Date.now() % 100000}`, givenName: 'Grace', surname: 'Mvogo', userGroup: 'Engineering', days: 30 });
+  ok(desk10.status === 200, 'a keycard is encoded at the Visionline desk (outside the platform)');
+  const card10 = await until('desk keycard recorded', () => call('GET', `${H}/visionline/cards?q=${desk10.json.regNo}&state=all`, gm),
+    (r) => r.json?.[0]?.holder_name === 'Grace Mvogo' && r.json[0].door_count > 0, 60_000);
+  const c10 = card10.json?.[0];
+  ok(c10?.reg_no === String(desk10.json.regNo) && c10.valid && c10.user_group === 'Engineering' && c10.door_count >= 1 && !c10.mobile_key,
+    `the new keycard is in the portal within seconds, with its holder, group and doors (${c10?.holder_name}, ${c10?.user_group}, ${c10?.door_count} doors)`, c10);
+  ok((await call('GET', `${H}/visionline/people?q=Mvogo`, gm)).json.some?.((u: any) => u.given_name === 'Grace' && u.valid_cards === 1), 'the new person is listed with one valid keycard');
+  ok((await call('GET', `${H}/visionline/cards`, issuer)).status === 403, 'key issuers without report rights do not see the Visionline card list');
+  ok((await call('POST', `${H}/visionline/refresh`, gm)).status === 403, 'hotel management cannot start a Visionline read');
+  const rf10 = await call('POST', `${H}/visionline/refresh`, admin);
+  ok(rf10.status === 200 && rf10.json.discovery?.commandId, 'an administrator can refresh everything now', rf10.json);
+
+  console.log('\n2.11: Breakfast at the restaurant (in-house list, serving, reports)');
+  const rest = await login('restaurant@khb.test');
+  const hr11 = await login('hr@khb.test');
+  const f11 = (await call('GET', `${H}/config/features`, admin)).json.data;
+  await call('PUT', `${H}/config/features`, admin, { ...f11, breakfast: false });
+  ok((await call('GET', `${H}/breakfast/day`, rest)).status === 409, 'breakfast switched off: the pages answer "switched off"');
+  ok((await call('PUT', `${H}/config/features`, admin, { ...f11, breakfast: true })).status === 200, 'an administrator switches Breakfast on (Settings → Modules)');
+  ok((await call('GET', `${H}/attention`, admin)).json.breakfast === true, 'the Breakfast page appears in the menu');
+  const day11 = await call('GET', `${H}/breakfast/day`, rest);
+  const today11 = day11.json.today as string;
+  const next11 = new Date(Date.parse(`${today11}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  ok(day11.status === 200 && /^\d{4}-\d{2}-\d{2}$/.test(today11) && day11.json.can.serve && !day11.json.can.manage, `the restaurant sees today's breakfast (${today11}, ${day11.json.timeZone}); may serve, not manage`);
+  const base11 = `9${String(Date.now()).slice(-5)}`;
+  const [rA, rB] = [`${base11}1`, `${base11}2`];
+  ok((await call('POST', `${H}/breakfast/stays/import`, rest, { rows: [{ room: rA }] })).status === 403, 'the restaurant cannot import the in-house list');
+  const imp11 = await call('POST', `${H}/breakfast/stays/import`, issuer, { rows: [
+    { ref: `E2E-${base11}-1`, room: rA, guestName: 'Family Test', adults: '2', children: '1', arrival: today11, departure: next11, breakfast: 'BB' },
+    { ref: `E2E-${base11}-2`, room: rB, guestName: 'Room Only', adults: 1, arrival: today11, departure: next11, breakfast: 'RO' },
+    { room: '', guestName: 'broken row' },
+  ] });
+  ok(imp11.status === 200 && imp11.json.added === 2 && imp11.json.rejected === 1, `PMS list imported: ${imp11.json.added} stays added, ${imp11.json.rejected} bad row reported`, imp11.json);
+  const again11 = await call('POST', `${H}/breakfast/stays/import`, issuer, { rows: [{ ref: `E2E-${base11}-1`, room: rA, guestName: 'Family Test', adults: 2, children: 1, arrival: today11, departure: next11 }] });
+  ok(again11.json.added === 0 && again11.json.updated === 1, 'importing the same reservation again updates it (no duplicate)', again11.json);
+  const s1 = await call('POST', `${H}/breakfast/serve`, rest, { room: rA, persons: 2 });
+  ok(s1.status === 200 && s1.json.kind === 'included', 'room with breakfast in the rate: 2 served as included', s1.json);
+  const over11 = await call('POST', `${H}/breakfast/serve`, rest, { room: rA, persons: 2, kind: 'included' });
+  ok(over11.status === 409 && over11.json.error?.code === 'NOT_INCLUDED', 'more than the rate allows is refused as included', over11.json);
+  ok((await call('POST', `${H}/breakfast/serve`, rest, { room: rA, persons: 1 })).json.kind === 'included', 'the third person (a child) is still in the rate');
+  ok((await call('POST', `${H}/breakfast/serve`, rest, { room: rA, persons: 1 })).json.kind === 'paying', 'a fourth person is recorded as paying');
+  ok((await call('POST', `${H}/breakfast/serve`, rest, { room: rB, persons: 1, kind: 'included' })).status === 409, 'a room-only stay cannot be served as included');
+  ok((await call('POST', `${H}/breakfast/serve`, rest, { room: rB, persons: 1 })).json.kind === 'paying', 'the room-only guest is recorded as paying');
+  ok((await call('POST', `${H}/breakfast/serve`, rest, { persons: 1 })).status === 400, 'a guest without a room needs a note');
+  const walk11 = await call('POST', `${H}/breakfast/serve`, rest, { persons: 2, note: `E2E visitors ${base11}` });
+  ok(walk11.status === 200 && walk11.json.kind === 'walk_in', 'walk-in guests are recorded', walk11.json);
+  ok((await call('POST', `${H}/breakfast/served/${walk11.json.id}/void`, rest, { reason: 'typed twice' })).status === 200, 'the waiter can undo an own entry');
+  ok((await call('POST', `${H}/breakfast/serve`, rest, { room: rA, persons: 1, date: next11 })).status === 403, 'the restaurant can only record today');
+  const v11 = (await call('GET', `${H}/breakfast/day`, gm)).json;
+  const ra11 = v11.rooms.find((r: any) => r.room === rA), rb11 = v11.rooms.find((r: any) => r.room === rB);
+  ok(ra11?.included === 3 && ra11.servedIncluded === 3 && ra11.servedPaying === 1 && ra11.status === 'done' && rb11?.status === 'not_included' && rb11.servedPaying === 1,
+    `today: room ${rA} 3 of 3 in the rate + 1 paying (done), room ${rB} not in the rate + 1 paying`, { ra11, rb11 });
+  ok(v11.served.some((s: any) => s.id === walk11.json.id && s.voided), 'the undone walk-in stays visible as undone (nothing is deleted)');
+  ok((await call('GET', `${H}/breakfast/day`, hr11)).status === 403, 'roles without breakfast rights do not see it');
+  ok((await call('POST', `${H}/breakfast/serve`, auditor, { room: rA, persons: 1 })).status === 403, 'auditors can look but not serve');
+  ok((await call('PUT', `${H}/breakfast/settings`, rest, { dayStartsAt: '03:00', serviceFrom: '06:00', serviceUntil: '10:30', countChildren: true, allowWalkIns: true })).status === 403, 'the restaurant cannot change breakfast settings');
+  const rep11 = await call('GET', `${H}/breakfast/report?from=${today11}&to=${today11}`, gm);
+  ok(rep11.status === 200 && rep11.json.days[0].served >= 3 && rep11.json.days[0].paying >= 2, `report: ${rep11.json.days?.[0]?.served} in the rate served, ${rep11.json.days?.[0]?.paying} paying`, rep11.json);
+  const csv11 = await fetch(`${H}/breakfast/export.csv?from=${today11}&to=${today11}`, { headers: { authorization: `Bearer ${gm}` } }).then((r) => r.text());
+  ok(csv11.includes(`${today11},${rA},Family Test,3,3,3,1,0`), 'CSV export has one line per room', csv11.slice(0, 300));
+  const pdf11 = await fetch(`${H}/breakfast/pdf`, { method: 'POST', headers: { authorization: `Bearer ${gm}`, 'content-type': 'application/json' }, body: '{}' });
+  ok(pdf11.status === 200 && (await pdf11.arrayBuffer()).byteLength > 1000 && /^[0-9a-f]{64}$/.test(pdf11.headers.get('x-report-sha256') ?? ''), 'the day sheet prints as a signed PDF');
+  const end11 = await call('POST', `${H}/breakfast/stays/import`, issuer, { rows: [{ ref: `E2E-${base11}-1`, room: rA, guestName: 'Family Test', adults: 2, children: 1, arrival: today11, departure: next11 }], replace: true });
+  ok(end11.status === 200 && end11.json.ended >= 1, `a full list with "replace" ends the stays it no longer contains (${end11.json.ended})`, end11.json);
+  ok(!(await call('GET', `${H}/breakfast/day`, gm)).json.rooms.some((r: any) => r.room === rB && r.stays.length), `room ${rB} left the in-house list`);
+
   console.log('\nGate: every request is traceable without exposing secrets');
   const trail = (await call('GET', `${H}/keys/${keyId}`, issuer)).json;
   const kt = await call('GET', `${H}/keys/${keyId}`, auditor);

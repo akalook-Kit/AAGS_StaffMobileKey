@@ -83,7 +83,13 @@ services:
       # Alert e-mail/SMS in the test setup go to the simulator's test sinks (see the lock simulator page).
       SECRET_SMTP_PASSWORD: ${SECRET_SMTP_PASSWORD:-dev-smtp-password}
       SECRET_SMS_API_KEY: ${SECRET_SMS_API_KEY:-sms-dev-password}
+      # 2.9 Passwords entered in the portal are sealed with this key (test value; on-premises the installer makes one).
+      SMK_SECRET_KEY: ${SMK_SECRET_KEY:-Zq3n0V2bH9mXc4kP7sT1wY6eA8dL5rUuJfGhKiMoNpQ}
+      # 2.9 Database copies (Settings -> Backups): daily at 02:30 and "Back up now".
+      SMK_BACKUP_DIR: /backups
+      SMK_BACKUP_LOG: /backups/backup.log
       LOG_LEVEL: info
+    volumes: [backups:/backups]
     ports: ["${SMK_BIND:-127.0.0.1}:${SMK_PORTAL_PORT:-14080}:4000"]
     mem_limit: 512m
     cpus: 1.0
@@ -125,5 +131,6 @@ networks:
 
 volumes:
   pgdata:
+  backups:
   certs:
   connector-data:

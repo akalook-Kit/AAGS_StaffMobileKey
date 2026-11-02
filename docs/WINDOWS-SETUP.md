@@ -137,6 +137,36 @@ The first run builds the image (5–10 minutes). When it prints **Ready.** the p
 The K Hotel branding (black and rose gold, your logo) is set in **Mobile app settings**. A logo
 uploaded there replaces it in the portal and the app immediately.
 
+### New in 2.11 — platform off port 4000, Breakfast
+
+| Feature | Where | What to check |
+|---|---|---|
+| Platform port | On-premises installer | The platform listens on 127.0.0.1:**47300** (or the next free port), never 4000, which PMS interfaces often use. Upgrading moves it automatically; `Install.cmd -PlatformPort 47310` chooses another. The installer prints every port it uses. (The local test setup on your PC still uses 4000.) |
+| Breakfast | **Settings → Modules → Breakfast**, then **Breakfast** | Import an in-house CSV (In-house list), serve rooms at **Restaurant**, check **Today** and print the day sheet. Sign in as **restaurant@khb.test** to see the waiter's view (Breakfast only). |
+
+See [BREAKFAST.md](BREAKFAST.md).
+
+### New in 2.10 — Visionline data arrives by itself
+
+| Feature | Where | What to check |
+|---|---|---|
+| Doors and user groups | **Visionline cards & people → User groups** | *Engineering* exists only in the simulated Visionline; it appears on its own (with its doors) and joins Settings → Visionline → Staff user groups. |
+| Keycards made at the desk | Lock simulator API: `POST http://localhost:14444/sim/desk/cards` with `{"userId":"vl-test-1","givenName":"Ann","surname":"Test","userGroup":"Engineering"}` | Within seconds the card is in **Visionline cards & people → Keycards** with the holder, group and doors. |
+| Refresh now | **Visionline cards & people** | Reads doors, groups, people and keycards again at once. |
+
+See [VISIONLINE-DATA.md](VISIONLINE-DATA.md).
+
+### New in 2.9 — all-in-one Windows installer, setup page, passwords and backups in the portal
+
+| Feature | Where | What to check |
+|---|---|---|
+| Passwords and keys | Sign in as **admin@khb.test** → **Settings → Alerts & notifications** (and **Credential Services**) | The panel *Passwords and keys* lists the mail password, SMS key and Credential Services account. In the test setup they come from the server's settings ("set in the server's own settings"). On a hotel server you type them here once; they can be changed or removed, never read back. |
+| Backups | **Settings → Backups** | **Back up now** makes a checked copy of the database; the list shows it with its fingerprint. A copy is also made every night at 02:30. |
+| First-run setup | Only on a new on-premises installation | After `Install.cmd` the portal opens on *Set up this installation*: hotel name, time zone, country, System ID, first administrator. See [ON-PREMISES.md](ON-PREMISES.md). |
+
+The on-premises package (`staff-mobile-key-onprem-2.9.0.zip`) now carries its own Node.js and PostgreSQL: on the
+Vingcard server double-click **Install.cmd**, nothing else needs installing.
+
 ### New in 2.8 — Time & attendance, hiding modules, sturdier screens
 
 | Feature | Where | What to check |
@@ -240,7 +270,7 @@ Runs inside the container, so Node.js is not needed:
 .\scripts\windows\test.ps1          # full run including the 2-minute expiry check
 ```
 
-It should end with `265 passed, 0 failed` (`262 passed` with `-Fast`).
+It should end with `313 passed, 0 failed` (`310 passed` with `-Fast`).
 
 ## Step 10 — Test the staff app on your phone (optional)
 

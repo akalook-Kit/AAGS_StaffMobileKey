@@ -7,6 +7,8 @@ import { enqueue, newCorrelationId } from './commands.ts';
 import { doorResolver } from './battery.ts';
 import { ApiError } from './lib/errors.ts';
 import { isOnline } from './routes/portal.ts';
+import { randomUUID } from 'node:crypto';
+import { readyConnector, requestDiscovery } from './visionline-sync.ts';
 
 /**
  * Visionline directory snapshot for management reports (opt-in, read-only). The connector streams parts to
@@ -15,26 +17,30 @@ import { isOnline } from './routes/portal.ts';
  */
 const SYNC_TTL_SEC = 40 * 60;
 
-export async function requestDirectorySync(hotelId: string, operatorId: string | null) {
+export async function requestDirectorySync(hotelId: string, operatorId: string | null, opts: { userIds?: string[] } = {}) {
   const vl = await getConfig(pool, hotelId, 'visionline');
   const ds = vl?.directorySync;
+  const partial = Boolean(opts.userIds?.length);
   if (!ds?.enabled) throw new ApiError(409, 'SYNC_OFF', 'Reading people and keycards from Visionline is switched off (Settings → Reports & sync).');
-  const conn = await one(pool, `SELECT id, last_seen_at, health FROM connectors WHERE hotel_id=$1 AND status='ACTIVE' AND health->'capabilities' ? 'directory-sync'
-    ORDER BY last_seen_at DESC NULLS LAST LIMIT 1`, [hotelId]);
-  if (!conn) throw new ApiError(409, 'CONNECTOR_CAPABILITY', 'Reports need connector 0.6.0 or newer. Update the connector on the Visionline PC.');
+  const conn = await one(pool, `SELECT id, last_seen_at, health FROM connectors WHERE hotel_id=$1 AND status='ACTIVE' AND health->'capabilities' ? $2
+    ORDER BY last_seen_at DESC NULLS LAST LIMIT 1`, [hotelId, partial ? 'directory-sync-users' : 'directory-sync']);
+  if (!conn) throw new ApiError(409, 'CONNECTOR_CAPABILITY', partial ? 'Recording cards as they are made needs connector 0.9.0 or newer.'
+    : 'Reading people and keycards needs connector 0.6.0 or newer, installed for the hotel\'s own Visionline (not with -NoWatch).');
   if (!isOnline(conn.last_seen_at)) throw new ApiError(409, 'CONNECTOR_OFFLINE', 'The hotel connector is offline.');
+  if (!conn.health?.credentialsConfigured) throw new ApiError(409, 'NOT_CONFIGURED', 'The connector has no Visionline account yet (Settings → Visionline).');
   const running = await one(pool, `SELECT id FROM directory_syncs WHERE hotel_id=$1 AND status='RUNNING' AND started_at > now() - make_interval(secs => $2)`, [hotelId, SYNC_TTL_SEC]);
   if (running) return { syncId: running.id as string, alreadyRunning: true };
   const last = await one(pool, `SELECT max(updated_at) AS t FROM vl_alarms WHERE hotel_id=$1`, [hotelId]);
   const alarmsSince = last?.t ? new Date(new Date(last.t).getTime() - 3600_000).toISOString() : new Date(Date.now() - 30 * 86_400_000).toISOString();
   const payload = {
-    userGroups: ds.scope === 'all' ? null : (vl.userGroups ?? []), includeCards: ds.includeCards, includeAlarms: ds.includeAlarms, alarmsSince, maxUsers: ds.maxUsers,
+    userGroups: ds.scope === 'all' ? null : (vl.userGroups ?? []), includeCards: ds.includeCards, includeAlarms: ds.includeAlarms && !partial, alarmsSince, maxUsers: ds.maxUsers,
+    ...(partial ? { userIds: [...new Set(opts.userIds)].slice(0, 200) } : {}),
   };
   return tx(async (c) => {
     await lockHotel(c, hotelId);
-    const cmd = await enqueue(c, { hotelId, type: 'SYNC_DIRECTORY', payload, idempotencyKey: `directory:${Date.now()}`, correlationId: newCorrelationId(), ttlSec: SYNC_TTL_SEC });
-    await c.query(`INSERT INTO directory_syncs (id, hotel_id, requested_by) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING`, [cmd.id, hotelId, operatorId]);
-    await audit(c, { hotelId, actorType: operatorId ? 'operator' : 'system', actorId: operatorId, action: 'directory.sync_requested', targetType: 'command', targetId: cmd.id, details: { scope: ds.scope, includeCards: ds.includeCards, includeAlarms: ds.includeAlarms } });
+    const cmd = await enqueue(c, { hotelId, type: 'SYNC_DIRECTORY', payload, idempotencyKey: `directory:${randomUUID()}`, correlationId: newCorrelationId(), ttlSec: partial ? 600 : SYNC_TTL_SEC });
+    await c.query(`INSERT INTO directory_syncs (id, hotel_id, requested_by, partial, user_ids) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING`, [cmd.id, hotelId, operatorId, partial, partial ? payload.userIds : null]);
+    if (!partial) await audit(c, { hotelId, actorType: operatorId ? 'operator' : 'system', actorId: operatorId, action: 'directory.sync_requested', targetType: 'command', targetId: cmd.id, details: { scope: ds.scope, includeCards: ds.includeCards, includeAlarms: ds.includeAlarms } });
     return { syncId: cmd.id as string, alreadyRunning: false };
   });
 }
@@ -66,7 +72,7 @@ export async function applyDirectoryChunk(hotelId: string, ch: DirectoryChunk) {
         ON CONFLICT (hotel_id, reg_no) DO UPDATE SET card_holder=EXCLUDED.card_holder, format=EXCLUDED.format, starts_at=EXCLUDED.starts_at, expires_at=EXCLUDED.expires_at,
           cancelled=EXCLUDED.cancelled, discarded=EXCLUDED.discarded, overridden=EXCLUDED.overridden, expired=EXCLUDED.expired, not_issued=EXCLUDED.not_issued,
           issued_count=EXCLUDED.issued_count, door_count=EXCLUDED.door_count, doors=EXCLUDED.doors, door_groups=EXCLUDED.door_groups, time_schedule=EXCLUDED.time_schedule,
-          key_id=EXCLUDED.key_id, seen_sync=EXCLUDED.seen_sync, active=true, last_seen_at=now()`,
+          key_id=COALESCE(EXCLUDED.key_id, vl_cards.key_id), seen_sync=EXCLUDED.seen_sync, active=true, last_seen_at=now(), source='sync'`,
         [hotelId, k.regNo, k.cardHolder, k.format, toUtc(k.startTime, tz), toUtc(k.expireTime, tz), k.cancelled, k.discarded, k.overridden, k.expired, k.notIssued, k.issuedCount,
           k.doors.length, k.doors, k.doorGroups, k.timeSchedule, ch.syncId]);
     }
@@ -83,7 +89,14 @@ export async function applyDirectoryChunk(hotelId: string, ch: DirectoryChunk) {
     }
     await c.query(`UPDATE directory_syncs SET users=users+$2, cards=cards+$3, alarms=alarms+$4 WHERE id=$1`, [ch.syncId, ch.users.length, ch.cards.length, ch.alarms.length]);
 
-    if (ch.final) {
+    if (ch.final && sync.partial) {
+      // A few people re-read after a card change: their cards that are no longer valid leave the list.
+      const ids: string[] = sync.user_ids ?? [];
+      await c.query(`UPDATE vl_cards SET active=false WHERE hotel_id=$1 AND active AND card_holder = ANY($2::text[]) AND seen_sync IS DISTINCT FROM $3`, [hotelId, ids, ch.syncId]);
+      await c.query(`UPDATE vl_cards k SET user_group=u.user_group FROM vl_users u WHERE k.hotel_id=$1 AND k.seen_sync=$2 AND u.hotel_id=k.hotel_id AND u.user_id=k.card_holder`, [hotelId, ch.syncId]);
+      await c.query(`UPDATE directory_syncs SET status='SUCCEEDED', finished_at=now(), notes=$2 WHERE id=$1`, [ch.syncId, JSON.stringify(ch.notes)]);
+      await discoverNewGroups(c, hotelId);
+    } else if (ch.final) {
       // Complete snapshot: everything not seen this time is no longer in Visionline (or no longer valid).
       await c.query(`UPDATE vl_users SET active=false WHERE hotel_id=$1 AND active AND seen_sync IS DISTINCT FROM $2`, [hotelId, ch.syncId]);
       await c.query(`UPDATE vl_cards SET active=false WHERE hotel_id=$1 AND active AND seen_sync IS DISTINCT FROM $2`, [hotelId, ch.syncId]);
@@ -97,9 +110,17 @@ export async function applyDirectoryChunk(hotelId: string, ch: DirectoryChunk) {
       await c.query(`UPDATE directory_syncs SET status='SUCCEEDED', finished_at=now(), notes=$2 WHERE id=$1`, [ch.syncId, JSON.stringify(ch.notes)]);
       const s = await one(c, 'SELECT users, cards, alarms FROM directory_syncs WHERE id=$1', [ch.syncId]);
       await audit(c, { hotelId, actorType: 'connector', action: 'directory.synced', targetType: 'command', targetId: ch.syncId, details: { users: s.users, cards: s.cards, alarms: s.alarms, notes: ch.notes } });
+      await discoverNewGroups(c, hotelId);
     }
     return { ok: true };
   });
+}
+
+/** People read from Visionline belong to user groups the portal has not read yet: read them (doors) now. */
+async function discoverNewGroups(c: import('pg').PoolClient, hotelId: string) {
+  const fresh = await one(c, `SELECT count(DISTINCT u.user_group)::int AS n FROM vl_users u WHERE u.hotel_id=$1 AND u.active AND u.user_group IS NOT NULL AND u.user_group <> ''
+    AND NOT EXISTS (SELECT 1 FROM resources r WHERE r.hotel_id=u.hotel_id AND r.kind='usergroup' AND r.active AND r.external_id=u.user_group)`, [hotelId]);
+  if (fresh?.n) await requestDiscovery(c, hotelId, null, `${fresh.n} new user group(s) found on Visionline people`);
 }
 
 /** Command result: only a failure needs recording here (the final part already completed a successful sync). */
@@ -114,8 +135,9 @@ export async function scheduleDirectorySyncs() {
     const vl = await getConfig(pool, h.id, 'visionline');
     const ds = vl?.directorySync;
     if (!ds?.enabled) continue;
+    if (!(await readyConnector(pool, h.id))) continue; // no connector online with a Visionline account yet
     await pool.query(`UPDATE directory_syncs SET status='FAILED', finished_at=now(), error='No answer from the connector in time' WHERE hotel_id=$1 AND status='RUNNING' AND started_at < now() - make_interval(secs => $2)`, [h.id, SYNC_TTL_SEC]);
-    const last = await one(pool, `SELECT started_at, status FROM directory_syncs WHERE hotel_id=$1 ORDER BY started_at DESC LIMIT 1`, [h.id]);
+    const last = await one(pool, `SELECT started_at, status FROM directory_syncs WHERE hotel_id=$1 AND NOT partial ORDER BY started_at DESC LIMIT 1`, [h.id]);
     // After a failure, try again within the hour rather than waiting a whole period.
     const waitMs = (last?.status === 'FAILED' ? Math.min(ds.everyHours, 1) : ds.everyHours) * 3600_000;
     if (last && Date.now() - new Date(last.started_at).getTime() < waitMs) continue;

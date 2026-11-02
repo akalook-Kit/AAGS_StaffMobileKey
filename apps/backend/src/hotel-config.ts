@@ -72,6 +72,8 @@ export const SCHEMAS = {
     mobileKeysVisibleTo: z.enum(['everyone', 'administrators']).default('everyone'),
     /** 2.8 Time & attendance. */
     timeAttendance: z.boolean().default(false),
+    /** 2.11 Breakfast: in-house list and restaurant check-off. */
+    breakfast: z.boolean().default(false),
     batteryMonitoring: z.boolean().default(false),
     maintenance: z.boolean().default(false),
     guestKeys: z.boolean().default(false),
@@ -154,6 +156,17 @@ export const SCHEMAS = {
       /** Corrections must give a reason. */
       requireReason: z.boolean().default(true),
     }).prefault({}),
+    /** 2.11 Breakfast. */
+    breakfast: z.object({
+      /** The breakfast day changes at this time (hotel time): before it, the restaurant still sees yesterday. */
+      dayStartsAt: z.string().regex(/^\d{2}:\d{2}$/).default('03:00'),
+      serviceFrom: z.string().regex(/^\d{2}:\d{2}$/).default('06:00'),
+      serviceUntil: z.string().regex(/^\d{2}:\d{2}$/).default('10:30'),
+      /** Children count as breakfast guests (they are served too). */
+      countChildren: z.boolean().default(true),
+      /** Guests without breakfast in their rate, and rooms not on the list, can still be served and are reported as paying. */
+      allowWalkIns: z.boolean().default(true),
+    }).prefault({}),
     /** Phase 2 maintenance requests. */
     maintenance: z.object({
       /** Due time given to a new request by priority, in hours. */
@@ -180,6 +193,8 @@ export const SCHEMAS = {
     /** Future start times: "hold" = the platform creates the key in Visionline at its start time (Web API §7.6.2);
      *  "send" = create it now with startTime in the future (only once ASSA ABLOY confirms Visionline accepts it). */
     startTimeMode: z.enum(['hold', 'send']).default('hold'),
+    /** 2.10 Read doors, door groups, user groups and time schedules from Visionline every N hours (0 = only by hand). */
+    discoveryEveryHours: z.number().int().min(0).max(168).default(6),
     /** Management reports: read Visionline's people, valid keycards and lock alarms (read-only, opt-in).
      *  scope "staffGroups" reads the user groups listed above; "all" reads every Visionline user. */
     directorySync: z.object({
@@ -194,8 +209,9 @@ export const SCHEMAS = {
   credential_services: z.object({
     baseUrl: z.string().url(),
     systemId: z.number().int(),
-    tenantUserRef: z.string().min(1),
-    tenantPasswordRef: z.string().min(1),
+    // Secret references are confined to their own family, so a setting cannot point at another secret.
+    tenantUserRef: z.string().regex(/^CS_[A-Z0-9_]{1,57}$/, 'Must start with CS_'),
+    tenantPasswordRef: z.string().regex(/^CS_[A-Z0-9_]{1,57}$/, 'Must start with CS_'),
   }),
   /** 2.7 How alerts reach people. Passwords and API keys are secret references (SECRET_<ref>), never stored here. */
   notifications: z.object({
@@ -205,7 +221,7 @@ export const SCHEMAS = {
       port: z.number().int().min(1).max(65535).default(587),
       security: z.enum(['starttls', 'tls', 'none']).default('starttls'),
       user: z.string().max(200).default(''),
-      passwordRef: z.string().min(1).max(60).default('SMTP_PASSWORD'),
+      passwordRef: z.string().regex(/^SMTP_[A-Z0-9_]{1,55}$/, 'Must start with SMTP_').default('SMTP_PASSWORD'),
       from: z.string().max(200).default(''),
     }).prefault({}),
     sms: z.object({
@@ -215,7 +231,7 @@ export const SCHEMAS = {
       provider: z.enum(['android-gateway', 'africastalking', 'http']).default('android-gateway'),
       url: z.string().max(300).default(''),
       username: z.string().max(200).default(''),
-      secretRef: z.string().min(1).max(60).default('SMS_API_KEY'),
+      secretRef: z.string().regex(/^SMS_[A-Z0-9_]{1,56}$/, 'Must start with SMS_').default('SMS_API_KEY'),
       sender: z.string().max(20).default(''),
       contentType: z.enum(['json', 'form']).default('json'),
       bodyTemplate: z.string().max(1000).default('{"to": "{to}", "message": "{text}"}'),
@@ -245,7 +261,7 @@ export type ConfigKind = keyof typeof SCHEMAS;
 export const CONFIG_KINDS = Object.keys(SCHEMAS) as ConfigKind[];
 
 /** Modules that exist in this release. Phase 3 modules cannot be switched on yet (spec §13.4.3). */
-const AVAILABLE_FEATURES = new Set(['staffMobileKeys', 'batteryMonitoring', 'maintenance', 'timeAttendance', 'mobileKeysVisibleTo']);
+const AVAILABLE_FEATURES = new Set(['staffMobileKeys', 'batteryMonitoring', 'maintenance', 'timeAttendance', 'breakfast', 'mobileKeysVisibleTo']);
 
 export async function validateConfig(db: Db, hotelId: string, kind: ConfigKind, raw: unknown) {
   const parsed = SCHEMAS[kind].safeParse(raw);

@@ -7,7 +7,7 @@ import { audit } from '../audit.ts';
 import { requirePerm } from '../auth.ts';
 import { badRequest, notFound } from '../lib/errors.ts';
 import { getConfig } from '../hotel-config.ts';
-import { getSecret } from '../config.ts';
+import { getSecret } from '../secret-store.ts';
 import { isOnline } from './portal.ts';
 import { CATEGORIES, CATEGORY_LABELS, checkHotel, channels, databaseInfo, defaultDiskPath, diskInfo, monitoringPolicy, sendTest } from '../monitoring/monitor.ts';
 import { normalisePhone } from '../monitoring/channels.ts';
@@ -92,7 +92,7 @@ export function monitoringRoutes(app: FastifyInstance) {
         connectors: conns.map((c) => ({ name: c.name, online: isOnline(c.last_seen_at), lastSeenAt: c.last_seen_at, version: c.health?.connectorVersion ?? null, visionline: c.health?.visionlineReachable ?? null, watch: c.health?.visionlineWatch ?? null })),
       },
       channels: { email: ch.email.enabled, sms: ch.sms.enabled, smsProvider: ch.sms.provider,
-        emailPassword: Boolean(getSecret(ch.email.passwordRef)), smsKey: Boolean(getSecret(ch.sms.secretRef)) },
+        emailPassword: Boolean(getSecret(ch.email.passwordRef, hotelId)), smsKey: Boolean(getSecret(ch.sms.secretRef, hotelId)) },
       messages,
       thresholds: { diskMinFreeGb: pol.diskMinFreeGb, dbMaxMb: pol.dbMaxMb, connectorOfflineMinutes: pol.connectorOfflineMinutes, cooldownMinutes: pol.notify.cooldownMinutes },
     };

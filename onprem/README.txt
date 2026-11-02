@@ -1,75 +1,105 @@
 STAFF MOBILE KEY - ON-PREMISES PLATFORM (Vingcard / Visionline server, any hotel)
-=======================================================================
+=================================================================================
 
-Everything runs on the Visionline server. Nothing is hosted in the cloud.
+Everything runs on the Visionline server. Nothing is hosted in the cloud, and nothing has to be installed
+beforehand: this package carries its own Node.js and PostgreSQL, used only by Staff Mobile Key.
 
-  Visionline (same server) <-- connector --> platform (127.0.0.1:4000) <-- gateway --> browsers / staff phones
-                                                    |                          | 8443  hotel network only
-                                                PostgreSQL (localhost)         | 9443  hotel public IP(s) only,
-                                                                               |       secret path required
+  Visionline (same server) <-- connector --> platform (127.0.0.1:47300) <-- gateway --> browsers / staff phones
+                                                 |                          | 8443  hotel network only
+                                       database (127.0.0.1 only)            | 9443  hotel public IP(s) only,
+                                                                            |       secret path required
 
-WHAT YOU NEED ON THE SERVER
-  - Windows Server 2016 or later (or Windows 10/11 Pro), administrator rights
-  - Node.js 22 LTS installed for all users        https://nodejs.org
-  - PostgreSQL 16 for Windows, port 5432           https://www.postgresql.org/download/windows/
-    (note the password of the 'postgres' user; it is asked once and not stored)
-  - .NET Framework 4.8 (already part of Windows)
+WHAT THE SERVER NEEDS
+  - Windows Server 2016 or newer (or Windows 10/11 Pro), 64-bit, an administrator account
+  - .NET Framework 4.8 (part of Windows)
+  - 2 GB free disk space (more as the database grows; Monitoring warns below 50 GB)
 
-INSTALL (PowerShell "Run as administrator", in this folder)
-  Unblock-File .\*.ps1; Unblock-File .\connector\*.ps1
-  .\install-onprem.ps1 -HotelName "Hotel name" -TimeZone Africa/Nairobi -Country KE -SystemId 1234 `
-      -ServerName vingcard-srv.hotel.local
-  With an outside entrance (hotel's own public IPs only):
-  .\install-onprem.ps1 -HotelName "Hotel name" -TimeZone Africa/Nairobi -Country KE -SystemId 1234 `
-      -ServerName vingcard-srv.hotel.local -ExternalPort 9443 -AllowExternal "41.202.219.10/32"
+INSTALL
+  1. Unzip the package, for example to C:\Vingcard Files\Onprem\
+  2. Double-click Install.cmd (Windows asks for administrator rights). No questions are asked.
+  3. At the end the portal opens on this server with the FIRST-RUN SETUP page and the setup code filled in.
+     Enter the hotel's details (name, time zone, country, ASSA ABLOY System ID), the first administrator,
+     and optionally the Credential Services account. Then sign in.
+     The setup code is also in C:\ProgramData\StaffMobileKey\Platform\setup-code.txt (administrators only).
+  4. In the portal: Connector health (the connector on this server shows Online), Settings -> Visionline
+     (Visionline account, encrypted for the connector), Branding, then Account -> two-step sign-in.
 
-  Nothing about a particular hotel is built in: name, time zone and country are asked once; logo, colours,
-  details and the system number printed on reports are set later in the portal.
-  The script asks for: the postgres password (once), the Credential Services user/password (or Enter to set
-  later), the first administrator's e-mail and password. It prints the portal address, the certificate
-  fingerprint and the SECRET PATH for outside access. Keep the secret path like a password.
-  Do NOT add -ReadOnly on the hotel's own server: it stops key issuing (it is only for tests against another
-  hotel's Visionline).
+  Install.cmd options (add them after the name in a command prompt, all optional):
+    -ServerName vingcard01.hotel.local   name staff use for this server (default: the computer name)
+    -LanPort 8443                        HTTPS port on the hotel network
+    -PlatformPort 47300                  internal port of the platform (127.0.0.1 only). Default 47300 or the next
+                                         free one; never 4000 (often used by PMS interfaces)
+    -ExternalPort 9443 -AllowExternal "41.202.219.10/32"   outside access (see below)
+    -CertPfx C:\certs\server.pfx         a real certificate instead of the self-signed one
+    -NoBrowser                           do not open the portal at the end
+    -ReadOnly -NoWatch                   ONLY for tests against a Visionline that is not the hotel's own
+                                         (never on the hotel's own server: it stops key issuing)
+
+PORTS
+  8443 (hotel network) and, if opened, the external port: the only ports other computers can reach.
+  On 127.0.0.1 only: platform 47300 (or the next free one), database 5433 (or the next free one), connector
+  status page 8090 (47390 if 8090 is taken). The installer prints the ports it used at the end.
+  Upgrading from 2.10 or older moves the platform off port 4000 automatically.
+
+WHAT IS INSTALLED
+  Programs:  C:\Program Files\StaffMobileKey\   (Platform, Connector, Runtime)
+  Data:      C:\ProgramData\StaffMobileKey\     (database, settings, encrypted secrets, logs, database copies)
+  Services:  StaffMobileKeyDatabase (NETWORK SERVICE), StaffMobileKeyPlatform, StaffMobileKeyGateway,
+             StaffMobileKeyConnector (LOCAL SERVICE). All start with Windows and restart on failure.
+  Desktop:   "Staff Mobile Key" shortcut to the portal.
+  Runtime\VERSIONS.txt lists the bundled Node.js / PostgreSQL versions and the SHA-256 of every program
+  file, for the hotel's antivirus or application allow-list.
+
+PASSWORDS
+  Typed in the portal, stored encrypted, never shown again:
+    Settings -> Credential Services -> Passwords and keys      (ASSA ABLOY account)
+    Settings -> Alerts & notifications -> Passwords and keys   (mail server password, SMS key)
+    Settings -> Visionline                                     (Visionline account, encrypted for the connector)
+  The database password, the session key and the certificate password are made by the installer and kept
+  encrypted with Windows DPAPI. set-platform-secrets.ps1 is only for special cases (values set there win).
+
+VISIONLINE CERTIFICATE
+  The installer reads Visionline's certificate from https://localhost/api/v1 on this server and trusts
+  exactly that certificate (verification stays on). If Visionline runs on another computer or was not
+  reachable, the installer says so: run connector\visionline-probe.ps1 -TlsOnly -SaveCert C:\vl.crt, check
+  the fingerprint with the Visionline administrator, then Install.cmd -CaFile C:\vl.crt (see the guide).
 
 OUTSIDE ACCESS ("public IP + special pathway")
   1. On the hotel firewall/router: forward TCP <public IP>:443 to <server LAN IP>:9443. Nothing else.
   2. Only addresses in -AllowExternal can even open a connection; others are dropped before TLS.
   3. The first visit must be https://<public IP>/<secret path>/ - it gives the browser a 12-hour pass.
      Without the path or a pass, the answer is "Not found". 20 misses ban the address for 30 minutes.
-  4. Sign-in (with MFA for administrators) is still required after that.
-  5. Staff app: build it with server address https://<public IP>/<secret path> (see ON-PREMISES.md)
-  The connector API and Credential Services callbacks are never reachable from outside. Credential Services
-  is POLLED from the server (outbound HTTPS only), so nothing inbound from the internet is needed for keys.
+  4. Sign-in (with two-step sign-in for administrators) is still required after that.
+  Change it later: set-external-access.ps1 -Show | -AllowExternal ... | -AddAddress ... | -Disable
+  Credential Services is POLLED from the server (outbound HTTPS only); nothing comes in from the internet
+  for keys.
 
-DAY-TO-DAY
-  Portal (hotel network):  https://<server name>:8443/
-  Logs:                    C:\ProgramData\StaffMobileKey\Platform\logs\
-  Backups (02:30 daily):   C:\ProgramData\StaffMobileKey\Platform\backups\   (copy them off the server)
-  Change passwords:        .\set-platform-secrets.ps1   (Credential Services, alert e-mail SMTP, SMS gateway)
-  Database size / copy:    .\database-tools.ps1 -Action Size | Copy -Destination E:\ | Verify | Optimize | Restore
-  Change allowed IPs:      .\set-external-access.ps1 -Show | -AllowExternal ... | -AddAddress ... | -Disable
+DAY-TO-DAY (the tools are also in C:\Program Files\StaffMobileKey\Platform)
+  Portal (hotel network):  https://<server name>:8443/      On the server itself: http://127.0.0.1:47300/ (shown by the installer)
+  Database copies:         every day at 02:30 (14 kept) and "Back up now" in Settings -> Backups,
+                           in C:\ProgramData\StaffMobileKey\Platform\backups  - copy that folder off the server
+  Database tools:          .\database-tools.ps1 -Action Size | List | Copy -Destination E:\ | Verify -File ...
+                                                | Optimize | Restore -File ...
+  Logs:                    C:\ProgramData\StaffMobileKey\Platform\logs\   (install-*.log for each installation)
   Restart:                 Restart-Service StaffMobileKeyPlatform, StaffMobileKeyGateway
 
 UPGRADE
-  Unzip the new version and run .\install-onprem.ps1 (no options needed: hotel, ports, allowed IPs are kept). It backs up the database first
-  (backups\pre-upgrade-<version>-*.dump) and keeps the old program in "Platform.previous".
+  Unzip the new version and double-click its Install.cmd. Everything is kept (hotel, settings, passwords,
+  ports, allowed IPs, certificate). A copy of the database is made first (backups\smk-*-pre-upgrade.smkbak)
+  and the old program is kept in "Platform.previous".
+  Older versions that used a separately installed PostgreSQL keep using it.
 
 ROLLBACK
   .\rollback-onprem.ps1                       program files only
   .\rollback-onprem.ps1 -RestoreDatabase      also the database as it was before the upgrade
 
-RESTORING A BACKUP (as administrator)
-  Stop-Service StaffMobileKeyGateway, StaffMobileKeyPlatform
-  & 'C:\Program Files\PostgreSQL\16\bin\pg_restore.exe' -h 127.0.0.1 -U postgres -d smk --clean --if-exists --no-owner `
-      C:\ProgramData\StaffMobileKey\Platform\backups\smk-YYYYMMDD-HHMM.dump
-  Start-Service StaffMobileKeyPlatform, StaffMobileKeyGateway
-
 UNINSTALL
-  .\uninstall-onprem.ps1   (keeps data and the database; add -RemoveData to delete settings and backups)
+  Uninstall.cmd                 removes services and programs, KEEPS the data (Install.cmd uses it again)
+  Uninstall.cmd -RemoveData     also deletes the database, settings and copies (asks first)
 
 SECURITY NOTES
-  - Secrets (database password, JWT key, Credential Services password, certificate password) are encrypted
-    with Windows DPAPI for this machine and readable only by SYSTEM, Administrators and LOCAL SERVICE.
-  - The platform listens on 127.0.0.1 only; PostgreSQL should listen on localhost only.
-  - Visionline is used read-only when installed with -ReadOnly.
+  - The platform and the database listen on 127.0.0.1 only; only the gateway port(s) are open.
+  - The database runs as NETWORK SERVICE, the platform, gateway and connector as LOCAL SERVICE; none as
+    an administrator. The data folder is readable by SYSTEM, Administrators and those accounts only.
+  - Database copies contain the whole database: keep the copies you take off the server safe.
   - Full guide: docs\ON-PREMISES.md in the project.

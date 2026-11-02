@@ -7,6 +7,7 @@ import { pool } from './db.ts';
 // On-premises service: create the hotel from the installer's answers on first start (migrations always run).
 if (process.env.PROVISION_ON_START === '1') { const { provision } = await import('./provision-lib.ts'); await provision(); }
 else await migrate();
+await (await import('./secret-store.ts')).loadStoredSecrets();
 const app = await buildServer();
 const jobs = startJobs();
 await app.listen({ port: config.port, host: config.host });

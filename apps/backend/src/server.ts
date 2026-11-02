@@ -17,6 +17,10 @@ import { insightsRoutes } from './routes/insights.ts';
 import { eventRoutes } from './routes/events.ts';
 import { monitoringRoutes } from './routes/monitoring.ts';
 import { attendanceRoutes } from './routes/attendance.ts';
+import { setupRoutes } from './routes/setup.ts';
+import { serverRoutes } from './routes/server.ts';
+import { visionlineDataRoutes } from './routes/visionline-data.ts';
+import { breakfastRoutes } from './routes/breakfast.ts';
 
 export async function buildServer() {
   const app = Fastify({
@@ -53,6 +57,10 @@ export async function buildServer() {
   eventRoutes(app);
   monitoringRoutes(app);
   attendanceRoutes(app);
+  setupRoutes(app);
+  serverRoutes(app);
+  visionlineDataRoutes(app);
+  breakfastRoutes(app);
 
   const dist = resolve(config.portalDist);
   if (existsSync(dist)) {

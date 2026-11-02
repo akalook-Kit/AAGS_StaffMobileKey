@@ -186,6 +186,27 @@ export function registerCredentialServices(app: FastifyInstance, st: SimState, o
     }
     return { credentialID: c.credentialID, cancelled: true };
   });
+  // 2.10 "Encode a keycard at the Visionline desk": a plastic staff card made outside the platform. Visionline reports it
+  // through the card callback (status 1, valid) [Web API §7.14.2]; the user is created first if needed (like the desk does).
+  app.post('/sim/desk/cards', async (req, reply) => {
+    const b = (req.body ?? {}) as { userId?: string; givenName?: string; surname?: string; userGroup?: string; days?: number; doors?: string[] };
+    if (!b.userId) return reply.code(400).send({ code: 'userId required' });
+    let u = st.users.get(b.userId);
+    if (!u) {
+      if (!b.userGroup || !st.userGroups.has(b.userGroup)) return reply.code(400).send({ code: 'Unknown user group' });
+      u = { id: b.userId, givenName: b.givenName ?? 'New', surname: b.surname ?? 'Staff', userGroup: b.userGroup };
+      st.users.set(u.id, u);
+    }
+    const now = Date.now(), days = b.days ?? 30;
+    const group = st.userGroups.get(u.userGroup);
+    const doors = b.doors ?? (group?.doorOperations ?? []).flatMap((o: any) => o.doors ?? []);
+    const c: Card = { cardId: String(st.nextCardId++), credentialID: st.nextCredentialId++, cardHolder: u.id, issuedBy: 'desk', endpointId: '', doors, startTime: now - 60_000,
+      expireTime: now + days * 86_400_000, status: 'ISSUED', cancelled: false, checkedOut: new Set(), createdAt: now, accountName: '', label: '', usedAt: new Set(), plastic: true, vlStatus: 1 };
+    st.cards.set(c.credentialID, c);
+    vlPublish(st, 'cards', { registrationNumber: Number(c.cardId), status: 1, cancelTime: '', cardHolder: c.cardHolder, expireTime: toVisionlineLocal(new Date(c.expireTime), opts.timeZone ?? 'Africa/Douala') });
+    opts.log(`DESK encoded keycard ${c.cardId} for ${u.id} (${u.userGroup})`);
+    return { regNo: c.cardId, credentialID: c.credentialID, userId: u.id };
+  });
   // A lock reporting a battery event [Web API §7.14.1]: low 304, critical 305, exchanged 528, "below X volts" 1056–1081.
   // Battery events are not caused by a card, so registrationNumber is 0.
   app.post('/sim/doors/:id/battery', async (req, reply) => {

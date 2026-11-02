@@ -1,10 +1,13 @@
 <#
-  Staff Mobile Key - change the platform's secrets, then restart it. Run as administrator.
+  Staff Mobile Key - server-level secrets. Run as administrator.
+  NORMALLY NOT NEEDED (2.9): the Credential Services account, the mail (SMTP) password and the SMS key are
+  entered in the portal (Settings -> Credential Services / Alerts & notifications -> Passwords and keys).
+  A value set here OVERRIDES the portal and is shown there as "set in the server's own settings".
   Press Enter at a prompt to keep the current value. Values are typed, never shown, and stored encrypted
   for this machine (Windows DPAPI).
     - Credential Services user and password (ASSA ABLOY, from Visionline Options -> Mobile Access)
     - JWT signing key (rotating it signs everyone out)
-    - Alert e-mail password (SMTP) and SMS gateway password / API key (Settings -> Alerts & notifications)
+    - Alert e-mail password (SMTP) and SMS gateway password / API key
 #>
 param([string]$DataDir = (Join-Path $env:ProgramData 'StaffMobileKey\Platform'))
 $ErrorActionPreference = 'Stop'

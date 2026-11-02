@@ -53,11 +53,12 @@ export function phase2Routes(app: FastifyInstance) {
   // ---- What needs attention (navigation badges, overview) -----------------------------------------
   app.get(`${P}/hotels/:hotelId/attention`, async (req) => {
     const hotelId = hid(req);
-    const op = await requirePerm(req, hotelId, 'resources.read');
+    // The restaurant role has only breakfast rights; it still needs to know whether the Breakfast page is on.
+    const op = await requirePerm(req, hotelId, 'resources.read').catch((e) => requirePerm(req, hotelId, 'breakfast.read').catch(() => { throw e; }));
     const perms = permsIn(op, hotelId);
     const f = (await getConfig(pool, hotelId, 'features')) ?? {};
     const p = await maintenancePolicy(pool, hotelId);
-    const out: Record<string, unknown> = { batteryMonitoring: Boolean(f.batteryMonitoring), maintenance: Boolean(f.maintenance) };
+    const out: Record<string, unknown> = { batteryMonitoring: Boolean(f.batteryMonitoring), maintenance: Boolean(f.maintenance), breakfast: Boolean(f.breakfast) };
     if (f.batteryMonitoring && perms.has('battery.read')) {
       out.battery = await one(pool, `SELECT
           count(*) FILTER (WHERE a.severity='CRITICAL')::int AS critical, count(*) FILTER (WHERE a.severity='LOW')::int AS low,

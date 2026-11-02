@@ -16,7 +16,7 @@ connector or Visionline down) and stays red until the problem is fixed.
 | Battery critically low | Battery module | critical | Lock alarms and batteries |
 | Connector offline | No contact for 10 minutes | critical | System |
 | Visionline not reachable | The connector reports it cannot reach the Web API | critical | System |
-| **Disk space low** | Less than **50 GB** free on C: of the platform server, or of the Visionline PC (connector 0.8.0 reports it) | critical, **red until fixed** | System |
+| **Disk space low** | Less than **50 GB** free on C: of the platform server, or of the Visionline PC (connector 0.8.0 or newer reports it) | critical, **red until fixed** | System |
 | **Database large** | Database bigger than **500 MB** | warning | System |
 
 All limits are in **Settings -> Alert thresholds**. An alert is announced once when it opens and (optionally) once
@@ -68,18 +68,21 @@ time and the person (when the card belongs to a known person).
 **Monitoring -> System health** shows the database size against its limit, the largest tables, free space on the
 server and on the Visionline PC, the connector, the last automatic backup, and a 30-day trend (sampled hourly).
 
-Database tools on the on-premises server (PowerShell as administrator, in `C:\Program Files\StaffMobileKey\Platform`):
+Database tools on the on-premises server (PowerShell as administrator, in `C:\Program Files\StaffMobileKey\Platform`).
+Since 2.9 they use the Node.js that comes with Staff Mobile Key; no PostgreSQL client tools are needed:
 
 ```powershell
 .\database-tools.ps1 -Action Size                          # size and largest tables, free space on C:
-.\database-tools.ps1 -Action Copy -Destination E:\          # full copy with progress bar, fingerprint (.sha256) and read-back check
-.\database-tools.ps1 -Action Verify -File E:\smk-copy-20261015-0800.dump
+.\database-tools.ps1 -Action List                          # the copies kept on the server
+.\database-tools.ps1 -Action Copy -Destination E:\          # full copy with progress, fingerprint (.sha256) and read-back check
+.\database-tools.ps1 -Action Verify -File E:\smk-copy-20261016-0800.smkbak
 .\database-tools.ps1 -Action Optimize                       # VACUUM ANALYZE while running ("repair" of statistics and space)
-.\database-tools.ps1 -Action Restore -File E:\smk-copy-20261015-0800.dump   # saves the current database first, asks YES
+.\database-tools.ps1 -Action Restore -File E:\smk-copy-20261016-0800.smkbak   # saves the current data first, asks YES
 ```
 
-The automatic daily backup (02:30, 14 kept) continues as before (`backup-onprem.ps1`). On the Windows test PC the
-same tools for the Docker database are `.\scripts\windows\database-tools.ps1 -Action Size|Copy|Optimize|Restore`.
+The platform makes a copy every day at 02:30 (14 kept) and when an administrator presses **Back up now** in
+Settings -> Backups, which also lists the copies. On the Windows test PC the same tools for the Docker database
+are `.\scripts\windows\database-tools.ps1 -Action Size|Copy|Optimize|Restore`.
 
 ## Empty screens
 

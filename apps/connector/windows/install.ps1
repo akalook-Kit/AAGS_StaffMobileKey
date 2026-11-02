@@ -164,11 +164,17 @@ if ($ResetSecrets -or -not (Test-Path (Join-Path $DataDir 'secrets.enc'))) {
     Write-Host '  Press Enter to skip; you can paste it later on the status page.'
     $token = Read-Secret '  Platform connector token'
   }
-  do {
-    $adminPw = Read-Secret '  New password for the local status page (user "admin", at least 10 characters)'
-    $again = Read-Secret '  Same password again'
-    if ($adminPw -ne $again -or $adminPw.Length -lt 10) { Write-Host '  The passwords differ or are shorter than 10 characters. Try again.' -ForegroundColor Yellow }
-  } while ($adminPw -ne $again -or $adminPw.Length -lt 10)
+  if ($env:SMK_CONNECTOR_ADMIN_PASSWORD) {
+    # One-click on-premises installation: a random password, not shown. Choose your own any time with .\set-secrets.ps1
+    $adminPw = $env:SMK_CONNECTOR_ADMIN_PASSWORD
+    Write-Host '  Local status page password: random (set your own with set-secrets.ps1 if you need the status page).'
+  } else {
+    do {
+      $adminPw = Read-Secret '  New password for the local status page (user "admin", at least 10 characters)'
+      $again = Read-Secret '  Same password again'
+      if ($adminPw -ne $again -or $adminPw.Length -lt 10) { Write-Host '  The passwords differ or are shorter than 10 characters. Try again.' -ForegroundColor Yellow }
+    } while ($adminPw -ne $again -or $adminPw.Length -lt 10)
+  }
   $json = @{ platformToken = $token; adminPassword = $adminPw } | ConvertTo-Json -Compress
   $env:CONNECTOR_CONFIG = $cfgFile
   $prevEnc = $OutputEncoding

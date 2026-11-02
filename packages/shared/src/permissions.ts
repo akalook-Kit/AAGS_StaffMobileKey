@@ -40,6 +40,12 @@ export const PERMISSIONS = [
   'attendance.clock',
   /** People, shifts, leave, corrections, approving periods for payroll, attendance settings. */
   'attendance.manage',
+  /** 2.11 Breakfast: the day's in-house list and who has had breakfast (read; reports). */
+  'breakfast.read',
+  /** Mark guests as served at the restaurant. */
+  'breakfast.serve',
+  /** In-house list (import from the PMS, add, check out), breakfast settings. */
+  'breakfast.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -54,6 +60,7 @@ export const ROLES = [
   'HOTEL_MANAGEMENT',
   'HR_MANAGER',
   'TIMEKEEPER',
+  'RESTAURANT',
   'AUDITOR',
   'READ_ONLY',
 ] as const;
@@ -70,6 +77,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   HOTEL_MANAGEMENT: 'Hotel Management (reports)',
   HR_MANAGER: 'HR Manager (time & attendance)',
   TIMEKEEPER: 'Timekeeper (check-in desk)',
+  RESTAURANT: 'Restaurant (breakfast)',
   AUDITOR: 'Auditor',
   READ_ONLY: 'Read Only',
 };
@@ -83,18 +91,20 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'staff.read', 'key.read', 'key.approve_broad', 'key.revoke', 'endpoint.delete',
     'resources.read', 'templates.manage', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read', 'alerts.read', 'alerts.manage',
   ],
-  KEY_ISSUER: ['staff.read', 'staff.manage', 'endpoint.onboard', 'key.read', 'key.issue', 'key.revoke', 'resources.read'],
+  KEY_ISSUER: ['staff.read', 'staff.manage', 'endpoint.onboard', 'key.read', 'key.issue', 'key.revoke', 'resources.read', 'breakfast.read', 'breakfast.serve', 'breakfast.manage'],
   APPROVER: ['staff.read', 'key.read', 'key.approve_broad', 'resources.read'],
   // Phase 2. "work" = report, comment, attach and move a request up to Resolved; "manage" = assign, prioritise,
   // set due dates, close, cancel and reopen.
   MAINTENANCE_MANAGER: ['staff.read', 'resources.read', 'battery.read', 'battery.manage', 'maintenance.read', 'maintenance.work', 'maintenance.manage', 'connector.read', 'alerts.read'],
   TECHNICIAN: ['resources.read', 'battery.read', 'maintenance.read', 'maintenance.work'],
   // Read-only view for the general manager and department heads: every report, nothing they can change.
-  HOTEL_MANAGEMENT: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read', 'reports.read', 'audit.export', 'events.read', 'alerts.read', 'attendance.read'],
+  HOTEL_MANAGEMENT: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read', 'reports.read', 'audit.export', 'events.read', 'alerts.read', 'attendance.read', 'breakfast.read'],
   // Time & attendance: HR runs it; the timekeeper only checks people in and out at the desk.
   HR_MANAGER: ['staff.read', 'resources.read', 'attendance.read', 'attendance.clock', 'attendance.manage'],
   TIMEKEEPER: ['attendance.clock'],
-  AUDITOR: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read', 'alerts.read', 'attendance.read'],
+  // Breakfast: the restaurant team marks guests as served; front office (key issuers) keeps the in-house list.
+  RESTAURANT: ['breakfast.read', 'breakfast.serve'],
+  AUDITOR: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read', 'alerts.read', 'attendance.read', 'breakfast.read'],
   READ_ONLY: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read'],
 };
 
@@ -109,6 +119,7 @@ export const MODULES = {
   eventLog: { label: 'Event log', permissions: ['events.read'] },
   monitoring: { label: 'Monitoring', permissions: ['alerts.read', 'alerts.manage'] },
   attendance: { label: 'Time & attendance', permissions: ['attendance.read', 'attendance.clock', 'attendance.manage'] },
+  breakfast: { label: 'Breakfast', permissions: ['breakfast.read', 'breakfast.serve', 'breakfast.manage'] },
   battery: { label: 'Battery status', permissions: ['battery.read', 'battery.manage'] },
   maintenance: { label: 'Maintenance', permissions: ['maintenance.read', 'maintenance.work', 'maintenance.manage'] },
   audit: { label: 'Audit trail', permissions: ['audit.read', 'audit.export'] },

@@ -182,7 +182,7 @@ function Messages({ d, t }: { d: any; t: (v: string | null) => string }) {
   const ch = d.channels;
   return (
     <div className="panel">
-      <p className="small">E-mail: <b>{ch.email ? 'on' : 'off'}</b>{ch.email && !ch.emailPassword ? ' (no mail password set on the server)' : ''} · SMS: <b>{ch.sms ? `on (${ch.smsProvider})` : 'off'}</b>{ch.sms && !ch.smsKey ? ' (no SMS key set on the server)' : ''} · <Link to="/settings?tab=alerts">Settings → Alerts & notifications</Link></p>
+      <p className="small">E-mail: <b>{ch.email ? 'on' : 'off'}</b>{ch.email && !ch.emailPassword ? ' (mail password not entered yet)' : ''} · SMS: <b>{ch.sms ? `on (${ch.smsProvider})` : 'off'}</b>{ch.sms && !ch.smsKey ? ' (SMS key not entered yet)' : ''} · <Link to="/settings?tab=alerts">Settings → Alerts & notifications</Link></p>
       {!d.messages.length ? <NoData text="No messages sent yet" hint="They appear here as alerts are announced." />
         : <DataTable head={['Sent', 'Channel', 'To', 'Message', 'Result']} rows={d.messages.map((x: any) => [t(x.sent_at), x.channel === 'sms' ? 'SMS' : 'E-mail', x.recipient, x.subject, x.status === 'sent' ? 'Sent' : <span key="e" className="bad-text">Failed: {x.error}</span>])} />}
     </div>

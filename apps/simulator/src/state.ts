@@ -38,6 +38,8 @@ const DESK_STAFF: [string, string, string, string, string[], number][] = [
   ['vl-sc-02', 'Marthe', 'Nkoulou', 'Security', ['Main Entrance', 'Staff Entrance', 'Linen Store', 'GM Office'], 365], ['vl-mg-01', 'Laura', 'Kamga', 'Management', ['Staff Entrance', 'GM Office'], 365],
   ['vl-fo-01', 'Kevin', 'Atangana', 'Front Office', ['Main Entrance'], 90], ['vl-fo-02', 'Nadia', 'Eto', 'Front Office', ['Main Entrance'], 25],
   ['vl-fo-03', 'Joel', 'Manga', 'Front Office', ['Main Entrance'], 140],
+  // 2.10 A group that exists only in Visionline (not typed into the portal): it must reach the portal by itself.
+  ['vl-en-01', 'Moses', 'Ngono', 'Engineering', ['Staff Entrance', 'Gym'], 180], ['vl-en-02', 'Ruth', 'Bella', 'Engineering', ['Staff Entrance'], 90],
 ];
 
 /** Seed resembling a small hotel. In production all of this comes from the hotel's Visionline database. */
@@ -81,6 +83,7 @@ export function createState() {
       // Uniform access: Visionline forces these doors on every card of the group [Web API §5.29.3].
       ['Security', { id: 'Security', uniformAccess: true, doorOperations: op(['Main Entrance', 'Staff Entrance', 'Linen Store', 'GM Office']) }],
       ['Front Office', { id: 'Front Office', uniformAccess: false, doorOperations: op(['Main Entrance']) }],
+      ['Engineering', { id: 'Engineering', uniformAccess: false, doorOperations: op(['Staff Entrance', 'Gym']) }],
     ]),
     timeSchedules: [{ id: 'Card always', timeSchedule: 'Card always', description: 'No restriction' }, { id: 'Day shift', timeSchedule: 'Day shift', description: '06:00–18:00 every day' }],
     // Mirrors K Hotel Bana's real Mobile Access account in Visionline (name and System ID; no secrets).

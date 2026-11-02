@@ -14,7 +14,7 @@ import { readDirectory } from './visionline/directory.ts';
 /** Commands that change Visionline; refused in read-only mode. */
 const WRITES = new Set(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'CREATE_USER_GROUP']);
 
-export const CONNECTOR_VERSION = '0.8.0';
+export const CONNECTOR_VERSION = '0.9.0';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -92,7 +92,7 @@ export class Connector {
       visionlineWatch: this.watch.status,
       readOnly: this.cfg.visionline.readOnly,
       // Battery alarms ride on the Visionline watch; without the watch there are none to report.
-      capabilities: [...(this.cfg.visionline.watch ? ['battery-events', 'entrance-events'] : []), 'directory-sync'],
+      capabilities: [...(this.cfg.visionline.watch ? ['battery-events', 'entrance-events', 'directory-sync', 'directory-sync-users'] : [])],
       directorySync: this.directorySync,
       ...(this.disk ? { disk: this.disk } : {}),
     };
@@ -278,6 +278,11 @@ export class Connector {
     if (prior?.state === 'DONE' || prior?.state === 'REPORTED') { void this.report(cmd.id, prior.result!).catch(() => {}); return; }
     if (this.syncRunning) {
       if (this.syncRunning !== cmd.id) void this.report(cmd.id, { status: 'FAILED', error: { code: 'SYNC_BUSY', message: 'A directory sync is already running on the connector.', retryable: true } }).catch(() => {});
+      return;
+    }
+    if (!this.cfg.visionline.watch) {
+      // Installed with -NoWatch: this Visionline is not the hotel's own, so no people or cards are read from it.
+      void this.report(cmd.id, { status: 'FAILED', error: { code: 'SYNC_NOT_ALLOWED', message: 'This connector was installed for a Visionline that is not the hotel\'s own (-NoWatch): people and keycards are not read from it.', retryable: false } }).catch(() => {});
       return;
     }
     this.syncRunning = cmd.id;

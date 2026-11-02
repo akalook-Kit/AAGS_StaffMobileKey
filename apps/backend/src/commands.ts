@@ -5,6 +5,7 @@ import { config } from './config.ts';
 import { pool, tx, one, many, lockHotel, type Db } from './db.ts';
 import { audit } from './audit.ts';
 import { onIssueResult, onRevokeResult } from './keys.ts';
+import { adoptUserGroups, requestDiscovery } from './visionline-sync.ts';
 import { onDirectorySyncResult } from './directory.ts';
 
 /**
@@ -71,11 +72,16 @@ async function applyResult(c: pg.PoolClient, cmd: any, result: CommandResult) {
           VALUES ($1,$2,$3,$4,$5,true,now())
           ON CONFLICT (hotel_id, kind, external_id) DO UPDATE SET name=EXCLUDED.name, data=EXCLUDED.data, active=true, discovered_at=now()`,
         [cmd.hotel_id, i.kind, i.externalId, i.name, i.data ?? {}]);
+      // 2.10 Groups found in Visionline become the hotel's staff user groups by themselves.
+      await adoptUserGroups(c, cmd.hotel_id);
       return;
     }
     case 'VALIDATE_SETUP': return;
     case 'SYNC_DIRECTORY': return onDirectorySyncResult(c, cmd, result);
-    case 'SET_PROPERTY_CREDENTIALS': return; // outcome visible in command result and connector health
+    case 'SET_PROPERTY_CREDENTIALS':
+      // 2.10 With a working Visionline account, read doors and groups straight away (people follow on the minute).
+      if (result.status === 'SUCCEEDED') await requestDiscovery(c, cmd.hotel_id, null, 'Visionline account set');
+      return;
     case 'VERIFY_OPERATOR_CREDENTIALS': {
       const ok = result.status === 'SUCCEEDED';
       await c.query(`UPDATE operator_vl_credentials SET status=$3, status_detail=$4, verified_at=CASE WHEN $3='VERIFIED' THEN now() ELSE verified_at END, updated_at=now()

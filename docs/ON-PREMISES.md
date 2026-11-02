@@ -1,16 +1,19 @@
 # On-premises installation (Vingcard / Visionline server)
 
-Since release 2.5 the platform can run entirely on a hotel's Visionline server, with no cloud hosting. This guide is for the
-hotel's IT partner. The short version for the person at the server is `onprem\README.txt` in the package.
+Since release 2.5 the platform can run entirely on a hotel's Visionline server, with no cloud hosting. Since
+**2.9 the package is all-in-one**: it carries its own Node.js and PostgreSQL, so nothing has to be installed
+on the server first, and the hotel's details are entered in the portal (first-run setup page), not in
+PowerShell. This guide is for the hotel's IT partner. The short version for the person at the server is
+`README.txt` in the package.
 
 ## What runs where
 
 ```
                        Visionline server (Windows)
  ┌───────────────────────────────────────────────────────────────────────────┐
- │  Visionline ◄── connector (service) ──► platform 127.0.0.1:4000 (service)  │
+ │  Visionline ◄── connector (service) ──► platform 127.0.0.1:47300 (service) │
  │                                              │                             │
- │                                        PostgreSQL (localhost only)         │
+ │                              database (service, 127.0.0.1 only)            │
  │                                              ▲                             │
  │                                    gateway (service)                       │
  │                         :8443 hotel network     :9443 external entrance    │
@@ -20,64 +23,104 @@ hotel's IT partner. The short version for the person at the server is `onprem\RE
                   (portal, staff phones)        only the hotel's own public IP(s)
 ```
 
-| Part | Windows service | Listens on | Notes |
-|---|---|---|---|
-| Platform (API, portal, jobs) | `StaffMobileKeyPlatform` | 127.0.0.1:4000 only | Never reachable from another machine |
-| Gateway (HTTPS front door) | `StaffMobileKeyGateway` | 8443 (LAN), 9443 (external, optional) | Allow-lists, secret path, security headers, access log |
-| Connector | `StaffMobileKeyConnector` | 127.0.0.1:8090 (status page) | Talks to Visionline on the same server, outbound to the platform |
-| Database | PostgreSQL 16 | localhost:5432 | Daily backup at 02:30 |
+| Part | Windows service | Account | Listens on | Notes |
+|---|---|---|---|---|
+| Database | `StaffMobileKeyDatabase` | NETWORK SERVICE | 127.0.0.1:5433 only | Bundled PostgreSQL 16; data in `C:\ProgramData\StaffMobileKey\Platform\database` |
+| Platform (API, portal, jobs) | `StaffMobileKeyPlatform` | LOCAL SERVICE | 127.0.0.1:47300 only (or the next free port; `-PlatformPort`) | Never reachable from another machine; makes the daily database copy |
+| Gateway (HTTPS front door) | `StaffMobileKeyGateway` | LOCAL SERVICE | 8443 (LAN), 9443 (external, optional) | Allow-lists, secret path, security headers, access log |
+| Connector | `StaffMobileKeyConnector` | LOCAL SERVICE | 127.0.0.1:8090 (status page) | Talks to Visionline on the same server, outbound to the platform |
 
-All three services run as **LOCAL SERVICE**, start with Windows and restart themselves after a failure. The
-service host (`StaffMobileKeyHost.exe`) is compiled on the server from `service\NodeService.cs` by the
+All services start with Windows and restart themselves after a failure. No service runs as an administrator.
+The service host (`StaffMobileKeyHost.exe`) is compiled on the server from `service\NodeService.cs` by the
 installer with the C# compiler that is part of Windows: no third-party wrapper.
+
+### What is in the package (2.9)
+
+| Folder | Content |
+|---|---|
+| `runtime\node\node.exe` | Node.js 22.23.2, the official Windows build (signed by the OpenJS Foundation) |
+| `runtime\pgsql\` | PostgreSQL 16.14 server: `postgres.exe`, `initdb.exe`, `pg_ctl.exe` and their DLLs (EDB Windows binaries, via the embedded-postgres project), plus the Microsoft Visual C++ runtime DLLs they need (signed by Microsoft), placed next to them instead of installed system-wide |
+| `runtime\VERSIONS.txt` | Versions, sources and the **SHA-256 of every program file**, for the hotel's antivirus or application allow-list |
+| `app\`, `portal\`, `migrations\`, `connector\` | Staff Mobile Key itself |
+
+Every bundled file is pinned and checked when the package is built (`scripts/windows-runtime.mjs`). Nothing is
+downloaded on the server, and nothing is installed outside `C:\Program Files\StaffMobileKey` and
+`C:\ProgramData\StaffMobileKey`.
 
 ## Prerequisites
 
-- Windows Server 2016+ (or Windows 10/11 Pro), administrator rights, about 1 GB free disk.
-- Node.js 22 LTS for all users, PostgreSQL 16 (keep port 5432, note the `postgres` password).
+- Windows Server 2016+ (or Windows 10/11 Pro), 64-bit, administrator rights, about 2 GB free disk.
+- .NET Framework 4.8 (part of Windows; used to build the small service host).
 - Outbound HTTPS from the server to `hospitality.credential-services.api.assaabloy.com` (ASSA ABLOY Credential
   Services). Nothing inbound from the internet is needed for keys to work.
 - For alerts (2.7): outbound to the hotel's mail server (SMTP, usually port 587), and either the Android SMS phone
   on the hotel network or the SMS service's address.
 
+Node.js and PostgreSQL do **not** need to be installed (2.9). A PostgreSQL that is already on the server is
+left alone: the bundled database uses its own service, folder and port (5433, or the next free one).
+
 ## Installing (any hotel)
 
-Nothing about a particular hotel is built into the package: the hotel is given once, to the installer, and
-everything else (logo, colours, details, system number, user groups) is set afterwards in the portal.
+1. Unzip `staff-mobile-key-onprem-<version>.zip` on the server.
+2. Double-click **`Install.cmd`**. Windows asks for administrator rights; nothing else is asked.
+3. At the end the portal opens on the server (`http://127.0.0.1:47300/`) on the **first-run setup** page, with
+   the one-time setup code filled in. Enter:
+   - the hotel: name, time zone, country, ASSA ABLOY System ID (Visionline: Options → Mobile Access; can be
+     left empty), the system number printed on reports, support e-mail and phone for staff;
+   - the first administrator: name, e-mail, password (12+ characters);
+   - optionally the Credential Services user and password (stored encrypted; can be added later).
+4. Sign in. Connector health shows the connector on this server **Online** (it was registered by the
+   installer, no token to copy). Enter the Visionline account in Settings → Visionline, run discovery, set the
+   branding, and turn on two-step sign-in (Account).
 
-```powershell
-# PowerShell "Run as administrator", in the unzipped staff-mobile-key-onprem folder
-Unblock-File .\*.ps1; Unblock-File .\connector\*.ps1
+The setup code is shown at the end of the installation and kept in
+`C:\ProgramData\StaffMobileKey\Platform\setup-code.txt` (administrators only). It is only accepted until the
+hotel and its first administrator exist; then the setup page closes for good. Ten wrong codes in 15 minutes
+lock it for 15 minutes. From another PC on the hotel network the setup page is at `https://<server>:8443/`
+(type the code).
 
-# First installation (example values - use the hotel's own)
-.\install-onprem.ps1 -HotelName "K Hotel Bana" -TimeZone Africa/Douala -Country CM -SystemId 3460 `
-    -ServerName vingcard-srv.khb.local `
-    -ExternalPort 9443 -AllowExternal "41.202.219.10/32"
-```
+What the installer does: copies the runtime and the program, creates the database in
+`ProgramData\StaffMobileKey\Platform\database` (random superuser and application passwords, stored encrypted
+with Windows DPAPI), registers the four services, makes a certificate (server name, `localhost` and the server's
+IPv4 addresses), writes the gateway settings, opens the firewall for the hotel network, reads the Visionline
+certificate from `https://localhost/api/v1` (see *Certificates*), installs the connector with its token, puts a
+"Staff Mobile Key" shortcut on the desktop, and writes a log to `logs\install-<version>-<time>.log`.
 
-The installer creates the `smk` database and role (random password), stores every secret encrypted with
-Windows DPAPI for this machine, makes a certificate, writes the gateway settings, opens the firewall, creates
-the hotel and its first administrator, installs and starts the services, schedules the backup and installs the
-connector with an automatically registered token.
+`Install.cmd` options (all optional; add them after the name in a command prompt):
 
 | Option | Meaning | Kept on upgrade |
 |---|---|---|
-| `-HotelName "..."` | Hotel name in the portal, the app and on reports (first installation) | yes |
-| `-TimeZone Africa/Nairobi` | Hotel time zone, IANA name (first installation) | yes |
-| `-Country KE` | Two-letter country code (first installation) | yes |
-| `-SystemId 3460` | ASSA ABLOY System ID (Visionline Options -> Mobile Access); also the default *system number* on reports | yes |
-| `-HotelCode` | Short code used in links (default made from the name) | yes |
-| `-SupportEmail`, `-SupportPhone` | Shown in the staff app | yes |
-| `-ServerName` | Name or IP in the portal address and the certificate | yes |
+| `-ServerName` | Name or IP staff use for the server (default: the computer name); used in the portal address and the certificate | yes |
 | `-LanPort 8443` | Port for the hotel network | yes |
+| `-PlatformPort 47300` | Internal port of the platform, 127.0.0.1 only. Default 47300 or the next free one. **Port 4000 (the default before 2.11) is often used by PMS interfaces; upgrades move off it automatically** | yes |
 | `-ExternalPort 9443 -AllowExternal "..."` | External entrance and the public addresses allowed in (see below) | yes |
 | `-RemoveExternal` | Close the external entrance | - |
-| `-CertPfx C:\certs\portal.pfx` | A real certificate instead of the self-signed one | yes |
+| `-CertPfx C:\certs\portal.pfx` | A real certificate instead of the self-signed one (asks for its password) | yes |
+| `-VisionlineUrl`, `-CaFile` | Visionline on another computer, or its certificate given by hand | connector keeps them |
+| `-ReadOnly`, `-NoWatch` | **Only for testing against a Visionline that is not the hotel's own** - `-ReadOnly` stops key issuing | connector keeps them |
 | `-SkipConnector` | The connector is installed (or stays) elsewhere | - |
-| `-VisionlineUrl`, `-CaFile`, `-ReadOnly`, `-NoWatch` | Passed to the connector. **Do not use `-ReadOnly` on the hotel's own server** - it stops key issuing; it is only for testing against another hotel's Visionline | connector keeps them |
+| `-NoBrowser` | Do not open the portal at the end | - |
+| `-HotelName -TimeZone -Country [-SystemId -HotelCode -SupportEmail -SupportPhone]` | Scripted installations only: the hotel is created from these instead of the setup page (the first administrator is still made on the setup page) | yes |
 
-**Upgrade:** unzip the new version and run `.\install-onprem.ps1` with no options; the hotel, ports, allowed
-addresses, secret path and certificate are remembered.
+**Upgrade:** unzip the new version and double-click its `Install.cmd`. Everything is kept: the hotel, settings,
+passwords, ports, allowed addresses, secret path and certificate. A copy of the database is made first.
+
+**Installations from 2.5-2.8** that used a separately installed PostgreSQL are upgraded the same way and keep
+using that PostgreSQL; only the program, Node.js runtime and services are updated, and the old scheduled backup
+task is replaced by the platform's own daily copy.
+
+## After installing: Visionline data comes by itself (2.10)
+
+Once the connector has the Visionline account (Settings → Visionline), the platform reads the doors, door groups and
+user groups, then every Visionline user and their valid keycards, without anyone pressing a button; it repeats this
+every 6 hours, and records a keycard encoded at the Visionline desk within seconds. The hotel's own user groups
+replace the placeholder names. See **Visionline cards & people** in the portal and [VISIONLINE-DATA.md](VISIONLINE-DATA.md).
+
+## Breakfast (2.11)
+
+Optional module for the restaurant (Settings → Modules → Breakfast): the in-house list is imported from the PMS
+"in-house guests" CSV, waiters with the *Restaurant (breakfast)* role record each room, managers print the day sheet.
+Nothing extra is installed and no PMS port is used. See [BREAKFAST.md](BREAKFAST.md).
 
 ## The public IP is a setting, not part of the program
 
@@ -144,44 +187,77 @@ there is no inbound path, so the platform runs with `CS_CALLBACKS=off` and **ask
 | Keys being issued or revoked | every 10 s |
 | Issued keys (removed by a phone deletion or a Visionline override) | each key about every 2 minutes; keys on a deleted phone every 15 s |
 
-The automated checks run the full suite in this mode (264 checks). One thing is not available without callbacks:
+The automated checks run the full suite in this mode (312 checks). One thing is not available without callbacks:
 the *first use at a door* time (Credential Services READBACK). Lock events from Visionline still arrive through
 the connector.
 
 ## Certificates
 
-The installer makes a self-signed certificate for `-ServerName` (3 years). Browsers and phones warn until it is
-trusted: either install the certificate (fingerprint printed by the installer) on the hotel's PCs and phones,
-or, better, use a real certificate for a name the hotel owns (for example `access.khotelbana.com` pointing to
-the public IP outside and to the server inside) and pass it with `-CertPfx`.
+**Portal:** the installer makes a self-signed certificate for `-ServerName`, `localhost` and the server's IPv4
+addresses (3 years). Browsers and phones warn until it is trusted: either install the certificate (fingerprint
+printed by the installer) on the hotel's PCs and phones, or, better, use a real certificate for a name the hotel
+owns (for example `access.khotelbana.com` pointing to the public IP outside and to the server inside) and pass it
+with `-CertPfx`.
 
-## Files and secrets
+**Visionline:** when Visionline runs on the same server and the connector has no certificate yet, the installer
+reads the certificate Visionline presents on `https://localhost/api/v1` and checks that the connector can verify
+it; from then on exactly that certificate is trusted (fingerprint match, verification is never switched off).
+This "trust on first use" happens on the server itself, over the loopback address. If Visionline is on another
+computer, was not running, or presents a chain the connector cannot verify, the installer says so and the
+connector is installed anyway; then use `connector\visionline-probe.ps1 -TlsOnly -SaveCert C:\vl.crt`, confirm
+the fingerprint with the Visionline administrator and run `Install.cmd -CaFile C:\vl.crt`
+([VISIONLINE-PROBE.md](VISIONLINE-PROBE.md)).
+
+## Passwords and secrets
+
+| Secret | Where it is entered | Where it is kept |
+|---|---|---|
+| Credential Services user and password | Portal: Settings → Credential Services → *Passwords and keys* (or the setup page) | Database, sealed with AES-256-GCM under a key that is only in `platform.secrets` |
+| Mail (SMTP) password, SMS password / API key | Portal: Settings → Alerts & notifications → *Passwords and keys* | as above |
+| Visionline account(s) | Portal: Settings → Visionline | Encrypted in the browser for the connector; only the connector can open them |
+| Database passwords, session (JWT) and callback keys, the sealing key, the local connector token | Made by the installer | `platform.secrets` / `database.secrets` (Windows DPAPI, this machine) |
+| Gateway cookie key, certificate password | Made by the installer (or asked with `-CertPfx`) | `gateway.secrets` (DPAPI) |
+
+A password entered in the portal can be replaced or removed, never read back - not even by an administrator,
+and it is never written to the audit trail or the logs (the audit trail records *who* changed *which* one).
+A value set with `set-platform-secrets.ps1` (environment of the service) takes precedence and is shown in the
+portal as "set in the server's own settings". A database copy alone does not reveal the passwords: the sealing
+key is not in the database.
+
+## Files
 
 | Path | Content |
 |---|---|
-| `C:\Program Files\StaffMobileKey\Platform` | Program (app\*.mjs, portal, migrations, scripts) |
+| `C:\Program Files\StaffMobileKey\Platform` | Program (app\*.mjs, portal, migrations, tools) |
 | `...\Platform.previous` | The version before the last upgrade (for rollback) |
+| `C:\Program Files\StaffMobileKey\Runtime` | Bundled Node.js and PostgreSQL (`VERSIONS.txt`) |
 | `C:\ProgramData\StaffMobileKey\Platform\platform.env` | Plain settings |
-| `...\platform.secrets`, `...\gateway.secrets` | DPAPI-encrypted: database URL, JWT and callback keys, Credential Services user and password, cookie key, certificate password |
+| `...\platform.secrets`, `...\gateway.secrets`, `...\database.secrets` | DPAPI-encrypted secrets (`database.secrets`: SYSTEM and Administrators only) |
+| `...\database\data` | The database (NETWORK SERVICE, SYSTEM, Administrators only); PostgreSQL's own log in `data\log` |
 | `...\gateway.config.json` | Listeners, allow-lists, secret path |
-| `...\logs\` | platform.log, gateway.log, gateway-access.log, backup.log (rotated, 10 MB × 5) |
-| `...\backups\` | Daily dumps (14 kept) and pre-upgrade dumps — SYSTEM and Administrators only |
-| `database-tools.ps1` | Size, Copy (to USB/share, checked), Verify, Optimize, Restore — see [MONITORING.md](MONITORING.md) |
-
-The secrets files are readable only by SYSTEM, Administrators and LOCAL SERVICE. Change the Credential Services
-password, the alert e-mail (SMTP) password and the SMS gateway password/API key with `set-platform-secrets.ps1`
-(it never shows or logs them).
+| `...\logs\` | platform.log, gateway.log, gateway-access.log, backup.log (rotated, 10 MB × 5), install-*.log |
+| `...\backups\` | Database copies (`*.smkbak` + `.sha256`): daily, "Back up now", before upgrades and restores |
+| `...\setup-code.txt` | One-time setup code, until the first-run setup is done (administrators only) |
 
 ## Backups, upgrade, rollback
 
-- **Backup:** daily at 02:30 (`backup-onprem.ps1`); copy `backups\` off the server regularly.
-- **Upgrade:** unzip the new package, run `install-onprem.ps1` with the same options. It dumps the database
-  first (`pre-upgrade-<version>-*.dump`), keeps the old program in `Platform.previous`, applies new database
-  migrations at start and checks `/healthz` before starting the gateway.
+- **Database copies (2.9):** made by the platform itself, without PostgreSQL client tools: every day at 02:30
+  (server time, the newest 14 kept), on **Settings → Backups → Back up now**, before every upgrade and before a
+  restore. A copy is one compressed `.smkbak` file read in a single consistent snapshot while the platform runs,
+  with an internal check (row counts and fingerprint) and a `.sha256` file next to it; `database-tools.ps1
+  -Action Verify` confirms it is complete and unchanged. **Copy the `backups` folder off the server regularly.**
+- **Database tools:** `database-tools.ps1 -Action Size | List | Copy -Destination E:\ | Verify -File ... |
+  Optimize | Restore -File ...` (they use the bundled Node.js; see [MONITORING.md](MONITORING.md)). Restore checks
+  the copy, saves the current data first, stops the platform, rebuilds the database in one transaction (nothing
+  changes if anything fails), applies newer database changes, and starts the platform again.
+- **Upgrade:** `Install.cmd` of the new version. It makes a copy first (`smk-*-pre-upgrade.smkbak`), keeps the
+  old program in `Platform.previous`, applies new database migrations at start and checks `/healthz` before
+  starting the gateway.
 - **Rollback:** `rollback-onprem.ps1` (program files) or `rollback-onprem.ps1 -RestoreDatabase` (also the
-  database as it was before the upgrade — data entered since is lost; you confirm by typing YES).
-- **Uninstall:** `uninstall-onprem.ps1` keeps data and the database; `-RemoveData` also deletes settings and
-  backups after confirmation.
+  database exactly as it was before the upgrade — data entered since is lost; you confirm by typing YES).
+- **Uninstall:** `Uninstall.cmd` removes the services, firewall rules, shortcut, certificate and programs and
+  keeps `C:\ProgramData\StaffMobileKey` (Install.cmd uses it again); `Uninstall.cmd -RemoveData` deletes it
+  too, after confirmation.
 
 ## Building the package
 
@@ -191,4 +267,5 @@ npm run build:portal && npm run package:connector && npm run package:onprem
 ```
 
 Each program is one bundled file (`platform.mjs`, `gateway.mjs`, `admin.mjs`, `cs-check.mjs`); the server needs
-no `npm install`.
+no `npm install`. The packager downloads the pinned Windows runtime once (npm registry and PyPI), checks every
+file against the pinned SHA-256/SHA-512 values and caches it in `.cache/windows-runtime`.
