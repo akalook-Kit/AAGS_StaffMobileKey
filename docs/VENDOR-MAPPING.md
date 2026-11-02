@@ -85,3 +85,17 @@ integrator agreement.
 | Readback | `sessionTransceived` records first use at each door | §8.5.3 | Documented |
 | Base URL and account | K Hotel Bana: `https://hospitality.credential-services.api.assaabloy.com`, System ID 3460, account `hma-cs-92a0dc3e-…` (docs/K-HOTEL-BANA.md). Password only in the platform secret store; `scripts/windows/cs-check.ps1` tests it read-only | not in the document | From the hotel (13 Oct) |
 | Error codes | Only `10008` is documented ("details to follow") | §4.3.3 | Vendor confirmation required |
+
+## 2.14 calls (from the Visionline Web API manual, DocNo 61 1100 080 rev. 74)
+
+| Platform function | Visionline call | Section |
+|---|---|---|
+| Encoders list | `GET /encoders` | §5.14 |
+| Encode a staff keycard | `POST /cards?action=encode&encoder=…[&override=true]` (TLCode, doorOperations normal) | §5.9.4, §7.6.1 |
+| Returned card made useless | same, expireTime = now + 1 min, `override=true&overwriteValidCard=true` | §5.9.4 |
+| Cancel a card by number | `POST /cards/{id}` `{ "cancelled": true }` | §5.10, §7.7.4 |
+| Emergency / stand-open / clearance / one-time card | `POST /cards?action=encode&encoder=…&type=emergency|standOpen|clearance|oneTime` | §7.22 |
+| Unpaid guest, offline room | guest card for the room (`operation: guest`), `override=true`, expires in 1 minute | §5.9.4 |
+| Unpaid guest / departure, online room | `POST /doors/{id}` `{ "checkedOut": true }` | §5.13.4, §7.13.1 |
+| Emergency open / back to normal | `POST /doors/{id}?timeout=30` `{ "emergencyOpen": true|false }` | §5.13.4, §7.12 |
+| Guest keycards per room | `GET /cards?guestDoor={room}&validTime={now}` | §5.9.3 |

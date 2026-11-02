@@ -99,7 +99,7 @@ export async function assertModuleLicensed(db: Db, hotelId: string, feature: str
 }
 
 /** Changes are refused once the licence (or trial) and its grace period are over. Reads, sign-in, revocation and the licence page stay open. */
-const ALWAYS_ALLOWED = [/^\/api\/v1\/hotels\/[^/]+\/(emergency|emergency\/[^/]+\/(confirm|end|roll|keys)|usage\/ping)$/, /^\/api\/v1\/hotels\/[^/]+\/licence$/, /^\/api\/v1\/hotels\/[^/]+\/keys\/[^/]+\/revoke$/, /^\/api\/v1\/hotels\/[^/]+\/me\//];
+const ALWAYS_ALLOWED = [/^\/api\/v1\/hotels\/[^/]+\/(emergency|emergency\/[^/]+\/(confirm|end|roll|keys)|usage\/ping)$/, /^\/api\/v1\/public\/keycard-requests\//, /^\/api\/v1\/hotels\/[^/]+\/licence$/, /^\/api\/v1\/hotels\/[^/]+\/keys\/[^/]+\/revoke$/, /^\/api\/v1\/hotels\/[^/]+\/me\//];
 export async function licenceGate(method: string, url: string, hotelId: string) {
   if (!licensingEnforced() || method === 'GET' || method === 'HEAD' || ALWAYS_ALLOWED.some((r) => r.test(url.split('?')[0]!))) return;
   const s = await licenceStatus(pool, hotelId);

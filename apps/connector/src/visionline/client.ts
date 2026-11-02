@@ -18,7 +18,8 @@ export class VisionlineApiError extends Error {
 }
 
 export interface VlTrust { caFile?: string; pinSha256?: string; servername?: string }
-export type VlPriority = 'high' | 'normal' | 'low';
+/** 'emergency' (2.14, door commands during a confirmed emergency) is not queued behind anything. */
+export type VlPriority = 'emergency' | 'high' | 'normal' | 'low';
 
 /**
  * 2.13 Sharing Visionline politely. The hotel's GRMS, PMS interface and the Visionline desk use the same server, so
@@ -34,7 +35,7 @@ export class VisionlineLimiter {
   private lowPausedUntil = 0;
   private slowUntil = 0;
   constructor(public maxConcurrent = 2, public minGapMs = 40) {}
-  private order = { high: 0, normal: 1, low: 2 } as const;
+  private order = { emergency: -1, high: 0, normal: 1, low: 2 } as const;
   async acquire(p: VlPriority) {
     await new Promise<void>((go) => { this.queue.push({ p, go }); this.queue.sort((a, b) => this.order[a.p] - this.order[b.p]); this.pump(); });
   }
@@ -153,7 +154,7 @@ export class VisionlineClient {
   /** Signed request with the reference implementation's recovery loop (at most 3 sends) [§6.1]. */
   async request<T = any>(method: string, path: string, body?: unknown, opts: { timeoutMs?: number; priority?: VlPriority } = {}): Promise<T> {
     // The callback long-poll (minutes-long timeout) is exempt: Visionline just holds it open until something happens.
-    const limited = !(opts.timeoutMs && opts.timeoutMs > 60_000);
+    const limited = !(opts.timeoutMs && opts.timeoutMs > 60_000) && opts.priority !== 'emergency';
     if (!limited) return this.send<T>(method, path, body, opts);
     await this.limiter.acquire(opts.priority ?? 'normal');
     const t0 = Date.now();

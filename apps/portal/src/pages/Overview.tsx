@@ -19,6 +19,7 @@ export function Overview() {
         {can('key.issue') && <Link className="btn primary" to="/keys">Issue a key</Link>}
       </PageHead>
       <ErrorNote error={s.error} />
+      <TodoNow />
       {(mon || att?.battery || att?.maintenance) && (
         <div className="attn">
           {mon && <><Link to="/monitoring" className={mon.alerts.critical ? 'bad' : mon.alerts.warning ? 'warn' : 'ok'}><strong>{mon.alerts.critical + mon.alerts.warning}</strong><span>{mon.alerts.critical + mon.alerts.warning ? `open alerts${mon.alerts.critical ? ` (${mon.alerts.critical} critical)` : ''}${mon.top[0] ? ` · ${mon.top[0].title}` : ''}` : 'open alerts - all quiet'}</span></Link>
@@ -78,5 +79,24 @@ export function Overview() {
         </>
       )}
     </>
+  );
+}
+
+/** 2.14 "To do now": the few things waiting for this person, refreshed every 20 seconds, with quick actions. */
+function TodoNow() {
+  const { base, can } = useHotel();
+  const t = useApi<any>(`${base}/today`, [], 20_000);
+  const items = t.data?.items ?? [];
+  const quick: [string, string, boolean][] = [['/keycards', 'Keycard request', can('keycards.request')], ['/keycards?tab=lockouts', 'Unpaid guest', can('lockout.request')],
+    ['/visionline?tab=lookup', 'Read a card', can('reports.read')], ['/muster', 'Who is in the building', can('muster.read')], ['/access', 'Access history', can('events.read')]];
+  return (
+    <section className="todo-now" aria-label="To do now">
+      <div className="todo-list">
+        {items.length ? items.map((i: any) => (
+          <Link key={i.id} to={i.to} className={`todo ${i.tone}`}><span className="todo-n">{i.n}</span><span><strong>{i.title}</strong><small>{i.detail}</small></span><span aria-hidden>→</span></Link>
+        )) : <div className="todo ok"><span className="todo-n">✓</span><span><strong>Nothing waiting for you</strong><small>Updated {t.data ? fmt.rel(t.data.at) : '…'}</small></span></div>}
+      </div>
+      <div className="quick">{quick.filter((q) => q[2]).map(([to, l]) => <Link key={to} to={to} className="chip">{l}</Link>)}</div>
+    </section>
   );
 }

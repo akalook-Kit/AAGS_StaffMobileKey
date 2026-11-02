@@ -1,3 +1,4 @@
+import { onKeycardCommandResult } from './routes/keycards.ts';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { PAYLOAD_SCHEMAS, type CommandType, type CommandResult } from '@smk/shared';
@@ -77,6 +78,20 @@ async function applyResult(c: pg.PoolClient, cmd: any, result: CommandResult) {
       return;
     }
     case 'VALIDATE_SETUP': return;
+    case 'ENCODE_KEYCARD': case 'CANCEL_KEYCARD': case 'DOOR_COMMANDS': return onKeycardCommandResult(c, cmd, result);
+    case 'COUNT_GUEST_CARDS': {
+      if (result.status !== 'SUCCEEDED') return;
+      for (const x of (result.result?.counts ?? []) as { room: string; n: number }[]) await c.query(`INSERT INTO guest_card_counts (hotel_id, room, n, read_at) VALUES ($1,$2,$3,now())
+        ON CONFLICT (hotel_id, room) DO UPDATE SET n=EXCLUDED.n, read_at=now()`, [cmd.hotel_id, x.room, x.n]);
+      return;
+    }
+    case 'LIST_ENCODERS': {
+      if (result.status !== 'SUCCEEDED') return;
+      await c.query(`UPDATE resources SET active=false WHERE hotel_id=$1 AND kind='encoder'`, [cmd.hotel_id]);
+      for (const e of (result.result?.encoders ?? []) as string[]) await c.query(`INSERT INTO resources (hotel_id, kind, external_id, name, data, active, discovered_at) VALUES ($1,'encoder',$2,$2,'{}',true,now())
+        ON CONFLICT (hotel_id, kind, external_id) DO UPDATE SET active=true, discovered_at=now()`, [cmd.hotel_id, e]);
+      return;
+    }
     case 'READ_CARD': return; // 2.12 pilot: the portal reads the result itself
     case 'SYNC_DIRECTORY': return onDirectorySyncResult(c, cmd, result);
     case 'SET_PROPERTY_CREDENTIALS':

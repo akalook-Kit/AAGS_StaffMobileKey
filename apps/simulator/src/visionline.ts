@@ -90,6 +90,8 @@ export function registerVisionline(app: FastifyInstance, st: SimState, opts: {
   // ---- discovery
   app.get(p('/resources'), async () =>
     ['cards', 'doors', 'users', 'userGroups', 'timeSchedules', 'mobileaccess', 'callback', 'resources', 'alarms', 'alarmTypes'].map((id) => ({ id })));
+  // Encoders [§5.14.1]: readable without a session.
+  app.get(p('/encoders'), async () => [...new Set(['fd1', 'fd2', ...encoderCards.keys()])].map((id) => ({ id })));
   app.get(p('/doors'), async (req) => {
     const q = req.query as Record<string, string>;
     let ds = st.doors;
@@ -152,6 +154,60 @@ export function registerVisionline(app: FastifyInstance, st: SimState, opts: {
       if (!reg) return fail(reply, 40024, `There is no card on encoder ${q.encoder}.`);
       const c = [...st.cards.values()].find((x) => x.cardId === reg);
       return { id: reg, cardHolder: c?.cardHolder ?? null };
+    }
+    // 2.14 Encode a staff card or a special card at an encoder [Web API §7.6.1, §7.22]. A card must lie on the encoder
+    // (POST /sim/encoder with a registration number, or "blank").
+    if (q.action === 'encode') {
+      if (!q.encoder) return fail(reply, E.missingProperty, 'A mandatory parameter is missing in the query string of the request.');
+      const onEncoder = encoderCards.get(q.encoder);
+      if (!onEncoder) return fail(reply, 40024, `There is no card on encoder ${q.encoder}.`);
+      const b = J(req);
+      const type = q.type as string | undefined;
+      if (type && !['clearance', 'emergency', 'oneTime', 'powerDown', 'standOpen'].includes(type)) return fail(reply, 40035, 'Invalid property value.', 'type');
+      if (b[F.format] !== 'TLCode' && b[F.format] !== 'rfid48') return fail(reply, 40009, 'Illegal card format specified. It must be rfid48 or TLCode.');
+      const guestCard = Array.isArray(b[F.doorOperations]) && b[F.doorOperations].some((o: any) => o.operation === 'guest');
+      if (!type && !guestCard && b[F.format] !== 'TLCode') return fail(reply, 40009, 'Format must be TLCode for a staff card.');
+      if (guestCard && !b[F.cardHolder]) b[F.cardHolder] = `guest-${Date.now()}`;
+      if (guestCard && !st.users.has(b[F.cardHolder])) st.users.set(b[F.cardHolder], { id: b[F.cardHolder], surname: b[F.cardHolder], givenName: '', userGroup: 'Guest' } as any);
+      if (type !== 'powerDown') {
+        if (!b[F.cardHolder]) return fail(reply, E.missingProperty, 'cardHolder is mandatory.');
+        if (!st.users.has(b[F.cardHolder])) return fail(reply, E.cardHolderNotFound, 'The specified card holder does not exist.');
+      }
+      const doors: string[] = [];
+      if (type === 'emergency' || type === 'clearance') {
+        if (b[F.doorOperations]) return fail(reply, 40035, 'Invalid property value.', 'doorOperations must not be included for this card type');
+        doors.push(...st.doors.map((d) => d.id));
+      } else {
+        if (!Array.isArray(b[F.doorOperations])) return fail(reply, E.missingProperty, 'A mandatory property is missing in the request object.', 'doorOperations');
+        for (const op of b[F.doorOperations]) {
+          if (!['normal', 'on/off', ...(guestCard ? ['guest'] : [])].includes(op.operation)) return fail(reply, E.illegalOperation, 'Illegal door operation type specified. In case of Staff card it should be normal.');
+          for (const d of op.doors ?? []) {
+            const door = st.doors.find((x) => x.id === d || String(x.doorID) === String(d));
+            if (!door) return fail(reply, E.doorNotFound, 'The specified door does not exist.', `Door ${d}`);
+            if (!doors.includes(door.id)) doors.push(door.id);
+          }
+        }
+      }
+      let expire = now() + 3650 * 86_400_000;
+      if (type !== 'emergency') {
+        try { expire = fromVisionlineLocal(b[F.expireTime], opts.timeZone).getTime(); } catch { return fail(reply, 40028, 'Timestamp must be in local time and formatted according to ISO 8601.'); }
+        if (expire <= now() - 60_000) return fail(reply, E.expireInPast, 'Value of Expire time cannot be in the past.');
+      }
+      // The card lying on the encoder still valid: only with overwriteValidCard=true (parameter from ASSA ABLOY's Postman
+      // reference; the refusal code below is a SIMULATOR ASSUMPTION, the real error code is not documented).
+      const lying = [...st.cards.values()].find((c) => c.cardId === onEncoder);
+      if (lying && !lying.cancelled && lying.expireTime > now() && q.overwriteValidCard !== 'true') return fail(reply, 40905, 'The card on the encoder is still valid. Use overwriteValidCard=true to overwrite it.');
+      const existing = !type ? [...st.cards.values()].filter((c) => c.plastic && c.cardHolder === b[F.cardHolder] && !c.cancelled && c.expireTime > now()) : [];
+      if (existing.length && q.override !== 'true') return fail(reply, E.validStaffCardExists, 'There is/are valid staff card(s) for this user. Please provide override=true to cancel all previous staff card(s).');
+      for (const c of existing) { c.cancelled = true; c.vlStatus = 2; c.cancelTime = now(); vlPublish(st, 'cards', cardChange(c)); }
+      if (lying && !lying.cancelled) { lying.cancelled = true; lying.vlStatus = 5; lying.cancelTime = now(); vlPublish(st, 'cards', cardChange(lying)); }
+      const card: Card = { cardId: String(st.nextCardId++), credentialID: st.nextCredentialId++, cardHolder: b[F.cardHolder] ?? '', issuedBy: (req as any).operator ?? '?', endpointId: '', doors,
+        startTime: now(), expireTime: expire, status: 'ISSUED', cancelled: false, checkedOut: new Set(), createdAt: now(), accountName: '', timeSchedule: b[F.timeSchedule], label: type ?? 'staff', usedAt: new Set(), plastic: true };
+      if (guestCard) { (card as any).guest = true; for (const c of st.cards.values()) if ((c as any).guest && c !== card && c.doors.some((d) => doors.includes(d)) && !c.cancelled && q.override === 'true') { c.cancelled = true; c.vlStatus = 2; } }
+      st.cards.set(card.credentialID, card);
+      encoderCards.set(q.encoder, card.cardId);
+      return reply.code(201).send({ id: card.cardId, cardHolder: card.cardHolder, created: toVisionlineLocal(new Date(card.createdAt), opts.timeZone), startTime: toVisionlineLocal(new Date(card.startTime), opts.timeZone),
+        expireTime: toVisionlineLocal(new Date(card.expireTime), opts.timeZone), cancelled: false, format: b[F.format], doorOperations: b[F.doorOperations] ?? [], numberOfIssuedCards: 1, serialNumbers: ['04A1B2C3D4'], ...(type ? { type } : {}) });
     }
     if (q.action !== VL.query.mobileAccess) return fail(reply, 50011, 'The requested functionality has not been implemented.', 'Simulator implements action=mobileAccess only');
     if (q.returnCredential === 'true') return fail(reply, 40326, 'Returning credentials is not enabled in this simulator.');
@@ -221,6 +277,10 @@ export function registerVisionline(app: FastifyInstance, st: SimState, opts: {
       if (Object.keys(q).length > 1) return fail(reply, 40022, 'Parameter cancelTimeSince cannot be combined with other parameters.');
       const t = fromVisionlineLocal(q.cancelTimeSince, opts.timeZone).getTime();
       return [...st.cards.values()].filter((c) => c.cancelled && (c.cancelTime ?? 0) >= t).map((c) => ({ id: c.cardId }));
+    }
+    if (q.guestDoor && q.validTime) {
+      const t = fromVisionlineLocal(q.validTime, opts.timeZone).getTime();
+      return [...st.cards.values()].filter((c) => (c as any).guest && c.doors.includes(q.guestDoor) && !c.cancelled && c.startTime <= t && t < c.expireTime).map((c) => ({ id: c.cardId }));
     }
     if (!q.cardHolder || (!q.validTime && !(q.startTime && q.expireTime))) return fail(reply, 40022, 'A mandatory parameter is missing in the query string of the request.');
     if (q.validTime) {
@@ -302,7 +362,20 @@ export function registerVisionline(app: FastifyInstance, st: SimState, opts: {
     const door = st.doors.find((x) => x.id === (req.params as any).id);
     if (!door) return fail(reply, E.doorNotFound, 'The specified door does not exist.');
     const b = J(req);
-    if (b[F.checkedOut] !== true) return fail(reply, 40503, 'The specified operation is not allowed for the door.', 'Simulator implements checkedOut only');
+    // 2.14 Door commands to online locks [Web API §5.13.4, §7.12]: open, standOpenTime, emergencyOpen. Needs the option
+    // "Web service for sending open/close commands to doors"; offline locks cannot be reached (the server times out).
+    const cmdKeys = ['open', 'standOpenTime', 'emergencyOpen', 'revokePassageTime'].filter((k) => k in b);
+    if (cmdKeys.length) {
+      if (cmdKeys.length > 1 || F.checkedOut in b) return fail(reply, 40035, 'Invalid property value.', 'Only one command property per request');
+      if (st.faults.noDoorCommands) return fail(reply, 40511, 'The specified operation is not allowed in unlicensed mode.', 'Option "Web service for sending open/close commands to doors" is not licensed');
+      if (!door.online) return fail(reply, 50401, 'Gateway timeout.', `Door ${door.id} could not be reached (offline lock)`);
+      const ev = (code: number) => vlPublish(st, 'events', { doorID: door.doorID, registrationNumber: 0, eventCode: code, eventTime: toVisionlineLocal(new Date(), opts.timeZone), repeatFlags: 0 });
+      if ('open' in b) { if (b.open !== true) return fail(reply, 40035, 'Invalid property value.', 'open must be true'); ev(417); }
+      if ('emergencyOpen' in b) { door.emergencyOpen = b.emergencyOpen === true; ev(door.emergencyOpen ? 41 : 42); }
+      if ('standOpenTime' in b) { door.standOpenUntil = b.standOpenTime; ev(b.standOpenTime === null ? 89 : 65); }
+      return { id: door.id };
+    }
+    if (b[F.checkedOut] !== true) return fail(reply, 40503, 'The specified operation is not allowed for the door.', 'Simulator implements checkedOut and door commands only');
     if (b.credentialID !== undefined) {
       const c = st.cards.get(Number(b.credentialID));
       if (!c) return fail(reply, 40411, 'The specified card does not exist.');

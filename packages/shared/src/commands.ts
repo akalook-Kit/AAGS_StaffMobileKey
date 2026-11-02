@@ -87,6 +87,45 @@ export const VerifyOperatorCredentialsPayload = OperatorCredential;
  * the read action's name is chosen per hotel until confirmed on the hotel's Visionline. Read-only: nothing is written to the card.
  */
 export const ReadCardPayload = z.object({ encoder: z.string().regex(/^[\w .-]{1,40}$/, 'Encoder name: letters, digits, space, dot, dash'), action: z.enum(['read', 'readCard']).default('read') });
+/**
+ * 2.14 Encode a keycard at an encoder [Web API §7.6.1 staff card, §7.22 special cards]. kind:
+ *  - staff: format TLCode, doors with operation normal (on/off doors optional), override=true replaces the holder's
+ *    valid staff cards (40902), expireTime required;
+ *  - expireNow: the returned card is overwritten with a card that expires a minute later (override=true cancels every
+ *    staff card of that holder, overwriteValidCard=true lets the encoder write over the still-valid card);
+ *  - emergency: type=emergency (all doors, also with the deadbolt on; no doors, no times);
+ *  - standOpen: type=standOpen (doors with operation normal; presenting it sets those locks to stand open).
+ */
+const EncoderName = z.string().regex(/^[\w .-]{1,40}$/, 'Encoder name: letters, digits, space, dot, dash');
+export const EncodeKeycardPayload = z.object({
+  kind: z.enum(['staff', 'expireNow', 'emergency', 'standOpen', 'clearance', 'oneTime', 'guestBlock']),
+  encoder: EncoderName,
+  cardHolder: z.string().min(1).max(100),
+  /** Create or move the Visionline user first [§5.31] (staff cards). */
+  user: z.object({ givenName: z.string().max(60), surname: z.string().max(60), userGroup: z.string().min(1).max(60) }).optional(),
+  doorIds: z.array(z.string().min(1).max(100)).max(2000).default([]),
+  onOffDoorIds: z.array(z.string().min(1).max(100)).max(2000).default([]),
+  expireTime: z.string().datetime().optional(),
+  timeSchedule: z.string().max(60).optional(),
+  override: z.boolean().default(false),
+  overwriteValidCard: z.boolean().default(false),
+});
+export type EncodeKeycardPayload = z.infer<typeof EncodeKeycardPayload>;
+/** 2.14 Cancel a physical keycard by its registration number [Web API §5.10, POST /cards/{id} {cancelled:true}]. */
+export const CancelKeycardPayload = z.object({ regNo: z.string().regex(/^\d{1,12}$/), cardHolder: z.string().max(100).optional() });
+/**
+ * 2.14 Commands to online locks [Web API §5.13.4, §7.12]: open, stand open until a time, clear stand open, emergency
+ * open on/off. Needs the Visionline option "Web service for sending open/close commands to doors"; offline locks
+ * cannot be reached. Sent to a batch of doors, several at a time.
+ */
+export const DoorCommandsPayload = z.object({
+  command: z.enum(['emergencyOpen', 'emergencyClose', 'standOpen', 'clearStandOpen', 'open', 'checkout']),
+  doors: z.array(z.string().min(1).max(100)).min(1).max(60),
+  standOpenUntil: z.string().datetime().optional(),
+  parallel: z.number().int().min(1).max(10).default(6),
+  timeoutSec: z.number().int().min(5).max(60).default(30),
+});
+export type DoorCommandsPayload = z.infer<typeof DoorCommandsPayload>;
 export const CreateUserGroupPayload = z.object({ userGroup: z.string().min(1).max(60), uniformAccess: z.boolean().default(false) });
 
 /**
@@ -128,7 +167,7 @@ export const DirectoryChunk = z.object({
 });
 export type DirectoryChunk = z.infer<typeof DirectoryChunk>;
 
-export const CommandType = z.enum(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'DISCOVER_RESOURCES', 'VALIDATE_SETUP', 'SET_PROPERTY_CREDENTIALS', 'VERIFY_OPERATOR_CREDENTIALS', 'CREATE_USER_GROUP', 'SYNC_DIRECTORY', 'READ_CARD']);
+export const CommandType = z.enum(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'DISCOVER_RESOURCES', 'VALIDATE_SETUP', 'SET_PROPERTY_CREDENTIALS', 'VERIFY_OPERATOR_CREDENTIALS', 'CREATE_USER_GROUP', 'SYNC_DIRECTORY', 'READ_CARD', 'ENCODE_KEYCARD', 'CANCEL_KEYCARD', 'DOOR_COMMANDS', 'LIST_ENCODERS', 'COUNT_GUEST_CARDS']);
 export type CommandType = z.infer<typeof CommandType>;
 
 export const PAYLOAD_SCHEMAS = {
@@ -141,6 +180,12 @@ export const PAYLOAD_SCHEMAS = {
   CREATE_USER_GROUP: CreateUserGroupPayload,
   SYNC_DIRECTORY: SyncDirectoryPayload,
   READ_CARD: ReadCardPayload,
+  ENCODE_KEYCARD: EncodeKeycardPayload,
+  CANCEL_KEYCARD: CancelKeycardPayload,
+  DOOR_COMMANDS: DoorCommandsPayload,
+  LIST_ENCODERS: z.object({}),
+  /** 2.14 Valid guest keycards per room [Web API §5.9.3 guestDoor + validTime], for the Accounts report. */
+  COUNT_GUEST_CARDS: z.object({ rooms: z.array(z.string().min(1).max(100)).min(1).max(1000) }),
 } as const;
 
 export const CommandEnvelope = z.object({
@@ -199,7 +244,7 @@ export const VisionlineEventsBatch = z.object({
 export type VisionlineEventsBatch = z.infer<typeof VisionlineEventsBatch>;
 
 export const DiscoveredResource = z.object({
-  kind: z.enum(['door', 'doorgroup', 'usergroup', 'timeschedule', 'mobileaccessaccount']),
+  kind: z.enum(['door', 'doorgroup', 'usergroup', 'timeschedule', 'mobileaccessaccount', 'encoder']),
   externalId: z.string(),
   name: z.string(),
   data: z.record(z.string(), z.unknown()).default({}),

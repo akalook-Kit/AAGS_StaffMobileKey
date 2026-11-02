@@ -1006,7 +1006,7 @@ async function main() {
     const pol = (await call('GET', `${H}/config/policy`, admin)).json.data;
     await call('PUT', `${H}/config/policy`, admin, { ...pol, safety: { ...(pol.safety ?? {}), emergencyTemplateId: tpl.id, emergencyKeyHours: 2 } });
     const em = (await call('GET', `${H}/emergency`, admin)).json;
-    ok(em.readiness.template?.id === tpl.id && em.readiness.responders.length > 0 && em.readiness.remoteOpen.available === false, `readiness: template "${em.readiness.template?.name}", ${em.readiness.responders.length} responder(s), remote opening honestly not offered`);
+    ok(em.readiness.template?.id === tpl.id && em.readiness.responders.length > 0 && typeof em.readiness.remoteOpen.online === 'number', `readiness: template "${em.readiness.template?.name}", ${em.readiness.responders.length} responder(s), online/offline locks counted for emergency open`);
     const k13 = await call('POST', `${H}/emergency/${e13.json.id}/keys`, admin, { staffIds: [em.readiness.responders[0].id] });
     ok(k13.status === 200 && k13.json.results.length === 1 && (k13.json.results[0].ok || /live key/.test(k13.json.results[0].error)), `emergency key for ${em.readiness.responders[0].name}: ${k13.json.results[0]?.ok ? k13.json.results[0].status : k13.json.results[0]?.error}`, k13.json);
     const end = await call('POST', `${H}/emergency/${e13.json.id}/end`, security, { note: 'e2e: all clear' });
@@ -1046,6 +1046,84 @@ async function main() {
     const valid = Boolean(signer && sig) && verify(null, Buffer.from(canon), createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: signer }, format: 'jwk' }), Buffer.from(sig, 'base64url'));
     ok(valid && createHash('sha256').update(canon).digest('hex') === sha256, 'the supplier summary is signed by this installation');
     ok(!/@|Grace|Amina|khb-/.test(canon), 'and contains counts only (no names, e-mails or Visionline ids)');
+  }
+
+  console.log('\n2.14: keycard requests (QR page), encode in Visionline, return, unpaid guest, departures, emergency open');
+  {
+    const cmdDone = (tok: string, id: string) => until('command', () => call('GET', `${H}/commands/${id}`, tok), (r) => ['SUCCEEDED', 'FAILED', 'EXPIRED'].includes(r.json?.status), 60_000);
+    const pol14 = (await call('GET', `${H}/config/policy`, admin)).json.data;
+    await call('POST', `${H}/resources/discover`, admin);
+    await sleep(3000);
+    const enc = await call('POST', `${H}/keycards/encoders/refresh`, admin, {});
+    ok((await cmdDone(admin, enc.json.commandId)).json.status === 'SUCCEEDED' && (await call('GET', `${H}/keycards/encoders`, admin)).json.encoders.some((e: any) => e.name === 'fd1' && e.inVisionline), 'encoders are read from Visionline');
+    ok((await call('PUT', `${H}/config/policy`, admin, { ...pol14, keycards: { ...(pol14.keycards ?? {}), encodeEnabled: true, encoders: ['fd1'], hrEmail: 'hr@khb.test' },
+      safety: { ...(pol14.safety ?? {}), doorCommands: { enabled: true, scope: 'rooms', closeOnEnd: true, parallel: 6, doorGroups: [] } } })).status === 200, 'encoding from the portal and remote door commands switched on');
+    const link = await call('POST', `${H}/keycards/qr-link`, admin, {});
+    const tok = link.json.path.split('/').pop();
+    ok((await call('GET', `${API}/api/v1/public/keycard-requests/${tok}`)).status === 200, 'the QR page opens without signing in');
+    ok((await call('GET', `${API}/api/v1/public/keycard-requests/${'x'.repeat(24)}`)).status === 404, 'a wrong link opens nothing');
+    const pub = await call('POST', `${API}/api/v1/public/keycard-requests/${tok}`, undefined, { kind: 'new', staffType: 'permanent', givenName: 'Aline', surname: 'Mbarga', department: 'Housekeeping', reason: 'New starter', managerName: 'Housekeeping manager' });
+    ok(pub.status === 201 && /^KR\d{4}-\d{4}$/.test(pub.json.number), `a manager asks from the QR page: ${pub.json.number}`);
+    ok((await call('GET', `${H}/keycards/requests`, rest)).status === 403, 'the restaurant cannot see keycard requests');
+    const req14 = (await call('GET', `${H}/keycards/requests?q=Mbarga`, issuer)).json[0];
+    ok((await call('POST', `${H}/keycards/requests/${req14.id}/issue`, issuer, { method: 'encoder', encoder: 'fd1', userGroup: 'Housekeeping' })).json.error?.code === 'LABEL_REQUIRED', 'permanent staff need the card number (HK 001)');
+    await call('POST', `${SIM}/sim/encoder`, undefined, { encoder: 'fd1', regNo: 'blank' });
+    const iss = await call('POST', `${H}/keycards/requests/${req14.id}/issue`, issuer, { method: 'encoder', encoder: 'fd1', userGroup: 'Housekeeping', cardLabel: 'hk 7' });
+    const ic = await cmdDone(issuer, iss.json.commandId);
+    await sleep(500);
+    const reg14 = (await call('GET', `${H}/keycards/register`, issuer)).json.find((x: any) => x.label === 'HK 007');
+    ok(ic.json.status === 'SUCCEEDED' && reg14?.status === 'in_use' && reg14.regNo === ic.json.result.regNo, `the card is encoded in Visionline (card ${ic.json.result?.regNo}) and registered as HK 007`, ic.json);
+    const dup = await call('POST', `${API}/api/v1/public/keycard-requests/${tok}`, undefined, { kind: 'new', staffType: 'permanent', givenName: 'Other', surname: 'Person', department: 'Housekeeping', reason: 'x1', managerName: 'HK manager' });
+    const other = (await call('GET', `${H}/keycards/requests?q=Other`, issuer)).json[0];
+    ok((await call('POST', `${H}/keycards/requests/${other.id}/issue`, issuer, { method: 'visionline_desk', userGroup: 'Housekeeping', cardLabel: 'HK 007' })).json.error?.code === 'LABEL_IN_USE' && dup.status === 201, 'a card number in use cannot be given twice');
+    const col = await call('POST', `${H}/keycards/requests/${req14.id}/collect`, issuer, { returnState: 'returned', method: 'expire_now', encoder: 'fd1' });
+    const cc = await cmdDone(issuer, col.json.commandId);
+    await sleep(1500);
+    const after = (await call('GET', `${H}/keycards/requests?q=Mbarga`, issuer)).json[0];
+    ok(cc.json.status === 'SUCCEEDED' && after.status === 'COLLECTED' && (await call('GET', `${H}/keycards/register`, issuer)).json.find((x: any) => x.label === 'HK 007')?.status === 'returned', 'the returned card is overwritten with a 1-minute card; the register says returned');
+    ok(after.notified.some((n: any) => n.to === 'hr@khb.test' && n.ok) && after.notified.some((n: any) => n.to === 'security@khb.test' && n.ok), 'HR and the security manager are told by e-mail', after.notified);
+    ok((await call('GET', `${H}/keycards/register.csv`, issuer)).json.includes('HK 007'), 'the register exports for HR');
+    ok((await call('GET', `${H}/keycards/attention`, issuer)).status === 200, 'renewals and people with several cards are listed');
+
+    const lo = await call('POST', `${H}/lockouts`, issuer, { room: '101', guestName: 'E2E Guest', amount: '100 USD', reason: 'Unpaid two nights' });
+    ok((await call('POST', `${H}/lockouts/${lo.json.id}/decide`, issuer, { approve: true })).status === 403, 'front office cannot approve its own lock-out');
+    const ap = await call('POST', `${H}/lockouts/${lo.json.id}/decide`, security, { approve: true });
+    const apc = await cmdDone(security, ap.json.commandId);
+    await sleep(500);
+    ok(ap.json.online === true && apc.json.status === 'SUCCEEDED' && (await call('GET', `${H}/lockouts`, security)).json.find((x: any) => x.id === lo.json.id)?.status === 'DONE', 'online room: the checkout command reached the lock');
+    const lo2 = await call('POST', `${H}/lockouts`, issuer, { room: '308', reason: 'Unpaid (offline lock)' });
+    await call('POST', `${SIM}/sim/encoder`, undefined, { encoder: 'fd1', regNo: 'blank' });
+    const ap2 = await call('POST', `${H}/lockouts/${lo2.json.id}/decide`, security, { approve: true, encoder: 'fd1' });
+    const ap2c = await cmdDone(security, ap2.json.commandId);
+    ok(ap2.json.online === false && ap2c.json.status === 'SUCCEEDED' && ap2c.json.result.kind === 'guestBlock', 'offline room: a 1-minute override guest card is encoded to place in the lock', ap2c.json);
+
+    await call('POST', `${SIM}/sim/encoder`, undefined, { encoder: 'fd1', regNo: 'blank' });
+    const sp = await call('POST', `${H}/keycards/special`, admin, { kind: 'emergency', encoder: 'fd1', holder: 'Duty manager' });
+    ok((await cmdDone(admin, sp.json.commandId)).json.status === 'SUCCEEDED', 'an emergency card is encoded at the encoder');
+    ok((await call('GET', `${H}/reports/setup`, admin)).json.property?.locks > 0, 'system setup report');
+    await call('POST', `${SIM}/sim/guest-cards`, undefined, { room: '205', n: 2 });
+    const gc = await call('POST', `${H}/reports/accounts/read-guest-cards`, admin, {});
+    ok((await cmdDone(admin, gc.json.commandId)).json.status === 'SUCCEEDED', 'guest keycards per room read from Visionline');
+    const acc = (await call('GET', `${H}/reports/accounts`, admin)).json;
+    ok(/occupied rooms/.test(acc.subject ?? '') && acc.multipleCards.some((m: any) => m.room === '205' && m.n >= 2), `Accounts daily report flags room 205 with ${acc.multipleCards?.find((m: any) => m.room === '205')?.n} active guest keycards`, acc.multipleCards);
+    ok(Array.isArray((await call('GET', `${H}/today`, security)).json.items), '"To do now" for the Overview');
+
+    const safety14 = await login('safety@khb.test');
+    const open0 = (await call('GET', `${H}/emergency/status`, safety14)).json.open;
+    if (open0) await call('POST', `${H}/emergency/${open0.id}/end`, security, { note: 'e2e cleanup' });
+    const rw = (await call('POST', `${API}/api/v1/me/reauth`, safety14, { password: PW })).json.token;
+    const rs = (await call('POST', `${API}/api/v1/me/reauth`, security, { password: PW })).json.token;
+    const em = await call('POST', `${H}/emergency`, safety14, { kind: 'fire', reason: 'e2e: emergency open' }, { 'x-smk-reauth': rw });
+    ok((await call('POST', `${H}/emergency/${em.json.id}/doors`, security, { command: 'emergencyOpen' }, { 'x-smk-reauth': rs })).status === 409, 'doors are not opened before a second person confirms');
+    await call('POST', `${H}/emergency/${em.json.id}/confirm`, security, {}, { 'x-smk-reauth': rs });
+    const op14 = await call('POST', `${H}/emergency/${em.json.id}/doors`, security, { command: 'emergencyOpen' }, { 'x-smk-reauth': rs });
+    for (const id of op14.json.commandIds ?? []) await cmdDone(security, id);
+    const runs = (await call('GET', `${H}/emergency/${em.json.id}/doors`, security)).json;
+    ok(op14.json.online > 0 && runs[0]?.reached === op14.json.online && op14.json.offline.length > 0, `emergency open: ${runs[0]?.reached} online guest-room locks opened, ${op14.json.offline?.length} offline listed for the emergency card`, op14.json);
+    await call('POST', `${H}/emergency/${em.json.id}/end`, security, { note: 'e2e: all clear' });
+    const back = await until('back to normal', () => call('GET', `${H}/emergency/${em.json.id}/doors`, security), (r) => r.json.some((x: any) => x.command === 'emergencyClose' && x.reached === op14.json.online), 60_000);
+    ok(back.json.some((x: any) => x.command === 'emergencyClose' && x.reached === op14.json.online), 'ending the emergency puts the doors back to normal');
+    await call('PUT', `${H}/config/policy`, admin, pol14);
   }
 
   console.log('\nGate: every request is traceable without exposing secrets');

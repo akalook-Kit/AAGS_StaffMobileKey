@@ -52,6 +52,15 @@ export const PERMISSIONS = [
   'muster.read',
   /** 2.13 Start (or confirm) an emergency, mark people safe, end the emergency. */
   'emergency.manage',
+  /** 2.14 Ask for a staff keycard or its cancellation; see one's own requests. */
+  'keycards.request',
+  /** See every keycard request and the keycard register; share them (HR). */
+  'keycards.read',
+  /** Issue (encode) keycards, record returns, cancel them in Visionline. */
+  'keycards.manage',
+  /** 2.14 Ask to lock an unpaid guest out of the room; approve it (a second person). */
+  'lockout.request',
+  'lockout.approve',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -68,6 +77,7 @@ export const ROLES = [
   'TIMEKEEPER',
   'RESTAURANT',
   'SAFETY',
+  'DEPT_MANAGER',
   'AUDITOR',
   'READ_ONLY',
 ] as const;
@@ -86,6 +96,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   TIMEKEEPER: 'Timekeeper (check-in desk)',
   RESTAURANT: 'Restaurant (breakfast)',
   SAFETY: 'Safety / fire warden (muster screen)',
+  DEPT_MANAGER: 'Department manager (keycard requests)',
   AUDITOR: 'Auditor',
   READ_ONLY: 'Read Only',
 };
@@ -98,25 +109,27 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   SECURITY_MANAGER: [
     'staff.read', 'key.read', 'key.approve_broad', 'key.revoke', 'endpoint.delete',
     'resources.read', 'templates.manage', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read', 'alerts.read', 'alerts.manage',
-    'muster.read', 'emergency.manage', 'idcards.manage',
+    'muster.read', 'emergency.manage', 'idcards.manage', 'keycards.request', 'keycards.read', 'keycards.manage', 'lockout.approve',
   ],
-  KEY_ISSUER: ['idcards.manage', 'staff.read', 'staff.manage', 'endpoint.onboard', 'key.read', 'key.issue', 'key.revoke', 'resources.read', 'breakfast.read', 'breakfast.serve', 'breakfast.manage'],
+  KEY_ISSUER: ['lockout.request', 'keycards.request', 'keycards.read', 'keycards.manage', 'idcards.manage', 'staff.read', 'staff.manage', 'endpoint.onboard', 'key.read', 'key.issue', 'key.revoke', 'resources.read', 'breakfast.read', 'breakfast.serve', 'breakfast.manage'],
   APPROVER: ['staff.read', 'key.read', 'key.approve_broad', 'resources.read'],
   // Phase 2. "work" = report, comment, attach and move a request up to Resolved; "manage" = assign, prioritise,
   // set due dates, close, cancel and reopen.
   MAINTENANCE_MANAGER: ['staff.read', 'resources.read', 'battery.read', 'battery.manage', 'maintenance.read', 'maintenance.work', 'maintenance.manage', 'connector.read', 'alerts.read'],
   TECHNICIAN: ['resources.read', 'battery.read', 'maintenance.read', 'maintenance.work'],
   // Read-only view for the general manager and department heads: every report, nothing they can change.
-  HOTEL_MANAGEMENT: ['muster.read', 'staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read', 'reports.read', 'audit.export', 'events.read', 'alerts.read', 'attendance.read', 'breakfast.read'],
+  HOTEL_MANAGEMENT: ['lockout.approve', 'keycards.read', 'muster.read', 'staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read', 'reports.read', 'audit.export', 'events.read', 'alerts.read', 'attendance.read', 'breakfast.read'],
   // Time & attendance: HR runs it; the timekeeper only checks people in and out at the desk.
-  HR_MANAGER: ['idcards.manage', 'staff.read', 'resources.read', 'attendance.read', 'attendance.clock', 'attendance.manage'],
+  HR_MANAGER: ['keycards.request', 'keycards.read', 'idcards.manage', 'staff.read', 'resources.read', 'attendance.read', 'attendance.clock', 'attendance.manage'],
   TIMEKEEPER: ['attendance.clock'],
   // Breakfast: the restaurant team marks guests as served; front office (key issuers) keeps the in-house list.
   RESTAURANT: ['breakfast.read', 'breakfast.serve'],
   // 2.13 The fire warden / security desk screen: the live muster list only, and starting an emergency (a second
   // person must confirm it).
   SAFETY: ['muster.read', 'emergency.manage'],
-  AUDITOR: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read', 'alerts.read', 'attendance.read', 'breakfast.read'],
+  // 2.14 Housekeeping, F&B, engineering... managers ask for keycards for their team (or their cancellation).
+  DEPT_MANAGER: ['keycards.request'],
+  AUDITOR: ['keycards.read', 'staff.read', 'key.read', 'resources.read', 'connector.read', 'audit.read', 'audit.export', 'battery.read', 'maintenance.read', 'reports.read', 'events.read', 'alerts.read', 'attendance.read', 'breakfast.read'],
   READ_ONLY: ['staff.read', 'key.read', 'resources.read', 'connector.read', 'battery.read', 'maintenance.read'],
 };
 
@@ -137,6 +150,7 @@ export const MODULES = {
   audit: { label: 'Audit trail', permissions: ['audit.read', 'audit.export'] },
   idCards: { label: 'Staff ID cards (profiles and printing)', permissions: ['idcards.manage'] },
   muster: { label: 'Live occupancy & emergency', permissions: ['muster.read', 'emergency.manage'] },
+  keycards: { label: 'Keycard requests and register', permissions: ['keycards.request', 'keycards.read', 'keycards.manage'] },
 } as const satisfies Record<string, { label: string; permissions: readonly Permission[] }>;
 export type ModuleId = keyof typeof MODULES;
 export const MODULE_IDS = Object.keys(MODULES) as ModuleId[];

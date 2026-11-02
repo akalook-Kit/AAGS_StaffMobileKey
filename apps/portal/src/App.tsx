@@ -30,6 +30,9 @@ import { EmergencyPage } from './pages/Emergency';
 import { IdCardsPage } from './pages/IdCards';
 import { UsagePage } from './pages/Usage';
 import { HelpPage } from './pages/Help';
+import { KeycardsPage } from './pages/Keycards';
+import { SetupReportPage } from './pages/SetupReport';
+import { PublicRequestPage } from './pages/PublicRequest';
 
 export interface Me {
   id: string; email: string; displayName: string; isPlatformAdmin: boolean; mfaEnabled: boolean;
@@ -54,6 +57,9 @@ export function App() {
     return () => window.removeEventListener('smk:signed-out', out);
   }, []);
   useEffect(() => { if (token) api<Me>('/api/v1/me').then(setMe).catch(() => setToken(null)); }, [token]);
+  // 2.14 The keycard request page behind the QR code needs no sign-in.
+  const pub = /^\/request\/([A-Za-z0-9_-]{20,64})$/.exec(location.pathname);
+  if (pub) return <PublicRequestPage token={pub[1]!} />;
   if (setup === undefined && !token) return <div className="empty">Loading…</div>;
   if (setup?.needed) return <SetupPage info={setup} />;
   if (!token) return <Login onSignedIn={(t) => { auth.set(t); setToken(t); }} />;
@@ -98,11 +104,11 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     ['/', 'Overview', true], ['/insights', 'Insights', can('reports.read')], ['/insights?page=mine', 'My reports', can('reports.read')], ['/insights?page=build', 'Build a report', can('reports.read')],
     ['/access', 'Access history', can('events.read')], ['/events', 'Event log', can('events.read')], ['/monitoring', 'Monitoring', can('alerts.read')],
     ['/muster', 'Live occupancy', can('muster.read')], ['/emergency', 'Emergency', can('muster.read')],
-    ['/visionline', 'Visionline cards & people', can('reports.read')], ['/visionline?tab=lookup', 'Card lookup', can('reports.read')], ['/idcards', 'Staff ID cards', can('idcards.manage')], ['/staff', 'Staff', can('staff.read')], ['/keys', 'Mobile keys', can('key.read')],
+    ['/visionline', 'Visionline cards & people', can('reports.read')], ['/visionline?tab=lookup', 'Card lookup', can('reports.read')], ['/idcards', 'Staff ID cards', can('idcards.manage')], ['/keycards', 'Staff keycards', can('keycards.request') || can('keycards.read') || can('lockout.request') || can('lockout.approve')], ['/staff', 'Staff', can('staff.read')], ['/keys', 'Mobile keys', can('key.read')],
     ['/attendance', 'Time & attendance', can('attendance.clock')], ['/breakfast', 'Breakfast', can('breakfast.read') && Boolean(attention.data?.breakfast)],
     ['/battery', 'Battery status', can('battery.read') && Boolean(attention.data?.batteryMonitoring)], ['/maintenance', 'Maintenance', can('maintenance.read') && Boolean(attention.data?.maintenance)],
     ['/operators', 'Operators', can('operators.manage')], ['/connector', 'Connector health', can('connector.read')], ['/branding', 'Branding and logo', can('branding.manage')],
-    ['/settings', 'Settings', can('settings.manage')], ['/settings?tab=licence', 'Licence', can('settings.manage')], ['/audit', 'Audit trail', can('audit.read')], ['/usage', 'Usage', can('settings.manage')], ['/help', 'Help and manual', true], ['/account', 'My account', true],
+    ['/settings', 'Settings', can('settings.manage')], ['/settings?tab=licence', 'Licence', can('settings.manage')], ['/audit', 'Audit trail', can('audit.read')], ['/usage', 'Usage', can('settings.manage')], ['/setup-report', 'System setup report', can('settings.manage')], ['/help', 'Help and manual', true], ['/account', 'My account', true],
   ] as [string, string, boolean][]).filter((x) => x[2]).map(([to, label]) => ({ to, label }));
 
   return (
@@ -133,8 +139,9 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             {can('muster.read') && (vis('/muster') || vis('/emergency')) && <div className="group">Safety</div>}
             {vis('/muster') && can('muster.read') && <NavLink to="/muster">Live occupancy {emergency.data?.open && <span className="count bad" title="Emergency open">!</span>}</NavLink>}
             {vis('/emergency') && can('muster.read') && <NavLink to="/emergency">Emergency</NavLink>}
-            {(can('reports.read') || can('staff.read') || can('key.read') || can('attendance.clock') || can('breakfast.read') || can('idcards.manage')) && <div className="group">People &amp; keys</div>}
+            {(can('reports.read') || can('staff.read') || can('key.read') || can('attendance.clock') || can('breakfast.read') || can('idcards.manage') || can('keycards.request') || can('lockout.request')) && <div className="group">People &amp; keys</div>}
             {vis('/visionline') && can('reports.read') && <NavLink to="/visionline">Visionline cards & people</NavLink>}
+            {vis('/keycards') && (can('keycards.request') || can('keycards.read') || can('lockout.request') || can('lockout.approve')) && <NavLink to="/keycards">Staff keycards</NavLink>}
             {vis('/idcards') && can('idcards.manage') && <NavLink to="/idcards">Staff ID cards</NavLink>}
             {vis('/staff') && can('staff.read') && <NavLink to="/staff">Staff</NavLink>}
             {vis('/keys') && can('key.read') && <NavLink to="/keys">Mobile keys {pendingCount > 0 && <span className="count" title="Awaiting approval">{pendingCount}</span>}</NavLink>}
@@ -150,6 +157,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             {vis('/settings') && can('settings.manage') && <NavLink to="/settings">Settings</NavLink>}
             {vis('/audit') && can('audit.read') && <NavLink to="/audit">Audit trail</NavLink>}
             {vis('/usage') && can('settings.manage') && <NavLink to="/usage">Usage</NavLink>}
+            {vis('/setup-report') && can('settings.manage') && <NavLink to="/setup-report">System setup report</NavLink>}
           </nav>
           <div className="foot">
             <div><NavLink to="/account" style={{ color: 'inherit' }}>{me.displayName}</NavLink></div>
@@ -191,6 +199,8 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <Route path="/muster" element={<MusterPage />} />
             <Route path="/emergency" element={<EmergencyPage />} />
             <Route path="/idcards" element={<IdCardsPage />} />
+            <Route path="/keycards" element={<KeycardsPage />} />
+            <Route path="/setup-report" element={<SetupReportPage />} />
             <Route path="/usage" element={<UsagePage />} />
             <Route path="/help" element={<HelpPage />} />
             <Route path="*" element={<Navigate to="/" />} />

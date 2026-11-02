@@ -1,7 +1,9 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { CsCredentialStatus } from '@smk/shared';
 
-export interface Door { id: string; doorID: number; doorName: string; doorGroup: string; doorGroupID: number; doorCategory: string; online: boolean; battery: 'GOOD' | 'LOW' | 'CRITICAL' | null }
+export interface Door { id: string; doorID: number; doorName: string; doorGroup: string; doorGroupID: number; doorCategory: string; online: boolean; battery: 'GOOD' | 'LOW' | 'CRITICAL' | null;
+  /** 2.14 Lock state set by door commands [Web API §5.13.3-4]. */
+  standOpenUntil?: string | null; emergencyOpen?: boolean }
 export interface Session { id: string; accessKey: string; username: string; webClientID?: number; expiresAt: number; ttlMs: number }
 export interface Card {
   cardId: string; credentialID: number; cardHolder: string; issuedBy: string; endpointId: string; doors: string[];
@@ -23,7 +25,7 @@ export interface CsCallbackReg { type: 'ENDPOINT' | 'CREDENTIAL' | 'READBACK'; u
 
 const rooms = (floor: number) => Array.from({ length: 10 }, (_, i): Door => {
   const n = `${floor}${String(i + 1).padStart(2, '0')}`;
-  return { id: n, doorID: Number(n), doorName: n, doorGroup: `Floor ${floor}`, doorGroupID: floor, doorCategory: 'guest', online: true, battery: i === 3 ? 'LOW' : 'GOOD' };
+  return { id: n, doorID: Number(n), doorName: n, doorGroup: `Floor ${floor}`, doorGroupID: floor, doorCategory: 'guest', online: !(floor === 3 && i >= 7), battery: i === 3 ? 'LOW' : 'GOOD' }; // 308-310: offline (standalone) locks
 });
 
 export const KHB_ACCOUNT = 'hma-cs-92a0dc3e-6379-4b84-999c-aedb582c1b63';
@@ -103,7 +105,7 @@ export function createState() {
     vlCallbacks: new Map<string, VlCallback>(),
     /** Visionline Options → Mobile Access (UUID, revoke mode). */
     mobileAccessOptions: { uuid: 9, revokeWhen: 'overridden' as 'overridden' | 'expired' },
-    faults: { visionlineDown: false, failNextCard: null as number | null, deliveryDelayMs: 1500, clockOffsetSec: 0, sessionTtlSec: 1800, enforceOneStaffCard: true },
+    faults: { visionlineDown: false, failNextCard: null as number | null, deliveryDelayMs: 1500, clockOffsetSec: 0, sessionTtlSec: 1800, enforceOneStaffCard: true, noDoorCommands: false },
     stats: { sessionsCreated: 0, signedRequests: 0, rejectedSignatures: 0, cardsCreated: 0, callbacksSent: 0 },
   };
 }

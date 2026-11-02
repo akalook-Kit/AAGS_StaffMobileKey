@@ -12,9 +12,9 @@ import { VisionlineWatch } from './watch.ts';
 import { readDirectory } from './visionline/directory.ts';
 
 /** Commands that change Visionline; refused in read-only mode. */
-const WRITES = new Set(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'CREATE_USER_GROUP']);
+const WRITES = new Set(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'CREATE_USER_GROUP', 'ENCODE_KEYCARD', 'CANCEL_KEYCARD', 'DOOR_COMMANDS']);
 
-export const CONNECTOR_VERSION = '0.11.0';
+export const CONNECTOR_VERSION = '0.12.0';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -94,7 +94,7 @@ export class Connector {
       visionlineWatch: this.watch.status,
       readOnly: this.cfg.visionline.readOnly,
       // Battery alarms ride on the Visionline watch; without the watch there are none to report.
-      capabilities: ['encoder-read', ...(this.cfg.visionline.watch ? ['battery-events', 'entrance-events', 'directory-sync', 'directory-sync-users'] : [])],
+      capabilities: ['encoder-read', 'encode-keycard', 'door-commands', ...(this.cfg.visionline.watch ? ['battery-events', 'entrance-events', 'directory-sync', 'directory-sync-users'] : [])],
       directorySync: this.directorySync,
       ...(this.disk ? { disk: this.disk } : {}),
     };
@@ -195,6 +195,25 @@ export class Connector {
         case 'READ_CARD':
           result = { status: 'SUCCEEDED', result: await this.adapter.readCardAtEncoder(payload.encoder, payload.action) };
           break;
+        case 'ENCODE_KEYCARD':
+          result = { status: 'SUCCEEDED', result: await this.adapter.encodeKeycard(payload) };
+          break;
+        case 'COUNT_GUEST_CARDS':
+          result = { status: 'SUCCEEDED', result: await this.adapter.countGuestCards(payload.rooms) };
+          break;
+        case 'LIST_ENCODERS':
+          result = { status: 'SUCCEEDED', result: await this.adapter.listEncoders() };
+          break;
+        case 'CANCEL_KEYCARD':
+          result = { status: 'SUCCEEDED', result: await this.adapter.cancelKeycard(payload.regNo, payload.cardHolder) };
+          break;
+        case 'DOOR_COMMANDS': {
+          const r = await this.adapter.doorCommands(payload);
+          // Partly done is still a result: the portal shows which doors did not answer.
+          result = { status: r.results.some((x) => x.ok) || !r.results.length ? 'SUCCEEDED' : 'FAILED', result: r,
+            ...(r.results.every((x) => !x.ok) ? { error: { code: 'DOORS_NOT_REACHED', message: r.results[0]?.error ?? 'No door answered', retryable: false } } : {}) };
+          break;
+        }
       }
       this.visionlineReachable = true;
     } catch (e) {

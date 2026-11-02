@@ -1,4 +1,4 @@
-# Staff Mobile Key — user manual (2.13)
+# Staff Mobile Key — user manual (2.14)
 
 The portal works next to ASSA ABLOY Visionline. Visionline stays the system that encodes keycards and talks to the
 locks; the portal reads from it (people, keycards, lock events), adds what Visionline does not do (reports, live
@@ -25,8 +25,9 @@ everyone except administrators.
 
 ## 2. Overview
 
-The first page: today's figures and anything that needs attention (keys waiting for approval, critical alerts,
-batteries, open maintenance requests). Click a figure to open the page behind it.
+The first page starts with **To do now**: only what is waiting for *you* (keycard requests to handle, lock-outs to
+approve, departures to clear, keycards ending this week, an emergency), refreshed by itself, with quick actions below
+it. Then today's figures and anything that needs attention. Click a card to open the page behind it.
 
 ## 3. Visionline cards & people
 
@@ -94,10 +95,12 @@ area is empty. The time windows are set in *Settings → Safety & emergency*.
 
 Everything is in the audit trail with names and times.
 
-**Opening all guest rooms at once** is not offered: it is not part of the Visionline interface the portal uses, and
-standalone (offline) RFID locks cannot be opened remotely by any system. If your hotel has online locks, ask ASSA ABLOY
-whether its online system offers it. Keep **emergency keycards** (they open every lock, also with the deadbolt on)
-in the fire box and at reception; the Readiness panel counts the valid ones Visionline reports.
+**Opening all guest rooms at once (2.14)**: during a confirmed emergency (not a drill), *Emergency open all guest
+rooms* sends the Visionline emergency-open command to every guest room with an **online** lock; the page shows which
+locks answered, and *Back to normal* (also automatic when the emergency ends) returns them to normal. Rooms with
+**offline** locks are listed: use the **emergency card** (encode one in *Staff keycards → Encoders & special cards*;
+it opens every lock, also with the deadbolt on). Switch the command on in *Settings → Safety & emergency* after
+testing it on one door.
 
 ## 9. Staff ID cards
 
@@ -123,8 +126,51 @@ Printing does not touch the chip: print before or after encoding the card in Vis
 | RFID keycards (best: prints on film laid on the card, edge to edge, not spoiled by the chip) | HID Fargo HDP5000 / HDP6600, Evolis Avansia, Matica MC310, Entrust Datacard CR805 |
 | Flat PVC keycards, lower cost (direct-to-card; keep a 1–1.5 mm margin) | Zebra ZC300 / ZC350, Evolis Primacy 2, Magicard Rio Pro 360, HID Fargo DTC1500 |
 
-Ask ASSA ABLOY or your card supplier for a printable surface version of your keycard (some glossy cards do not take
+Ask your card supplier for a printable surface version of your keycard (some glossy cards do not take
 ink well).
+
+## 9b. Staff keycards (requests, register, cancellations)
+
+*People & keys → Staff keycards.* Visionline stays the key system: every card is made in Visionline, either encoded
+from the portal at an encoder or made at the Visionline desk and recorded here.
+
+- **Request**: *New request* (or the **QR code page**: front office prints the QR code from *QR code page*; managers
+  scan it with their phone, no sign-in). Choose New / Replacement / Cancellation, permanent or daily staff, first name,
+  surname, department, job title, employee number, card number (e.g. **HK 001**), the manager asking (e.g. the
+  Housekeeping manager), HR e-mail, reason. Daily staff can ask for several cards at once.
+- **Issue**: open the request, choose the Visionline user group and validity. *Encode here*: place a blank card on the
+  chosen encoder and press *Encode the card* (the person is created in Visionline if needed). *Made at the Visionline
+  desk*: record the Visionline card number. Permanent staff need the card number (HK 001); it goes into the
+  **Register**.
+- **Resignation / cancellation**: open the request, say whether the card was returned, lost or damaged, and stop it:
+  *Overwriting it at the encoder* (the returned card is rewritten so it expires one minute later), *Cancelling its
+  number in Visionline*, or *Done at the Visionline desk*. HR and the security manager receive an e-mail ("keycard
+  cancelled and returned").
+- **Send to HR** e-mails one request; **Register → Export for HR** gives the whole list (CSV).
+- **Renewals & duplicates**: staff keycards ending within 7/30/60 days (also on *To do now*, and once a day an e-mail
+  to HR and the security manager lists the cards ending within 14 days), and people holding more
+  than one valid card. A *Replacement* request encodes the new card with *override*, which cancels every older card of
+  that person in Visionline.
+- **Unpaid guests**: front office asks (room, guest, amount, reason); a manager approves (never the same person).
+  Online lock: the Visionline checkout command stops the guest's cards at the door. Offline lock: a one-minute guest
+  card is encoded for the room with *override*; place it in the lock and the guest's cards stop working. Every case is
+  listed (and in the Accounts report). *Settled* closes it; issue a new key in Opera.
+- **Departures**: rooms leaving today. Online locks: *Send checkout* and see which locks confirmed it. Offline locks:
+  place the **clearance card** on the lock and tick *Clearance card placed*.
+- **Encoders & special cards**: the encoders read from Visionline and their last use; encode **emergency**,
+  **stand-open**, **clearance** and **one-time** cards. Choose the encoders the portal may use in *Settings →
+  Keycards & encoders*.
+
+## 9c. Reports for Accounts and the system setup report
+
+- **Accounts daily report** (*Settings → Accounts daily report*): an e-mail every morning with the guests who checked
+  in yesterday, the guests in house and the number of occupied rooms (to tally with the Opera night audit), the
+  **rooms with more than one active guest keycard** (read from Visionline 30 minutes before the report; a room not on
+  the in-house list is flagged), and the unpaid-guest lock-outs. *Send now* sends it at once; the page shows a preview. It reads the Opera in-house list
+  imported in Breakfast.
+- **System setup report** (*Administration → System setup report*): property, keycard types, user groups, door groups
+  and rooms, locks (online/offline), time tables, who has access, and the main parameters — one section per page, in
+  the layout of the Visionline System Setup Report. *Print / PDF*.
 
 ## 10. Staff and mobile keys (when the module is on)
 

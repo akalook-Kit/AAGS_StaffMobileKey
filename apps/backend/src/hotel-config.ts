@@ -184,6 +184,44 @@ export const SCHEMAS = {
       emergencyKeyHours: z.number().int().min(1).max(24).default(4),
       /** Floors from room numbers: the first N characters of the door name (0 = guess: all but the last 2 digits). */
       floorDigits: z.number().int().min(0).max(4).default(0),
+      /** 2.14 Remote door commands to online locks [Web API §5.13.4, §7.12]; needs the Visionline option
+       *  "Web service for sending open/close commands to doors". Off until the hotel has tested it on one door. */
+      doorCommands: z.object({
+        enabled: z.boolean().default(false),
+        /** Which doors "Open all guest rooms" commands: room-number doors, chosen door groups, or every online door. */
+        scope: z.enum(['rooms', 'groups', 'all']).default('rooms'),
+        doorGroups: z.array(z.string().min(1).max(80)).max(100).default([]),
+        /** Doors commanded at the same time (each can take up to 20 s on ZigBee). */
+        parallel: z.number().int().min(1).max(10).default(6),
+        /** Put the doors back to normal when the emergency is ended. */
+        closeOnEnd: z.boolean().default(true),
+      }).prefault({}),
+    }).prefault({}),
+    /** 2.14 Daily e-mail for the Accounts team (in-house, arrivals, occupied rooms, lock-outs). */
+    accountsReport: z.object({
+      enabled: z.boolean().default(false),
+      time: z.string().regex(/^\d{2}:\d{2}$/).default('06:30'),
+      emails: z.array(z.string().email()).max(10).default([]),
+    }).prefault({}),
+    /** 2.14 Keycard requests. */
+    keycards: z.object({
+      /** HR is told when a keycard is cancelled and returned (and can be sent a request). */
+      hrEmail: z.string().email().optional().nullable(),
+      /** Security manager / front office: told about new requests and cancellations. */
+      notifyEmails: z.array(z.string().email()).max(10).default([]),
+      /** Also e-mail every operator with the Security Manager role. */
+      notifySecurityManagers: z.boolean().default(true),
+      /** Encoding at an encoder from the portal [Web API §7.6.1]. Off until tested on site. */
+      encodeEnabled: z.boolean().default(false),
+      encoders: z.array(z.string().regex(/^[\w .-]{1,40}$/)).max(20).default([]),
+      /** Visionline user group for daily (casual) staff cards. */
+      dailyUserGroup: z.string().max(60).optional().nullable(),
+      /** How long a daily card is valid (hours) and a permanent card (days) by default. */
+      dailyHours: z.number().int().min(1).max(72).default(14),
+      permanentDays: z.number().int().min(1).max(3650).default(365),
+      /** Pattern of the hotel's card numbers (HK 001). */
+      requestTokenHash: z.string().regex(/^[0-9a-f]{64}$/).optional().nullable(),
+      labelPrefixes: z.array(z.string().regex(/^[A-Z]{1,6}$/)).max(40).default(['HK', 'FO', 'FB', 'ENG', 'SEC', 'ADM', 'SPA', 'KIT', 'LDY']),
     }).prefault({}),
     /** 2.13 Staff ID card layout (CR80, 85.6 × 54 mm). */
     idCard: z.object({

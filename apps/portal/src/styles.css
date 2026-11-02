@@ -711,3 +711,27 @@ table.grid td .row.end, table.grid td .row { flex-wrap: nowrap; } table.grid td:
 .em-banner .btn { color: #b42318; }
 .btn.danger-solid { background: #b42318; border-color: #b42318; }
 .table-scroll { overflow-x: auto; }
+.qr-box { width: 220px; height: 220px; background: #fff; padding: 6px; border-radius: 8px; }
+.qr-box svg { width: 100%; height: 100%; }
+.report-preview { background: var(--surface-2); padding: 10px 12px; border-radius: 6px; font-size: 12.5px; white-space: pre-wrap; max-height: 360px; overflow: auto; }
+/* ---- 2.14 System setup report ---- */
+.ssr-page { background: #fff; color: #111; border: 1px solid var(--line); border-radius: 6px; padding: 22px 26px; margin-bottom: 18px; font-size: 13px; }
+.ssr-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; border-bottom: 1.5px solid #111; padding-bottom: 8px; margin-bottom: 12px; gap: 12px; }
+.ssr-head img { max-height: 40px; max-width: 160px; }
+.ssr-title { text-align: center; display: flex; flex-direction: column; } .ssr-title strong { font-size: 18px; } .ssr-title em { font-weight: 600; }
+.ssr-right { text-align: right; display: flex; flex-direction: column; font-size: 12px; }
+.ssr-t { width: 100%; border-collapse: collapse; } .ssr-t th { text-align: left; border-bottom: 1px solid #111; padding: 4px 6px; font-size: 12px; } .ssr-t td { padding: 3px 6px; vertical-align: top; border-bottom: 1px solid #eee; }
+.ssr-kv div { display: grid; grid-template-columns: 220px 1fr; padding: 3px 0; } .ssr-kv dt { text-align: right; padding-right: 12px; color: #333; } .ssr-kv dd { margin: 0; }
+.ssr-foot { border-top: 1px solid #111; margin-top: 14px; padding-top: 4px; font-size: 11px; }
+@media print { .ssr-page { border: 0; break-after: page; padding: 0; } @page { size: A4 landscape; margin: 12mm; } }
+/* ---- 2.14 Overview: to do now ---- */
+.todo-now { margin-bottom: 18px; }
+.todo-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+.todo { display: grid; grid-template-columns: 46px 1fr auto; gap: 12px; align-items: center; text-decoration: none; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--brand); border-radius: var(--radius); padding: 12px 14px; transition: transform .12s, box-shadow .12s; }
+.todo:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+.todo.bad { border-left-color: var(--bad); } .todo.warn { border-left-color: var(--warn); } .todo.ok { border-left-color: var(--ok); }
+.todo-n { font-family: var(--tag); font-size: 26px; font-weight: 650; text-align: center; }
+.todo small { display: block; color: var(--ink-2); }
+.todo.bad .todo-n { color: var(--bad); }
+.quick { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.quick .chip { text-decoration: none; }

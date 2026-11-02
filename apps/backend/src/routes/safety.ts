@@ -21,6 +21,7 @@ import { getConfig } from '../hotel-config.ts';
 import { queryEvents } from '../event-log.ts';
 import { attendanceOn, today as attendanceToday, hotelTz } from '../attendance/service.ts';
 import { requestKey, enqueueIssue } from '../keys.ts';
+import { enqueue, newCorrelationId } from '../commands.ts';
 import { buildReportPdf } from '../pdf.ts';
 import { licenceStatus } from '../licence.ts';
 import { PLATFORM_VERSION } from '../version.ts';
@@ -142,7 +143,7 @@ export async function musterView(hotelId: string) {
 // Usage
 // ---------------------------------------------------------------------------------------------------------------
 const AREAS = ['overview', 'insights', 'access', 'events', 'monitoring', 'visionline', 'staff', 'keys', 'attendance', 'breakfast', 'battery', 'maintenance',
-  'operators', 'connector', 'branding', 'settings', 'audit', 'account', 'idcards', 'muster', 'emergency', 'usage', 'help'] as const;
+  'operators', 'connector', 'branding', 'settings', 'audit', 'account', 'idcards', 'muster', 'emergency', 'usage', 'help', 'keycards', 'setup-report'] as const;
 const recentPings = new Map<string, number>();
 /** What a page view or action is worth in minutes saved (editable in the Usage page, these are starting points). */
 const OUTCOMES: Record<string, { label: string; actions?: string[]; table?: string }> = {
@@ -282,8 +283,13 @@ export function safetyRoutes(app: FastifyInstance) {
       readiness: {
         emergencyCards: emergencyCards?.n ?? 0, responders: responders.map((r) => ({ id: r.id, name: r.full_name, role: r.job_role })),
         template: template ? { id: template.id, name: template.name } : null, keyHours: pol.emergencyKeyHours,
-        // Opening every room from the server needs online locks and an ASSA ABLOY interface that allows it; not offered here.
-        remoteOpen: { available: false, reason: 'Opening rooms from a computer is not part of the Visionline interface the portal uses, and standalone (offline) RFID locks cannot be opened remotely by any system. If the hotel has online locks, ask ASSA ABLOY whether its online system offers it. Use emergency keycards (they open every lock, also with the deadbolt on) and emergency mobile keys for responders.' },
+        remoteOpen: await (async () => {
+          const dc = (await getConfig(pool, hotelId, 'policy'))?.safety?.doorCommands ?? {};
+          const rooms = await many(pool, `SELECT data FROM resources WHERE hotel_id=$1 AND kind='door' AND active AND (data->>'doorCategory'='guest' OR name ~ '^[0-9]{2,5}[A-Za-z]?$')`, [hotelId]);
+          const online = rooms.filter((d) => d.data?.online === true).length;
+          return { available: Boolean(dc.enabled) && online > 0, enabled: Boolean(dc.enabled), online, offline: rooms.length - online,
+            reason: 'Online locks get the emergency open command from Visionline; offline locks need the emergency card (encode one in Staff keycards -> Encoders & special cards).' };
+        })(),
       },
     };
   });
@@ -328,7 +334,60 @@ export function safetyRoutes(app: FastifyInstance) {
       const status = e.status === 'REQUESTED' ? 'CANCELLED' : 'ENDED';
       await c.query(`UPDATE emergencies SET status=$2, ended_by=$3, ended_at=now(), actions = actions || $4::jsonb WHERE id=$1`, [id, status, op.id, JSON.stringify([{ at: new Date().toISOString(), by: op.displayName, what: `${status === 'ENDED' ? 'Ended' : 'Cancelled'}: ${b.note}` }])]);
       await audit(c, { hotelId, actorType: 'operator', actorId: op.id, action: status === 'ENDED' ? 'emergency.ended' : 'emergency.cancelled', targetType: 'emergency', targetId: id, details: { note: b.note } });
+      // 2.14 Doors opened remotely go back to normal when the emergency ends (Settings -> Safety: closeOnEnd).
+      const runs = await many(c, `SELECT doors FROM emergency_door_runs WHERE emergency_id=$1 AND command='emergencyOpen'`, [id]);
+      const pol = (await getConfig(c, hotelId, 'policy'))?.safety?.doorCommands ?? {};
+      const opened = [...new Set(runs.flatMap((r: any) => r.doors as string[]))];
+      if (opened.length && pol.closeOnEnd !== false) {
+        const ids: string[] = [];
+        for (let i = 0; i < opened.length; i += 60) ids.push((await enqueue(c, { hotelId, type: 'DOOR_COMMANDS', payload: { command: 'emergencyClose', doors: opened.slice(i, i + 60), parallel: pol.parallel ?? 6, timeoutSec: 30 }, idempotencyKey: `em:${id}:close:${i}`, correlationId: newCorrelationId(), ttlSec: 300 })).id);
+        await c.query(`INSERT INTO emergency_door_runs (hotel_id, emergency_id, command, doors, command_ids, created_by) VALUES ($1,$2,'emergencyClose',$3,$4,$5)`, [hotelId, id, opened, ids, op.id]);
+      }
       return { id, status };
+    });
+  });
+  /**
+   * 2.14 Emergency open (or back to normal) of the guest rooms with online locks [Web API §5.13.4, §7.12]: sent in
+   * batches during a confirmed emergency (never a drill). Offline locks cannot be reached: they are listed so staff
+   * use the emergency card.
+   */
+  app.post(`${P}/hotels/:hotelId/emergency/:id/doors`, async (req) => {
+    const hotelId = hid(req);
+    const op = await requirePerm(req, hotelId, 'emergency.manage');
+    await requireReauth(req, op);
+    const id = uuid.parse((req.params as any).id);
+    const b = z.object({ command: z.enum(['emergencyOpen', 'emergencyClose']) }).parse(req.body);
+    const e = await one(pool, `SELECT * FROM emergencies WHERE id=$1 AND hotel_id=$2`, [id, hotelId]);
+    if (!e) throw notFound('Emergency');
+    if (b.command === 'emergencyOpen' && (e.status !== 'ACTIVE' || e.kind === 'drill')) throw conflict('NOT_ACTIVE', e.kind === 'drill' ? 'Doors are not opened during a drill.' : 'A second person must confirm the emergency first.');
+    const pol = (await getConfig(pool, hotelId, 'policy'))?.safety?.doorCommands ?? {};
+    if (!pol.enabled) throw conflict('DOOR_COMMANDS_OFF', 'Remote door commands are switched off (Settings -> Safety & emergency). Test them on one door first.');
+    const doors = await many(pool, `SELECT external_id, name, data FROM resources WHERE hotel_id=$1 AND kind='door' AND active`, [hotelId]);
+    const scope = pol.scope ?? 'rooms';
+    const chosen = doors.filter((d) => scope === 'all' || (scope === 'groups' ? (pol.doorGroups ?? []).includes(d.data?.doorGroup) : (d.data?.doorCategory === 'guest' || ROOM.test(d.name))));
+    const online = chosen.filter((d) => d.data?.online === true).map((d) => d.external_id);
+    const offline = chosen.filter((d) => d.data?.online !== true).map((d) => d.name);
+    const ids: string[] = [];
+    for (let i = 0; i < online.length; i += 60) {
+      const cmd = await enqueue(pool, { hotelId, type: 'DOOR_COMMANDS', payload: { command: b.command, doors: online.slice(i, i + 60), parallel: pol.parallel ?? 6, timeoutSec: 30 },
+        idempotencyKey: `em:${id}:${b.command}:${i}:${Date.now()}`, correlationId: newCorrelationId(), ttlSec: 300 });
+      ids.push(cmd.id);
+    }
+    await pool.query(`INSERT INTO emergency_door_runs (hotel_id, emergency_id, command, doors, skipped, command_ids, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [hotelId, id, b.command, online, offline, ids, op.id]);
+    await pool.query(`UPDATE emergencies SET actions = actions || $2::jsonb WHERE id=$1`, [id, JSON.stringify([{ at: new Date().toISOString(), by: op.displayName, what: `${b.command === 'emergencyOpen' ? 'Emergency open' : 'Back to normal'} sent to ${online.length} online door(s); ${offline.length} offline (emergency card)` }])]);
+    await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: b.command === 'emergencyOpen' ? 'emergency.doors_opened' : 'emergency.doors_normal', targetType: 'emergency', targetId: id, details: { online: online.length, offline: offline.length } });
+    return { online: online.length, offline, commandIds: ids };
+  });
+  /** Results of the door commands of an emergency (which doors answered). */
+  app.get(`${P}/hotels/:hotelId/emergency/:id/doors`, async (req) => {
+    const hotelId = hid(req);
+    await requirePerm(req, hotelId, 'muster.read');
+    const id = uuid.parse((req.params as any).id);
+    const runs = await many(pool, `SELECT r.*, (SELECT json_agg(json_build_object('status', c.status, 'result', c.result)) FROM commands c WHERE c.id = ANY(r.command_ids)) AS cmds FROM emergency_door_runs r WHERE r.hotel_id=$1 AND r.emergency_id=$2 ORDER BY r.created_at`, [hotelId, id]);
+    return runs.map((r) => {
+      const results = (r.cmds ?? []).flatMap((c: any) => c.result?.results ?? []);
+      return { command: r.command, at: r.created_at, doors: r.doors.length, offline: r.skipped, pending: (r.cmds ?? []).filter((c: any) => !['SUCCEEDED', 'FAILED', 'EXPIRED'].includes(c.status)).length,
+        reached: results.filter((x: any) => x.ok).length, failed: results.filter((x: any) => !x.ok).map((x: any) => ({ door: x.door, error: x.error })) };
     });
   });
   /** Roll call: tick a person or a room as safe (or undo). */

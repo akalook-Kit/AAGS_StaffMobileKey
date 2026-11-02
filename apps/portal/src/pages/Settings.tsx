@@ -67,6 +67,8 @@ const TABS = [
   { id: 'battery', label: 'Battery & maintenance', group: 'Alerts' },
   { id: 'safety', label: 'Safety & emergency', group: 'Safety & people' },
   { id: 'idcard', label: 'ID card layout', group: 'Safety & people' },
+  { id: 'keycards', label: 'Keycards & encoders', group: 'Safety & people' },
+  { id: 'accounts', label: 'Accounts daily report', group: 'Safety & people' },
   { id: 'security', label: 'Administrator protection', group: 'System' },
   { id: 'privacy', label: 'Privacy & retention', group: 'System' },
   { id: 'backups', label: 'Backups', group: 'System' },
@@ -82,6 +84,7 @@ const KEYWORDS: Record<string, string> = {
   credential_services: 'seos tenant system id credential', alerts: 'email sms smtp contacts notifications', thresholds: 'offline vip alarms disk monitoring',
   battery: 'battery voltage maintenance due technicians', safety: 'muster occupancy fire evacuation emergency template responders visitors floors',
   idcard: 'id card badge photo print printer barcode cr80 layout', security: 'two-step mfa 2fa authenticator password administrators protection re-enter',
+  keycards: 'keycard request qr hr email encoder encode daily permanent card number security', accounts: 'accounts finance daily report email occupied rooms in house',
   backups: 'backup restore database', privacy: 'privacy retention gdpr data protection delete keep days guests events', licence: 'licence license key installation id trial',
 };
 
@@ -124,6 +127,8 @@ export function SettingsPage() {
         : tab === 'idcard' ? <ConfigForm key="idcard" kind="policy" intro="What is printed on staff ID cards (CR80, 85.6 × 54 mm). Part of the hotel policy." render={(d, set) => <IdCardPolicy data={d} set={set} />} />
         : tab === 'security' ? <ConfigForm key="security" kind="policy" intro="Extra protection for the people who can change settings. Part of the hotel policy." render={(d, set) => <AdminSecurityPolicy data={d} set={set} />} />
         : tab === 'privacy' ? <ConfigForm key="privacy" kind="policy" intro="How long personal data is kept. Older data is deleted automatically every hour, a little at a time. The audit trail is always kept." render={(d, set) => <PrivacyPolicy data={d} set={set} />} />
+        : tab === 'keycards' ? <ConfigForm key="keycards" kind="policy" intro="Staff keycard requests, who is told, and encoding from the portal. Part of the hotel policy." render={(d, set) => <KeycardPolicy data={d} set={set} />} />
+        : tab === 'accounts' ? <ConfigForm key="accounts" kind="policy" intro="A daily e-mail for the Accounts team: guests who checked in yesterday, guests in house and occupied rooms (from the Opera in-house list), unpaid-guest lock-outs." render={(d, set) => <AccountsPolicy data={d} set={set} />} />
         : tab === 'backups' ? <BackupsPanel />
         : tab === 'licence' ? <LicencePanel />
         : tab === 'thresholds' ? <ConfigForm key="thresholds" kind="policy" intro="When Monitoring raises an alert. Part of the hotel policy; each save is a new policy version." render={(d, set) => <ThresholdsEditor data={d} set={set} />} />
@@ -890,6 +895,7 @@ function SafetyPolicy({ data, set }: { data: any; set: (patch: any) => void }) {
   const sf = { staffOnSiteHours: 10, roomActivityHours: 12, visitorGroups: [], emergencyTemplateId: null, emergencyKeyHours: 4, floorDigits: 0, ...(data.safety ?? {}) };
   const setS = (patch: any) => set({ safety: { ...sf, ...patch } });
   const [vg, setVg] = useState((sf.visitorGroups ?? []).join(', '));
+  const dc = { enabled: false, scope: 'rooms', doorGroups: [], parallel: 6, closeOnEnd: true, ...(sf.doorCommands ?? {}) };
   return (
     <>
       <h3 className="section-title">Live occupancy</h3>
@@ -902,6 +908,10 @@ function SafetyPolicy({ data, set }: { data: any; set: (patch: any) => void }) {
       </div>
       <div className="field"><label htmlFor="vg">Visionline user groups that are visitors or contractors</label><input id="vg" value={vg} onChange={(e) => setVg(e.target.value)} onBlur={() => setS({ visitorGroups: vg.split(',').map((x: string) => x.trim()).filter(Boolean) })} placeholder="e.g. Contractors, Visitors" />
         <span className="hint">Counted separately from staff. Separate with commas.</span></div>
+      <h3 className="section-title">Remote door commands (online locks)</h3>
+      <label className="check"><input type="checkbox" checked={dc.enabled} onChange={(e) => setS({ doorCommands: { ...dc, enabled: e.target.checked } })} /> <span>Allow "Emergency open all guest rooms" during a confirmed emergency<br /><span className="small muted">Needs the Visionline option "Web service for sending open/close commands to doors" and online (ZigBee / Ethernet) locks. Test it on one door first.</span></span></label>
+      <label className="check"><input type="checkbox" checked={dc.closeOnEnd} onChange={(e) => setS({ doorCommands: { ...dc, closeOnEnd: e.target.checked } })} /> Put the doors back to normal when the emergency ends</label>
+      <div className="field" style={{ maxWidth: 320 }}><label htmlFor="dcs">Doors</label><select id="dcs" value={dc.scope} onChange={(e) => setS({ doorCommands: { ...dc, scope: e.target.value } })}><option value="rooms">Guest rooms</option><option value="all">Every online door</option></select></div>
       <h3 className="section-title">Emergency keys</h3>
       <div className="field-row">
         <div className="field"><label htmlFor="et">Template for emergency mobile keys</label>
@@ -968,6 +978,59 @@ function PrivacyPolicy({ data, set }: { data: any; set: (patch: any) => void }) 
         {f('usageDays', 'Portal usage counts (days)', 'Pages opened per person per day.')}
       </div>
       <p className="small muted">0 keeps the data. Visionline keeps its own history independently. Staff ID profiles and their photos are deleted when the profile is removed.</p>
+    </>
+  );
+}
+
+/** 2.14 Keycard requests and encoders. */
+function KeycardPolicy({ data, set }: { data: any; set: (patch: any) => void }) {
+  const { base } = useHotel();
+  const enc = useApi<any>(`${base}/keycards/encoders`);
+  const k = { hrEmail: null, notifyEmails: [], notifySecurityManagers: true, encodeEnabled: false, encoders: [], dailyUserGroup: null, dailyHours: 14, permanentDays: 365, ...(data.keycards ?? {}) };
+  const setK = (p: any) => set({ keycards: { ...k, ...p } });
+  const [emails, setEmails] = useState((k.notifyEmails ?? []).join(', '));
+  return (
+    <>
+      <div className="field-row">
+        <div className="field"><label htmlFor="k-hr">HR e-mail</label><input id="k-hr" type="email" value={k.hrEmail ?? ''} onChange={(e) => setK({ hrEmail: e.target.value || null })} /><span className="hint">Told when a keycard is cancelled and returned.</span></div>
+        <div className="field"><label htmlFor="k-n">Also tell (e-mails)</label><input id="k-n" value={emails} onChange={(e) => setEmails(e.target.value)} onBlur={() => setK({ notifyEmails: emails.split(',').map((x: string) => x.trim()).filter(Boolean) })} placeholder="security@hotel.com" /></div>
+      </div>
+      <label className="check"><input type="checkbox" checked={k.notifySecurityManagers} onChange={(e) => setK({ notifySecurityManagers: e.target.checked })} /> E-mail every Security Manager about new requests and cancellations</label>
+      <div className="field-row">
+        <div className="field"><label htmlFor="k-dh">Daily staff card valid (hours)</label><input id="k-dh" type="number" min={1} max={72} value={k.dailyHours} onChange={(e) => setK({ dailyHours: Number(e.target.value) })} /></div>
+        <div className="field"><label htmlFor="k-pd">Permanent staff card valid (days)</label><input id="k-pd" type="number" min={1} max={3650} value={k.permanentDays} onChange={(e) => setK({ permanentDays: Number(e.target.value) })} /></div>
+      </div>
+      <h3 className="section-title">Encoding from the portal</h3>
+      <label className="check"><input type="checkbox" checked={k.encodeEnabled} onChange={(e) => setK({ encodeEnabled: e.target.checked })} /> <span>Encode keycards at an encoder from the portal<br /><span className="small muted">The card is made by Visionline (Web API: cards with action=encode), so it is in Visionline like any card made at the desk. Test with one encoder first.</span></span></label>
+      <p className="small muted" style={{ margin: '8px 0 4px' }}>Encoders the portal may use (read from Visionline in Staff keycards → Encoders):</p>
+      <div className="menu-picks">{(enc.data?.encoders ?? []).map((x: any) => <label key={x.name} className="check"><input type="checkbox" checked={k.encoders.includes(x.name)} onChange={(e) => setK({ encoders: e.target.checked ? [...k.encoders, x.name] : k.encoders.filter((n: string) => n !== x.name) })} /> {x.name}{x.inVisionline ? '' : ' (not found)'}</label>)}</div>
+      {!enc.data?.encoders?.length && <p className="small muted">No encoders read yet: open Staff keycards → Encoders & special cards → Read encoders from Visionline.</p>}
+    </>
+  );
+}
+
+/** 2.14 Accounts daily e-mail. */
+function AccountsPolicy({ data, set }: { data: any; set: (patch: any) => void }) {
+  const { base } = useHotel();
+  const a = { enabled: false, time: '06:30', emails: [], ...(data.accountsReport ?? {}) };
+  const [emails, setEmails] = useState((a.emails ?? []).join(', '));
+  const [msg, setMsg] = useState<string | null>(null);
+  const prev = useApi<any>(`${base}/reports/accounts`);
+  return (
+    <>
+      <label className="check"><input type="checkbox" checked={a.enabled} onChange={(e) => set({ accountsReport: { ...a, enabled: e.target.checked } })} /> Send it every day</label>
+      <div className="field-row">
+        <div className="field"><label htmlFor="ar-t">At (hotel time)</label><input id="ar-t" type="time" value={a.time} onChange={(e) => set({ accountsReport: { ...a, time: e.target.value } })} /></div>
+        <div className="field"><label htmlFor="ar-e">To (e-mails)</label><input id="ar-e" value={emails} onChange={(e) => setEmails(e.target.value)} onBlur={() => set({ accountsReport: { ...a, emails: emails.split(',').map((x: string) => x.trim()).filter(Boolean) } })} placeholder="accounts@hotel.com" /></div>
+      </div>
+      <p className="small muted">The guest keycards of every room are read from Visionline 30 minutes before the report (one room at a time, after the PMS and GRMS), to list rooms with more than one active guest keycard.</p>
+      <div className="row">
+        <button className="btn" type="button" onClick={() => api(`${base}/reports/accounts/read-guest-cards`, { body: {} }).then(() => setMsg('Reading guest keycards from Visionline… refresh the preview in a minute.')).catch((e) => setMsg((e as Error).message))}>Read guest keycards now</button>
+        <button className="btn" type="button" onClick={() => api(`${base}/reports/accounts/send`, { body: {} }).then((r) => setMsg(`Sent to ${r.sentTo} address(es).`)).catch((e) => setMsg((e as Error).message))}>Send now (saved addresses)</button>
+        <button className="btn" type="button" onClick={() => void prev.reload()}>Refresh preview</button>
+      </div>
+      {msg && <p className="small">{msg}</p>}
+      {prev.data && <><h3 className="section-title">Preview</h3><pre className="report-preview">{prev.data.text}</pre></>}
     </>
   );
 }

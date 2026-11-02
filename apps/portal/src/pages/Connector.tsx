@@ -60,8 +60,8 @@ export function ConnectorPage() {
             </dl>
           </div>
           <div className="panel">
-            <h2>Waiting for ASSA ABLOY confirmation</h2>
-            <p className="small muted">The hotel has decided how each point should work; these remain to be confirmed by ASSA ABLOY for the installed Visionline version.</p>
+            <h2>To check on site</h2>
+            <p className="small muted">How the platform handles each point, from the Visionline Web API manual; check them once on the hotel's own Visionline.</p>
             {(ready.data?.vendorConfirmations ?? []).map((v: any) => (
               <details key={v.id} style={{ borderTop: '1px solid var(--line-2)', padding: '8px 0' }}>
                 <summary style={{ cursor: 'pointer', fontWeight: 500 }}>{v.question}</summary>

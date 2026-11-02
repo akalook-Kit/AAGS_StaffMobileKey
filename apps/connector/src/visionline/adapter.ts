@@ -1,5 +1,5 @@
 import { VL, toVisionlineLocal, VL_DOC } from '@smk/shared/node';
-import type { DiscoveredResource, ErrorInfo, IssueStaffKeyPayload, RevokeStaffKeyPayload } from '@smk/shared';
+import type { DiscoveredResource, DoorCommandsPayload, EncodeKeycardPayload, ErrorInfo, IssueStaffKeyPayload, RevokeStaffKeyPayload } from '@smk/shared';
 import { VisionlineClient, VisionlineApiError } from './client.ts';
 import { utcForms, withTimeForms } from './time-forms.ts';
 
@@ -70,6 +70,14 @@ export interface VisionlineAdapter {
   cancelledSince(since: Date): Promise<any[]>;
   /** 2.12 pilot: the card on an encoder, read-only. */
   readCardAtEncoder(encoder: string, action: 'read' | 'readCard'): Promise<Record<string, unknown>>;
+  /** 2.14 Encode a staff / expire-now / emergency / stand-open card at an encoder [§7.6.1, §7.22]. */
+  encodeKeycard(p: EncodeKeycardPayload): Promise<Record<string, unknown>>;
+  /** 2.14 Cancel a physical keycard [§5.10]. */
+  cancelKeycard(regNo: string, cardHolder?: string): Promise<Record<string, unknown>>;
+  /** 2.14 Commands to online locks [§5.13.4, §7.12]. */
+  doorCommands(p: DoorCommandsPayload): Promise<{ results: { door: string; ok: boolean; error?: string; code?: number }[] }>;
+  listEncoders(): Promise<{ encoders: string[] }>;
+  countGuestCards(rooms: string[]): Promise<{ counts: { room: string; n: number }[]; errors: { room: string; error: string }[]; readAt: string }>;
 }
 
 export class WebApiAdapter implements VisionlineAdapter {
@@ -92,6 +100,7 @@ export class WebApiAdapter implements VisionlineAdapter {
       if (d.doorGroup) groups.set(String(d.doorGroup), d.doorGroupID ?? null);
     }
     for (const [name, id] of groups) out.push({ kind: 'doorgroup', externalId: name, name, data: { doorGroupID: id } });
+    try { for (const e of (await this.listEncoders()).encoders) out.push({ kind: 'encoder', externalId: e, name: e, data: {} }); } catch { /* older Visionline: no list */ }
     // Configured groups, plus every group Visionline lists (when it offers the list).
     const allGroups = [...new Set([...userGroups, ...((await listUserGroupNames(this.vl)) ?? [])])];
     for (const g of allGroups) {
@@ -142,6 +151,99 @@ export class WebApiAdapter implements VisionlineAdapter {
       doorGroups: [...new Set(ops.flatMap((o: any) => (Array.isArray(o?.doorGroups) ? o.doorGroups : []).map(String)))].slice(0, 100),
       encoder, readAt: new Date().toISOString(),
     };
+  }
+
+  async encodeKeycard(p: EncodeKeycardPayload) {
+    if (p.user) await this.ensureUser({ cardHolder: p.cardHolder, user: p.user } as IssueStaffKeyPayload);
+    const tz = this.timeZone();
+    const F = VL.fields;
+    const ops = (normal: string[], onOff: string[] = []) => [
+      ...(normal.length ? [{ [F.operation]: F.operationNormal, [F.doors]: normal }] : []),
+      ...(onOff.length ? [{ [F.operation]: 'on/off', [F.doors]: onOff }] : []),
+    ];
+    const body: Record<string, unknown> = { [F.cardHolder]: p.cardHolder, [F.format]: F.formatTLCode };
+    const q = [`${VL.query.action}=encode`, `encoder=${encodeURIComponent(p.encoder)}`];
+    if (p.kind === 'emergency') q.push('type=emergency'); // [§7.22.2] all doors, always valid: no doors, no times
+    else if (p.kind === 'clearance') { // [§7.22.1] rfid48, all doors, expireTime only
+      q.push('type=clearance'); body[F.format] = 'rfid48';
+      body[F.expireTime] = toVisionlineLocal(p.expireTime ? new Date(p.expireTime) : new Date(Date.now() + 86_400_000), tz);
+    } else if (p.kind === 'guestBlock') {
+      // Guest card for the room that overrides every older guest card [§5.9.4 override] and is dead a minute later:
+      // placed in an offline lock, the lock stops accepting the previous guest's cards.
+      body[F.format] = 'rfid48';
+      if (!p.doorIds.length) throw Object.assign(new Error('Choose the room.'), { code: 'NO_DOORS' });
+      body[F.doorOperations] = [{ [F.operation]: 'guest', [F.doors]: [p.doorIds[0]] }];
+      body[F.expireTime] = toVisionlineLocal(new Date(Math.ceil((Date.now() + 60_000) / 60_000) * 60_000), tz);
+    } else {
+      if (p.kind === 'oneTime') { q.push('type=oneTime'); body[F.format] = 'rfid48'; } // [§7.22.3]
+      if (p.kind === 'standOpen') q.push('type=standOpen'); // [§7.22.5] doors with operation normal only
+      const doors = ops(p.doorIds, p.kind === 'staff' ? p.onOffDoorIds : []);
+      if (!doors.length) throw Object.assign(new Error('Choose at least one door for this card.'), { code: 'NO_DOORS' });
+      body[F.doorOperations] = doors;
+      // expireNow: the next whole minute + 1 (Visionline times have minute precision), so the card is dead a minute later.
+      const exp = p.kind === 'expireNow' ? new Date(Math.ceil((Date.now() + 60_000) / 60_000) * 60_000) : p.expireTime ? new Date(p.expireTime) : null;
+      if (!exp) throw Object.assign(new Error('The card needs an end time.'), { code: 'NO_EXPIRY' });
+      body[F.expireTime] = toVisionlineLocal(exp, tz);
+      if (p.timeSchedule && p.kind === 'staff') body[F.timeSchedule] = p.timeSchedule;
+    }
+    if (p.override || p.kind === 'expireNow' || p.kind === 'guestBlock') q.push(`${VL.query.override}=true`);
+    if (p.overwriteValidCard || p.kind === 'expireNow' || p.kind === 'guestBlock') q.push('overwriteValidCard=true');
+    const r = await this.vl.request<any>('POST', `${VL.paths.cards}?${q.join('&')}`, body, { ...HIGH, timeoutMs: 60_000 });
+    const regNo = firstText(r?.id, r?.registrationNumber);
+    // Serial numbers of the physical card are not kept (privacy rule since 2.5).
+    return { kind: p.kind, regNo, cardHolder: firstText(r?.cardHolder) ?? p.cardHolder, startTime: firstText(r?.startTime), expireTime: firstText(r?.expireTime) ?? (body[F.expireTime] as string | undefined) ?? null,
+      doors: p.doorIds.length, encoder: p.encoder, encodedAt: new Date().toISOString() };
+  }
+
+  /** 2.14 Valid guest keycards per room [§5.9.3]: background reads, one room at a time (the PMS and GRMS go first). */
+  async countGuestCards(rooms: string[]) {
+    const at = toVisionlineLocal(new Date(), this.timeZone());
+    const counts: { room: string; n: number }[] = [];
+    const errors: { room: string; error: string }[] = [];
+    for (const room of rooms) {
+      try {
+        const r = await this.vl.request<{ id: string }[]>('GET', `${VL.paths.cards}?guestDoor=${encodeURIComponent(room)}&validTime=${at}`, undefined, { priority: 'low' });
+        counts.push({ room, n: (r ?? []).length });
+      } catch (e) { errors.push({ room, error: (e as Error).message.slice(0, 120) }); }
+    }
+    return { counts, errors, readAt: new Date().toISOString() };
+  }
+
+  /** 2.14 Encoders configured in Visionline [§5.14]. */
+  async listEncoders() {
+    const r = await this.vl.request<{ id: string }[]>('GET', '/encoders', undefined, HIGH);
+    return { encoders: (r ?? []).map((e) => String(e.id)).filter(Boolean) };
+  }
+
+  async cancelKeycard(regNo: string, cardHolder?: string) {
+    const card = await this.vl.request<any>('GET', VL.paths.card(regNo), undefined, HIGH);
+    if (cardHolder && card?.cardHolder && card.cardHolder !== cardHolder) throw new VisionlineApiError(409, undefined, `Card ${regNo} belongs to ${card.cardHolder}, not ${cardHolder}; not cancelled`);
+    if (card?.cancelled === true) return { regNo, alreadyCancelled: true, cardHolder: card?.cardHolder ?? null };
+    await this.vl.request('POST', VL.paths.card(regNo), { cancelled: true }, HIGH);
+    return { regNo, cancelled: true, cardHolder: card?.cardHolder ?? null };
+  }
+
+  async doorCommands(p: DoorCommandsPayload) {
+    const tz = this.timeZone();
+    const body = p.command === 'emergencyOpen' ? { emergencyOpen: true } : p.command === 'emergencyClose' ? { emergencyOpen: false }
+      : p.command === 'open' ? { open: true } : p.command === 'clearStandOpen' ? { standOpenTime: null } : p.command === 'checkout' ? { checkedOut: true }
+      : { standOpenTime: p.standOpenUntil ? toVisionlineLocal(new Date(p.standOpenUntil), tz) : 'forever' };
+    // Emergency commands skip the queue (the GRMS waits a few seconds); other commands go first in the high lane.
+    const prio = p.command === 'emergencyOpen' || p.command === 'emergencyClose' ? 'emergency' as const : 'high' as const;
+    const results: { door: string; ok: boolean; error?: string; code?: number }[] = [];
+    const queue = [...p.doors];
+    const worker = async () => {
+      for (let d = queue.shift(); d !== undefined; d = queue.shift()) {
+        try {
+          await this.vl.request('POST', `${VL.paths.door(d)}?timeout=${p.timeoutSec}`, body, { priority: prio, timeoutMs: (p.timeoutSec + 15) * 1000 });
+          results.push({ door: d, ok: true });
+        } catch (e) {
+          results.push({ door: d, ok: false, error: (e as Error).message.slice(0, 200), code: e instanceof VisionlineApiError ? e.code : undefined });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(p.parallel, p.doors.length) }, worker));
+    return { results };
   }
 
   async validate() {

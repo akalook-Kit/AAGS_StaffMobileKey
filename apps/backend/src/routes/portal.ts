@@ -217,8 +217,15 @@ export function portalRoutes(app: FastifyInstance) {
   });
   app.get(`${P}/hotels/:hotelId/commands/:commandId`, async (req) => {
     const hotelId = hid(req);
-    await requirePerm(req, hotelId, 'connector.read');
-    const c = await one(pool, 'SELECT id, type, status, attempts, result, error, correlation_id, created_at, completed_at FROM commands WHERE id=$1 AND hotel_id=$2', [(req.params as any).commandId, hotelId]);
+    const op = await requireOperator(req);
+    if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this hotel.');
+    const perms = permsIn(op, hotelId);
+    const c = await one(pool, 'SELECT id, type, status, attempts, result, error, correlation_id, created_at, completed_at FROM commands WHERE id=$1 AND hotel_id=$2', [z.string().uuid().parse((req.params as any).commandId), hotelId]);
+    // 2.14 People who send keycard, lock-out and emergency commands may follow them without connector rights.
+    const allowed = perms.has('connector.read')
+      || (c && ['ENCODE_KEYCARD', 'CANCEL_KEYCARD', 'LIST_ENCODERS'].includes(c.type) && ['keycards.manage', 'keycards.read', 'lockout.approve', 'lockout.request'].some((x) => perms.has(x as any)))
+      || (c && c.type === 'DOOR_COMMANDS' && ['emergency.manage', 'muster.read', 'lockout.approve'].some((x) => perms.has(x as any)));
+    if (!allowed) throw forbidden('Missing permission: connector.read');
     if (!c) throw notFound('Command');
     return c;
   });

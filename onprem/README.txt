@@ -14,6 +14,14 @@ WHAT THE SERVER NEEDS
   - .NET Framework 4.8 (part of Windows)
   - 2 GB free disk space (more as the database grows; Monitoring warns below 50 GB)
 
+NEW IN 2.14
+  Staff keycard requests (also from a QR code page, no sign-in), issued in Visionline from an encoder or recorded
+  from the Visionline desk, the keycard register (HK 001...), returns on resignation with e-mails to HR and security,
+  renewal reminders; unpaid-guest lock-outs (checkout for online locks, 1-minute card for offline locks) with manager
+  approval; departures (checkout confirmed / clearance card placed); emergency, stand-open, clearance and one-time
+  cards; emergency open of every guest room with an online lock; Accounts daily report by e-mail; System setup report;
+  "To do now" on the Overview. Connector 0.12.0.
+
 NEW IN 2.13
   Live occupancy and Emergency (Safety menu; role "Safety / fire warden" for the security-desk screen), staff ID
   cards printed on CR80 keycards, dark mode, personal menus and "Visionline only" focus, a licence window when the

@@ -137,6 +137,20 @@ The first run builds the image (5–10 minutes). When it prints **Ready.** the p
 The K Hotel branding (black and rose gold, your logo) is set in **Mobile app settings**. A logo
 uploaded there replaces it in the portal and the app immediately.
 
+### New in 2.14 — staff keycard requests, emergency open, unpaid guests, departures, Accounts report
+
+| Feature | Where | What to check |
+|---|---|---|
+| Keycard requests (+ QR page) | **People & keys → Staff keycards** | *QR code page* → open the link in a private window, send a request; back in the portal open it, *Encode here* (put a card on the simulator encoder: `POST http://localhost:14444/sim/encoder {"encoder":"fd1","regNo":"blank"}`), then *Return and cancel*. |
+| Register, renewals, duplicates | Same page, tabs | HK numbers and holders; cards ending soon; people with several cards. |
+| Unpaid guest | Tab **Unpaid guests** | Ask as `issuer@khb.test`, approve as `security@khb.test`: room 101 (online) gets a checkout, 308 (offline) a 1-minute card. |
+| Departures | Tab **Departures** | Online rooms: send checkout and see it confirmed; offline: clearance card placed. |
+| Special cards, encoders | Tab **Encoders & special cards** | Read encoders from Visionline; encode an emergency card. |
+| Emergency open | **Safety → Emergency** | Switch on in *Settings → Safety & emergency*; start + confirm a fire; *Emergency open all guest rooms*: 27 online locks answer, 308–310 are listed as offline; ending it puts them back to normal. |
+| Accounts report | **Settings → Accounts daily report** | Preview and *Send now* (simulator mail box). |
+| System setup report | **Administration → System setup report** | Print / PDF. |
+| To do now | **Overview** | Only what is waiting for you, refreshed by itself. |
+
 ### New in 2.13 — live occupancy and emergency, staff ID cards, dark mode, your own menu, usage, security fixes
 
 | Feature | Where | What to check |

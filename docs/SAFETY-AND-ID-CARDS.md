@@ -31,11 +31,10 @@ visitor groups, the emergency key template and how long emergency keys last.
 
 The live list, the PDF and the roll call work also when the licence has ended.
 
-**Opening all guest rooms at once** is not offered: it is not part of the Visionline Web API the platform uses, and
-standalone (offline) RFID locks cannot be opened remotely by any system. With online locks, ask ASSA ABLOY what its
-online system offers. Keep **emergency keycards** (they open every lock, also with the deadbolt on) in the fire box and
-at reception; *Emergency → Readiness* counts the valid ones Visionline reports (user group or type containing
-"emergency").
+**Opening all guest rooms at once (2.14)**: online locks receive the Visionline `emergencyOpen` command (Web API
+§5.13.4) from *Emergency → Emergency open all guest rooms*; offline locks need the emergency card (Web API §7.22.2),
+which can be encoded from *Staff keycards → Encoders & special cards*. The readiness panel counts online and offline
+guest-room locks.
 
 ## Staff ID cards
 
@@ -56,21 +55,12 @@ in *Settings → ID card layout*; the logo comes from *Branding*.
 | Retransfer (best for RFID keycards) | HID Fargo HDP5000 / HDP6600, Evolis Avansia, Matica MC310, Entrust Datacard CR805 | Prints on a film then fused to the card: even over the chip and antenna bump, edge to edge |
 | Direct-to-card (lower cost) | Zebra ZC300 / ZC350, Evolis Primacy 2, Magicard Rio Pro 360, HID Fargo DTC1500 | Flat PVC cards; set a 1–1.5 mm safe margin |
 
-Use printable keycards (ask ASSA ABLOY / the card supplier for a printable PVC surface). Printing does not touch the
+Use printable keycards (ask the card supplier for a printable PVC surface). Printing does not touch the
 chip: print before or after encoding in Visionline. Card printers come with Windows drivers; any of them appears in
 the browser's print window.
 
-## Towards issuing staff keycards from the portal
+## Issuing staff keycards from the portal (2.14)
 
-Today Visionline encodes staff keycards and the portal issues staff **mobile** keys through Visionline. The way to
-replace Visionline's staff screens for day-to-day work, step by step:
-
-1. **Done**: people and keycards read from Visionline, card lookup, reading a card at the encoder (pilot), staff
-   mobile keys, ID profiles and printing, attendance.
-2. **Next (needs ASSA ABLOY)**: encode a staff keycard at an encoder from the portal (Visionline Web API
-   `POST /cards?action=encode&encoder=…`; the exact body and the licence options must be confirmed by ASSA ABLOY and
-   tested on a non-production Visionline). The portal would then encode the card, print it, and record both in one step.
-3. Then: change doors / extend validity / cancel a staff keycard from the portal, with the same approvals as mobile keys.
-
-Each step is switched on per hotel and tested on site first; the Marriott Visionline on the development PC stays
-read-only.
+Staff keycards are requested (portal or QR code page), then encoded at an encoder from the portal through the
+Visionline Web API (`POST /cards?action=encode&encoder=…`, §7.6.1) — so the card exists in Visionline exactly as one
+made at the desk — or made at the Visionline desk and recorded. See USER-MANUAL.md, "Staff keycards".

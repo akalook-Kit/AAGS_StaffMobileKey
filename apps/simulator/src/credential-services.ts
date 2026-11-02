@@ -196,6 +196,17 @@ export function registerCredentialServices(app: FastifyInstance, st: SimState, o
     opts.log(b.regNo ? `ENCODER ${b.encoder}: keycard ${b.regNo} placed` : `ENCODER ${b.encoder}: empty`);
     return { encoder: b.encoder, regNo: b.regNo ?? null };
   });
+  // 2.14 Guest keycards made by the PMS for a room (test only): n valid guest cards for the room.
+  app.post('/sim/guest-cards', async (req, reply) => {
+    const b = (req.body ?? {}) as { room?: string; n?: number; hours?: number };
+    if (!b.room || !st.doors.some((d) => d.id === b.room)) return reply.code(400).send({ code: 'Unknown room' });
+    for (let i = 0; i < (b.n ?? 1); i++) {
+      const c: any = { cardId: String(st.nextCardId++), credentialID: st.nextCredentialId++, cardHolder: `guest-${b.room}`, issuedBy: 'PMS', endpointId: '', doors: [b.room], startTime: Date.now() - 60_000,
+        expireTime: Date.now() + (b.hours ?? 24) * 3_600_000, status: 'ISSUED', cancelled: false, checkedOut: new Set(), createdAt: Date.now(), accountName: '', label: 'guest', usedAt: new Set(), plastic: true, guest: true };
+      st.cards.set(c.credentialID, c);
+    }
+    return { room: b.room, added: b.n ?? 1 };
+  });
   app.post('/sim/desk/cards', async (req, reply) => {
     const b = (req.body ?? {}) as { userId?: string; givenName?: string; surname?: string; userGroup?: string; days?: number; doors?: string[] };
     if (!b.userId) return reply.code(400).send({ code: 'userId required' });

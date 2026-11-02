@@ -58,6 +58,16 @@ e-mails it. The software never "phones home".
 | Software supply | Exact dependency versions, at least two weeks old; release checksums (SHA256SUMS); `.msi` to be code-signed with the vendor's certificate |
 | Vulnerability management | Internal review each release (SECURITY-REVIEW-2.13.md); independent penetration test recommended before group roll-out |
 
+## 3b. New in 2.14
+
+- **Keycard request page (QR code)** is the only page without sign-in: it accepts a request and nothing else (no data
+  is shown except the hotel name and department names). The link carries a random secret (only its SHA-256 is
+  stored; a new link stops the old one), requests are limited to 15 per hour per device, and every request must be
+  issued by front office or security in the portal.
+- **Two people** for unpaid-guest lock-outs and emergency door opening; door commands only during a confirmed
+  emergency (never a drill) and only when the hotel switched them on.
+- Every keycard encoded, cancelled or overwritten, every lock-out and every door command is in the audit trail.
+
 ## 4. Hosting the database (on-premises)
 
 The database lives on the Visionline server's disk. The group will expect **disk encryption** (BitLocker) on that
