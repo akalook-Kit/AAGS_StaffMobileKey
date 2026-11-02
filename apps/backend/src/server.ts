@@ -26,6 +26,7 @@ import { keycardRoutes } from './routes/keycards.ts';
 import { inviteRoutes } from './routes/invites.ts';
 import { noticeRoutes } from './routes/notices.ts';
 import { vlImportRoutes } from './routes/vl-imports.ts';
+import { lockReportRoutes } from './routes/lock-reports.ts';
 import { safetyRoutes } from './routes/safety.ts';
 import { reportBuilderRoutes } from './routes/report-builder.ts';
 import { breakfastRoutes } from './routes/breakfast.ts';
@@ -94,6 +95,7 @@ export async function buildServer() {
   inviteRoutes(app);
   noticeRoutes(app);
   vlImportRoutes(app);
+  lockReportRoutes(app);
 
   const dist = resolve(config.portalDist);
   if (existsSync(dist)) {

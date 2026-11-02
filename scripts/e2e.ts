@@ -1156,12 +1156,14 @@ async function main() {
     const ch = await until('206 change inferred', () => bd('206'), (d) => d?.lastChange);
     ok(ch?.lastChange?.source === 'inferred' && /3\.6 V to 4\.6 V/.test(ch.lastChange.detail ?? ''), 'batteries counted as changed from the voltage jump (3.6 V -> 4.6 V), without a "battery exchanged" event', ch?.lastChange);
     ok((await bd('Linen Store'))?.lastChange?.source === 'event', 'Linen Store: last change from the lock\'s "battery exchanged" event');
-    await bat('206', { kind: 'low' });
+    // 2.18: the lock's own "Battery alarm in lock" (0529) counts; a card "Battery level low" alert (0304) right after
+    // new batteries would not (feedback 27 Oct, tested in the 2.18 section).
+    await bat('206', { kind: 'low', code: 529 });
     const rp = await until('206 reprogram', () => bd('206'), (d) => d?.reprogram);
     ok(rp?.state === 'LOW' && rp.reprogram?.number > 0 && rp.ticket?.id === rp.reprogram.ticketId, `still alarming after the change -> request #${rp?.reprogram?.number} "program the lock and upload firmware"`, rp);
     const rt = (await call('GET', `${H}/maintenance/tickets/${rp?.reprogram?.ticketId}`, maint15)).json;
     ok(/Program lock and upload firmware/.test(rt.title) && /service tool/.test(rt.description) && rt.category === 'lock', 'the request tells the technician to program the lock and upload the firmware', rt.title);
-    await bat('206', { kind: 'low' });
+    await bat('206', { kind: 'low', code: 529 });
     await new Promise((r) => setTimeout(r, 2500));
     const tickets = (await call('GET', `${H}/maintenance/tickets?status=open`, maint15)).json;
     const list = Array.isArray(tickets) ? tickets : tickets.tickets ?? tickets.items ?? [];
@@ -1307,6 +1309,69 @@ async function main() {
     }
     const ovw = (await call('GET', `${H}/visionline/overview`, gm17)).json;
     ok(ovw.visionlineOperator && typeof ovw.visionlineOperator.shared === 'boolean', `the Visionline user the portal uses is checked (${ovw.visionlineOperator?.name}: ${ovw.visionlineOperator?.shared ? 'shared' : 'named'})`);
+  }
+
+  console.log('\n2.18: new batteries close the alarm by themselves; lock troubleshooting from an uploaded lock report');
+  {
+    const maint18 = await login('maint@khb.test'); const tech18 = await login('tech@khb.test');
+    const pol18 = (await call('GET', `${H}/config/policy`, admin)).json.data;
+    ok(pol18.battery.fullReadingMeansNew === true, '"4.8 V means new batteries" is on by default');
+    await call('PUT', `${H}/config/policy`, admin, { ...pol18, battery: { ...pol18.battery, voltage: { ...pol18.battery.voltage, lowRange: { low: 4.4, critical: 4.0 } } } });
+    const bat = (door: string, body: unknown) => call('POST', `${SIM}/sim/doors/${encodeURIComponent(door)}/battery`, undefined, body);
+    const bd = async (id: string) => (await call('GET', `${H}/battery`, maint18)).json.doors?.find((d: any) => d.doorId === id);
+    await bat('208', { kind: 'volts', volts: 3.8 });
+    const crit = await until('208 critical', () => bd('208'), (d) => d?.state === 'CRITICAL' && d?.ticket);
+    ok(crit?.alert && crit.ticket, `a 3.8 V reading raises a critical alarm and opens request #${crit?.ticket?.number}`);
+    await bat('208', { kind: 'volts', volts: 4.8 });
+    const fresh = await until('208 good', () => bd('208'), (d) => d?.state === 'GOOD');
+    ok(fresh?.state === 'GOOD' && !fresh.alert, 'the 4.8 V reading after new batteries closes the alarm by itself');
+    ok(/New batteries/.test(fresh?.lastChange?.detail ?? ''), `and is recorded as a battery change (${fresh?.lastChange?.detail})`);
+    const t18 = (await call('GET', `${H}/maintenance/tickets/${crit.ticket.id}`, maint18)).json;
+    ok(t18.status === 'RESOLVED' && /Resolved automatically/.test(t18.resolution ?? ''), 'its maintenance request is resolved automatically');
+    // Feedback 27 Oct: after new batteries the lock may keep logging "Alert, Battery level low" (0304) with cards.
+    await bat('208', { kind: 'low' });
+    await new Promise((res) => setTimeout(res, 6000));
+    const after = await bd('208');
+    ok(after?.state === 'GOOD' && !after.alert, '"Alert, Battery level low" right after new batteries is not a battery alarm', after);
+    const ign = (await call('GET', `${H}/audit?action=battery.low_alert_ignored`, admin)).json;
+    ok(JSON.stringify(ign).includes('battery.low_alert_ignored'), 'it is noted in the audit trail as ignored');
+    await bat('208', { kind: 'volts', volts: 4.2 });
+    await bat('208', { kind: 'low' });
+    const conf = await until('208 low confirmed', () => bd('208'), (d) => d?.state === 'LOW' || d?.state === 'CRITICAL');
+    ok(conf?.alert, 'once a reading confirms it (4.2 V), the low-battery alert counts again');
+    await call('PUT', `${H}/config/policy`, admin, pol18);
+
+    // A lock event report as Visionline saves it (UTF-16 text). Names in it must not be kept.
+    const head = 'User group\tCard name\tRegistration No.\tTime\tEvent\tMain guest room\tUser ID\tLast name\tFirst name\tIssued by';
+    const L: string[] = [head];
+    const r = (t: string, ev: string, card = 'Door Unit Internal', last = '') => L.push(`n/a\t${card}\tn/a\t${t}\t${ev}\t205\t\t${last}\t\t`);
+    r('10/12/2026 9:00 AM', 'Battery level below 4.2 volts (1078)');
+    for (let d = 11; d >= 3; d--) for (let i = 0; i < 5; i++) { r(`10/${d}/2026 ${i + 8}:10 AM`, 'The door is opened (0912)'); r(`10/${d}/2026 ${i + 8}:09 AM`, 'Guest Card accepted (0067)', 'Guest (MC)', 'Topsecret-Guestname'); }
+    r('10/5/2026 8:00 PM', 'Battery level below 4.4 volts (1079)');
+    for (let i = 0; i < 7; i++) r(`10/4/2026 ${i + 1}:00 PM`, 'Error, Internal (1975)');
+    r('10/2/2026 9:20 PM', 'Battery level below 4.8 volts (1081)');
+    r('10/2/2026 7:06 PM', 'Battery exchanged (0528)');
+    r('9/30/2026 3:00 PM', 'Battery level below 4.0 volts (1077)');
+    const data = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(L.join('\r\n'), 'utf16le')]).toString('base64');
+    ok((await call('POST', `${H}/lock-reports/preview`, tech18, { fileName: '205.xls', data })).status === 403, 'a technician cannot upload lock reports (battery.manage)');
+    const pv = await call('POST', `${H}/lock-reports/preview`, maint18, { fileName: '205.xls', data });
+    ok(pv.status === 200 && pv.json.dateOrder === 'MDY' && pv.json.events === L.length - 1, `step 1: ${pv.json.events} events read, dates month/day`, pv.json);
+    ok(pv.json.suggestedDoor?.name === '205', 'the door is suggested from the file');
+    ok(!JSON.stringify(pv.json).includes('Topsecret'), 'the preview shows no names');
+    ok((await call('POST', `${H}/lock-reports/preview`, maint18, { fileName: 'x.txt', data: Buffer.from('Name\tGroup\r\nA\tB\r\n').toString('base64') })).json.error?.code === 'NOT_A_LOCK_REPORT', 'another kind of file is refused with an explanation');
+    const sv = await call('POST', `${H}/lock-reports`, maint18, { fileName: '205.xls', data, doorId: pv.json.suggestedDoor.id });
+    ok(sv.status === 200 && sv.json.id, 'step 2: confirmed for the door and analysed');
+    const rep18 = (await call('GET', `${H}/lock-reports/${sv.json.id}`, tech18)).json;
+    const titles = (rep18.analysis?.findings ?? []).map((f: any) => f.title);
+    ok(titles.some((t: string) => /New batteries down to 4\.4 V in 3 days/.test(t)), 'finding: new batteries drained in 3 days', titles);
+    ok(titles.some((t: string) => /Internal lock error 7 times/.test(t)), 'finding: internal lock errors');
+    ok(rep18.analysis.usage.openings === 45 && rep18.analysis.battery.avgDropPer30Days > 0, `usage counted (45 openings) and battery use averaged (${rep18.analysis.battery.avgDropPer30Days} V / 30 days)`);
+    const row18 = (await call('GET', `${H}/lock-reports`, tech18)).json.find((x: any) => x.id === sv.json.id);
+    ok(row18?.high >= 2 && row18.doorName === '205', 'listed with its findings');
+    const raw18 = await fetch(`${H}/lock-reports/${sv.json.id}`, { headers: { authorization: `Bearer ${admin}` } }).then((x) => x.text());
+    ok(!raw18.includes('Topsecret'), 'no name from the file is stored or returned');
+    ok((await call('GET', `${H}/lock-reports/${sv.json.id}`, lakeAdmin)).status === 403, 'another hotel cannot read it');
+    ok((await call('DELETE', `${H}/lock-reports/${sv.json.id}`, tech18)).status === 403 && (await call('DELETE', `${H}/lock-reports/${sv.json.id}`, maint18)).status === 200, 'only battery managers delete a lock report');
   }
 
   console.log('\nGate: every request is traceable without exposing secrets');

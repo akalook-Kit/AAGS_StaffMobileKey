@@ -14,6 +14,16 @@ WHAT THE SERVER NEEDS
   - .NET Framework 4.8 (part of Windows)
   - 2 GB free disk space (more as the database grows; Monitoring warns below 50 GB)
 
+NEW IN 2.18
+  New batteries close the battery alarm by themselves: the reading a lock gives right after new batteries ("below
+  4.8 volts", or 9.0 V) resolves the alarm and its maintenance request. "Alert, Battery level low" (0304) logged in the
+  30 days after a battery change is not treated as a battery problem unless a voltage reading confirms it. "Stale" is
+  now "No recent report". Lock troubleshooting (Building -> Lock troubleshooting): upload the event report of one lock
+  exported from Visionline (older or newer column layout), confirm the door, and get a verdict, what to do in order,
+  battery periods and consumption, faults week by week, door problems (left open, opened with no card, mechanical key),
+  refusals, use by hour/weekday and card type, service history and online pings. Names, card and serial numbers in the
+  file are not kept.
+
 NEW IN 2.17.2
   Fixes "The answers could not be saved: Method not found: 'System.String System.String.TrimEnd(Char)'" in the setup
   window (then error 1722): the installer's small helper programs are now built strictly for .NET Framework 4.

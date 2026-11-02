@@ -1,4 +1,4 @@
-# Security and compliance pack (for hotel groups and institutions, e.g. Marriott vendor review) — Access Monitoring Tool 2.17
+# Security and compliance pack (for hotel groups and institutions, e.g. Marriott vendor review) — Access Monitoring Tool 2.18
 
 **What this is.** The answers a hotel group's IT security team asks of a vendor, prepared in advance. **Approval itself
 can only come from the group** (for Marriott: its third-party / vendor risk assessment, normally a questionnaire,
@@ -94,6 +94,14 @@ e-mails it. The software never "phones home".
   only; no author); everything else needs a signed-in user.
 - **Mobile keys** are recognised from Visionline's data (no physical serial); still no PIN, e-mail, phone or card serial
   is kept by the directory sync.
+
+## 3e. New in 2.18
+
+- **Lock troubleshooting reports**: uploading needs `battery.manage`, reading `battery.read`, per site. The file is
+  parsed as text (15 MB limit). From each event only the lock time, the event code and name, Visionline's "(*)" mark
+  and the card type are stored; names, user IDs, card numbers, card serial numbers (S/N) and "issued by" are discarded
+  while reading (the sequence number is used only to drop rows read twice). Upload,
+  analysis and deletion are in the audit trail.
 
 ## 4. Hosting the database (on-premises)
 

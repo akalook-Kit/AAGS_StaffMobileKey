@@ -10,7 +10,7 @@ export const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)'] 
 
 export const fmtN = (n: number | null | undefined) => n == null ? '—' : Math.abs(n) >= 10_000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}K` : n.toLocaleString();
 
-function useWidth<T extends HTMLElement>() {
+export function useWidth<T extends HTMLElement>() {
   // A callback ref: charts that first render an empty state attach the element later, and must still be measured.
   const ref = useRef<T | null>(null);
   const ro = useRef<ResizeObserver | null>(null);

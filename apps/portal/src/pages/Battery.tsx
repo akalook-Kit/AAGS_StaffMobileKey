@@ -55,7 +55,8 @@ export function BatteryPage() {
 
   return (
     <>
-      <PageHead title="Battery status" intro={<>Lock batteries as the locks report them to Visionline: alarms, exchanges and voltage readings. Offline locks report only when their events reach Visionline, so some doors may show <em>never reported</em> or <em>stale</em>.</>}>
+      <PageHead title="Battery status" intro={<>Lock batteries as the locks report them to Visionline: alarms, exchanges and voltage readings. Offline locks report only when their events reach Visionline, so some doors may show <em>never reported</em> or <em>no recent report</em> (nothing heard from the lock for a while; its last reading may be out of date).</>}>
+        <Link className="btn" to="/lock-troubleshoot">Troubleshoot a lock</Link>
         <button className="btn" onClick={() => download(`${base}/battery/export`, 'battery-history.csv').catch(setError)}>Export history</button>
         {can('settings.manage') && <Link className="btn" to="/settings?tab=battery">Thresholds</Link>}
       </PageHead>
@@ -64,7 +65,7 @@ export function BatteryPage() {
         <div className="figures">
           <div><div className="v" style={{ color: s.critical ? 'var(--bad)' : undefined }}>{s.critical}</div><div className="l">critical</div></div>
           <div><div className="v" style={{ color: s.low ? 'var(--warn)' : undefined }}>{s.low}</div><div className="l">low</div></div>
-          <div><div className="v">{s.stale}</div><div className="l">stale (no report for {b.data!.policy.staleAfterDays} days)</div></div>
+          <div><div className="v">{s.stale}</div><div className="l">no recent report (nothing for {b.data!.policy.staleAfterDays} days)</div></div>
           <div><div className="v">{s.never}<span style={{ fontSize: 18, color: 'var(--ink-3)' }}>/{s.total}</span></div><div className="l">never reported</div></div>
           <div><div className="v" style={{ color: 'var(--ok)' }}>{s.good}</div><div className="l">good</div></div>
           {s.reprogram > 0 && <div><div className="v" style={{ color: 'var(--bad)' }}>{s.reprogram}</div><div className="l">to program (alarm after new batteries)</div></div>}
@@ -124,9 +125,9 @@ export function BatteryPage() {
               <div className="doors">
                 {ds.map((d) => (
                   <button key={d.doorId} className={`door wide ${d.state}${d.stale ? ' stale' : ''}`} onClick={() => nav(`/battery/${encodeURIComponent(d.doorId)}`)}
-                    title={`${d.name}: ${STATE_LABEL[d.state]}${d.stale ? ' (stale)' : ''}${d.reportedAt ? ` · ${fmt.dt(d.reportedAt)}` : ''}${d.lastChange ? ` · batteries changed ${fmt.dt(d.lastChange.at)}` : ''}${needsProgramming(d) ? ' · program the lock' : ''}`}>
+                    title={`${d.name}: ${STATE_LABEL[d.state]}${d.stale ? ' (no recent report)' : ''}${d.reportedAt ? ` · ${fmt.dt(d.reportedAt)}` : ''}${d.lastChange ? ` · batteries changed ${fmt.dt(d.lastChange.at)}` : ''}${needsProgramming(d) ? ' · program the lock' : ''}`}>
                     <span className="cell" aria-hidden><i /></span>{d.name}
-                    <span className="sr">{STATE_LABEL[d.state]}{d.stale ? ', stale' : ''}</span>
+                    <span className="sr">{STATE_LABEL[d.state]}{d.stale ? ', no recent report' : ''}</span>
                   </button>
                 ))}
               </div>
@@ -148,7 +149,7 @@ function Legend() {
   return (
     <div className="row small muted batlegend" style={{ marginBottom: 12 }}>
       {(['CRITICAL', 'LOW', 'GOOD', 'REPORTED', 'NEVER'] as BState[]).map((s) => <span key={s} className={`door wide ${s}`} aria-hidden><span className="cell"><i /></span>{STATE_LABEL[s]}</span>)}
-      <span className="door wide GOOD stale" aria-hidden><span className="cell"><i /></span>Stale</span>
+      <span className="door wide GOOD stale" aria-hidden><span className="cell"><i /></span>No recent report</span>
     </div>
   );
 }
@@ -207,7 +208,7 @@ function DoorBattery({ id, door, onClose, onChanged }: { id: string; door: BDoor
       <div className="split" style={{ gridTemplateColumns: 'minmax(0,1fr) 250px' }}>
         <div>
           <dl className="kv" style={{ marginBottom: 18 }}>
-            <dt>Battery</dt><dd><Status s={STATE_PILL[door.state]} label={STATE_LABEL[door.state]} />{door.stale && <> <Status s="PENDING" label="Stale" /></>}</dd>
+            <dt>Battery</dt><dd><Status s={STATE_PILL[door.state]} label={STATE_LABEL[door.state]} />{door.stale && <> <Status s="PENDING" label="No recent report" /></>}</dd>
             <dt>Last report</dt><dd>{door.lastEvent ? `${door.lastEvent.name}${door.lastEvent.code ? ` (event ${door.lastEvent.code})` : ''}` : 'This lock has not reported a battery event'}</dd>
             {door.voltsBelow != null && <><dt>Voltage</dt><dd>below {door.voltsBelow.toFixed(1)} V</dd></>}
             <dt>Reported</dt><dd>{door.reportedAt ? `${fmt.dt(door.reportedAt)} (lock time)` : '—'}{door.receivedAt ? <span className="small muted"> · received {fmt.rel(door.receivedAt)}</span> : null}</dd>

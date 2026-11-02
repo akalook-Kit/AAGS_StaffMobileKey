@@ -19,8 +19,14 @@ events, which reach Visionline and are read by the connector's watch (`/callback
 | 528 battery exchanged · 535 IR battery exchanged · 536 backup battery exchanged | **Good**. The open alert and its request are resolved automatically. |
 | 1056–1081 "Battery level below X volts" (6.0–9.0 V and 3.0–4.8 V, in 0.2 V steps) | A **reading**. It becomes Low or Critical only if the hotel sets voltage thresholds (Settings → Battery & maintenance). |
 
+**2.18:** "Below 4.8 V" (or 9.0 V) is the reading of new batteries: it counts as a battery change and closes the alert and
+its request. In the 30 days after a change (Settings → Battery & maintenance), 304 / 306 "battery level low" alerts
+are **ignored** (no alert, no request, noted in the audit trail as `battery.low_alert_ignored`) unless a reading at or
+below the low threshold (or 4.2 V / 8.4 V when none is set) came after the change: locks can keep logging the alert
+with cards for a while after new batteries.
+
 Every door the platform knows is shown, including doors that have **never reported**. A reading becomes
-**stale** after the number of days set by the hotel (30 by default).
+**no recent report** after the number of days set by the hotel (30 by default).
 
 > **Offline locks** (all 449 doors at the JW Marriott test system are offline) only report when their
 > events reach Visionline, for example when the lock is read with a programming unit. Expect *never
@@ -87,7 +93,7 @@ These settings are part of the versioned hotel policy, so each save can be rolle
 
 | Setting | Default |
 |---|---|
-| Days until a reading is stale | 30 |
+| Days without a report before "no recent report" | 30 |
 | Automatic maintenance request for | Critical alarms |
 | Voltage thresholds (6–9 V packs, 3–4.8 V cells) | empty: readings only |
 | Due time per priority (hours) | urgent 4, high 24, normal 72, low 168 |

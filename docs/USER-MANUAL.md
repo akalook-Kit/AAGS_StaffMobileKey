@@ -1,4 +1,4 @@
-# Access Monitoring Tool — user manual (2.17)
+# Access Monitoring Tool — user manual (2.18)
 
 New here? Start with **QUICK-START.md** (5 steps, adding people, everyday tasks).
 
@@ -58,6 +58,53 @@ online reader or when the lock is read.
 Every lock event received from Visionline (entrances, refused entries, alarms, battery), every mobile-key event and
 system events, with filters (period, type, door, person, known/unknown card). **Print** makes a PDF with a
 fingerprint (SHA-256) that can be checked later under *Verify a PDF*: any change to the file shows.
+
+### 5b. New in 2.18
+
+- **New batteries close the alarm by themselves.** Right after new batteries, a lock reads the top of its scale
+  ("Battery level below 4.8 volts", or 9.0 V for 6–9 V packs). That reading now closes the battery alarm and resolves
+  its maintenance request, and counts as a battery change. Settings → Battery & maintenance can switch this off.
+- **"Alert, Battery level low" after new batteries is not a battery problem.** A lock can keep logging this alert
+  (0304) with each card for a while after the batteries were changed. For 30 days after a change (setting) such
+  alerts raise no alarm and open no request, unless a voltage reading at or below the low level (your threshold, or
+  4.2 V / 8.4 V) confirms it. Each ignored alert is noted in the audit trail.
+- **"No recent report"** replaces the word "stale" on Battery status: nothing has been heard from the lock for the
+  number of days set in Settings, so its last reading may be out of date.
+- **Lock troubleshooting** (Building → Lock troubleshooting, or *Troubleshoot a lock* on Battery status), mainly for
+  offline locks. It works whether or not battery monitoring is switched on.
+  1. Read the lock with the service device and upload its events to Visionline as usual.
+  2. In Visionline, open the lock's events and save them as a report (.xls), e.g. `1115.xls`. Both the older layout
+     (Time, Event…) and the newer one (Door, S/N, Event time, Read-out time, Seq.No…) are read.
+  3. Upload the file, check the newest events (switch *Day/month* if day and month are swapped), choose the door
+     (suggested from the file) and confirm.
+
+  The report starts with a verdict (*needs attention*, *a few things to check*, *nothing wrong found*) and **what to do,
+  in order**, then every finding with its reason. It covers:
+  - **Battery:** readings over time with each battery change; each battery period with days to 4.4 / 4.2 / 4.0 V,
+    use per 30 days and per 1,000 openings, alarms; how long a set lasts at that rate; the alarms that count, and the
+    low-battery alerts ignored after a change.
+  - **Lock:** internal errors, card-reading and Bluetooth errors, cards of another system, restarts (those right after a
+    battery change are normal and not counted), lost clock, data errors; a week-by-week table.
+  - **Door:** left open too long (how often, how long), opened from outside with no card or key just before (latch
+    not catching, or forced), mechanical key openings, deadbolt use, refused entries by reason.
+  - **Use:** openings a day, by hour and by weekday, cards used by card type.
+  - **Service and data:** service-device read-outs, time setting and program uploads with dates, server pings for
+    online locks, and the report's own quality (rows read twice counted once, events with a lost clock, readings left
+    out while the lock was being programmed).
+
+  Every event type and every refusal reason is explained in plain words, for example:
+  - *Door Unit Internal* events are the lock's own, mostly mechanical events (door opened or closed, double lock on or
+    off).
+  - *Deadbolt thrown / released*: the knob inside the room turned the double lock on / off.
+  - *Error, Door unit dead bolted*: someone tried to open while the double lock was on; only cards with the right to
+    override the deadbolt open the room then. Normal privacy, not a fault.
+  - *Error, Card has expired*: an expired card was used; the door does not open.
+  - *Mechanical key*: the metal key was used to open or lock the door.
+
+  Refusals are shown as card or rights matters, not as lock faults.
+
+  *Open a maintenance request* puts the findings into a request; *Print* makes a paper copy. Names, user IDs, card
+  numbers and serial numbers in the file are not kept.
 
 ### 5a. New in 2.17
 

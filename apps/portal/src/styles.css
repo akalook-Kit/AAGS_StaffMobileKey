@@ -795,3 +795,21 @@ ol.steps > li { margin-bottom: 14px; }
 .chip.on { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
 .ssr-warn { border-left: 3px solid var(--bad); padding: 6px 10px; background: rgba(200,40,40,.06); }
 .ssr-cols { columns: 2; font-size: 12px; }
+
+/* 2.18 Lock troubleshooting */
+.findings { display: grid; gap: 8px; }
+.finding { display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.finding.f-high { border-color: var(--bad-line); background: var(--bad-bg); }
+.finding.f-medium { border-color: var(--warn-line); }
+.finding .badge { justify-self: start; margin-top: 2px; }
+.finding p { margin: 3px 0 0; color: var(--ink-2); font-size: 13.5px; }
+.finding .f-action { color: var(--ink); }
+.steps-inline { margin: 8px 0 12px; padding-left: 20px; color: var(--ink-2); } .steps-inline li { margin: 2px 0; }
+@media (max-width: 640px) { .finding { grid-template-columns: 1fr; } }
+@media print { .lock-report .vizcard .btn { display: none !important; } .finding { break-inside: avoid; } }
+/* 2.18 Lock troubleshooting: verdict and the ordered to-do list */
+.verdict.v-attention { border-color: var(--bad-line); }
+.verdict.v-check { border-color: var(--warn-line); }
+.verdict .badge { font-size: 14px; padding: 4px 10px; }
+.lr-todo { margin: 6px 0 0; padding-left: 22px; display: block; } .lr-todo li { margin: 5px 0; } .lr-todo li.t-high::marker { color: var(--bad); font-weight: 700; }
+.lock-report > .section-title { margin: 22px 0 8px; }

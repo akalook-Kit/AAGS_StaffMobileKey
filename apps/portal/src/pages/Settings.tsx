@@ -524,7 +524,7 @@ function TemplatesSettings() {
 
 /** Settings → Battery & maintenance: policy.battery and policy.maintenance. */
 function Phase2Policy({ data, set }: { data: any; set: (patch: any) => void }) {
-  const b = { staleAfterDays: 30, autoTicket: 'critical', changeJumpVolts: 0.8, stillAlarmingDays: 14, voltage: { highRange: { low: null, critical: null }, lowRange: { low: null, critical: null } }, ...(data.battery ?? {}) };
+  const b = { staleAfterDays: 30, autoTicket: 'critical', changeJumpVolts: 0.8, stillAlarmingDays: 14, fullReadingMeansNew: true, lowAlertGraceDays: 30, lowAlertCodes: [304, 306], voltage: { highRange: { low: null, critical: null }, lowRange: { low: null, critical: null } }, ...(data.battery ?? {}) };
   const m = { dueHours: { low: 168, normal: 72, high: 24, urgent: 4 }, notifyJobRoles: ['Maintenance'], staffCanReport: true, ...(data.maintenance ?? {}) };
   const setB = (patch: any) => set({ battery: { ...b, ...patch } });
   const setM = (patch: any) => set({ maintenance: { ...m, ...patch } });
@@ -534,7 +534,7 @@ function Phase2Policy({ data, set }: { data: any; set: (patch: any) => void }) {
     <>
       <h3 className="section-title">Battery alarms</h3>
       <div className="field-row">
-        <div className="field"><label htmlFor="stale">A reading is stale after (days)</label><input id="stale" type="number" min={1} max={365} value={b.staleAfterDays} onChange={(e) => setB({ staleAfterDays: Number(e.target.value) })} />
+        <div className="field"><label htmlFor="stale">Show "no recent report" after (days without a report)</label><input id="stale" type="number" min={1} max={365} value={b.staleAfterDays} onChange={(e) => setB({ staleAfterDays: Number(e.target.value) })} />
           <span className="hint">Locks report only when their events reach Visionline.</span></div>
         <div className="field"><label htmlFor="auto">Open a maintenance request automatically for</label>
           <select id="auto" value={b.autoTicket} onChange={(e) => setB({ autoTicket: e.target.value })}>
@@ -554,6 +554,11 @@ function Phase2Policy({ data, set }: { data: any; set: (patch: any) => void }) {
           <span className="hint">For example 3.6 V then 4.6 V. Used when the lock does not send “Battery exchanged”.</span></div>
         <div className="field"><label htmlFor="still">An alarm this many days after a change means “program the lock and upload firmware”</label><input id="still" type="number" min={0} max={90} value={b.stillAlarmingDays} onChange={(e) => setB({ stillAlarmingDays: Number(e.target.value) })} />
           <span className="hint">A high-priority maintenance request is opened. 0 = off.</span></div>
+      </div>
+      <label className="check"><input type="checkbox" checked={b.fullReadingMeansNew !== false} onChange={(e) => setB({ fullReadingMeansNew: e.target.checked })} /><span>A reading of 4.8 V (or 9.0 V) means new batteries: close the alarm and its maintenance request by themselves<span className="hint" style={{ display: 'block' }}>Locks read the top of their scale right after the batteries are replaced.</span></span></label>
+      <div className="field-row">
+        <div className="field"><label htmlFor="grace">After a battery change, ignore “Alert, Battery level low” for (days)</label><input id="grace" type="number" min={0} max={120} value={b.lowAlertGraceDays ?? 30} onChange={(e) => setB({ lowAlertGraceDays: Number(e.target.value) })} />
+          <span className="hint">A lock can keep logging this alert with each card after new batteries. It is not treated as a battery problem (no alarm, no request) unless a voltage reading at or below the low level (4.2 V / 8.4 V if not set above) confirms it. 0 = always count it.</span></div>
       </div>
       <h3 className="section-title">Maintenance requests</h3>
       <p className="small muted" style={{ marginBottom: 6 }}>Time to complete a new request, by priority (hours).</p>
