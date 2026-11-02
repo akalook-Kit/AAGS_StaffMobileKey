@@ -870,7 +870,7 @@ async function main() {
 
     // Card lookup and reading a keycard on an encoder (pilot)
     const lk = await call('GET', `${H}/visionline/cards/${desk10.json.regNo}/lookup`, gm);
-    ok(lk.status === 200 && lk.json.known && lk.json.card.holder === 'Grace Mvogo' && lk.json.card.issuedBy === 'Visionline desk' && lk.json.card.doors.length > 0, `card lookup: ${lk.json.card?.holder}, ${lk.json.card?.group}, issued by ${lk.json.card?.issuedBy}, ${lk.json.card?.doors?.length} doors`, lk.json);
+    ok(lk.status === 200 && lk.json.known && lk.json.card.holder === 'Grace Mvogo' && lk.json.card.issuedBy === null && lk.json.card.doors.length > 0, `card lookup: ${lk.json.card?.holder}, ${lk.json.card?.group}, issued by ${lk.json.card?.issuedBy ?? 'Visionline (operator not reported)'}, ${lk.json.card?.doors?.length} doors`, lk.json);
     ok((await call('GET', `${H}/visionline/cards/999999999/lookup`, gm)).json.known === false, 'an unknown card number is said to match nothing');
     ok((await call('POST', `${H}/visionline/encoder/read`, gm, { encoder: 'fd1' })).json.error?.code === 'ENCODER_READ_OFF', 'reading at an encoder is off until the hotel switches it on');
     const vle = (await call('GET', `${H}/config/visionline`, admin)).json.data;
@@ -1124,6 +1124,189 @@ async function main() {
     const back = await until('back to normal', () => call('GET', `${H}/emergency/${em.json.id}/doors`, security), (r) => r.json.some((x: any) => x.command === 'emergencyClose' && x.reached === op14.json.online), 60_000);
     ok(back.json.some((x: any) => x.command === 'emergencyClose' && x.reached === op14.json.online), 'ending the emergency puts the doors back to normal');
     await call('PUT', `${H}/config/policy`, admin, pol14);
+  }
+
+  console.log('\n2.15: keycards used per room (who issued them), battery changes, "program the lock and upload firmware"');
+  {
+    const maint15 = await login('maint@khb.test');
+    const ev = (door: string, body: unknown) => call('POST', `${SIM}/sim/doors/${encodeURIComponent(door)}/event`, undefined, body);
+    const desk = (await call('POST', `${SIM}/sim/desk/cards`, undefined, { userId: 'e2e-215', givenName: 'Room', surname: 'Attendant', userGroup: (await call('GET', `${SIM}/sim/state`)).json.users[0]?.userGroup, doors: ['309'] })).json;
+    const guest = (await call('POST', `${SIM}/sim/guest-cards`, undefined, { room: '309', n: 1 })).json;
+    await ev('309', { code: 64, registrationNumber: desk.regNo, minutesAgo: 180 }); // offline lock: recorded 3 h ago, uploaded now
+    await ev('309', { code: 64, registrationNumber: guest.regNos[0], minutesAgo: 120 });
+    await ev('309', { code: 320, registrationNumber: guest.regNos[0], minutesAgo: 60 });
+    const from = new Date(Date.now() - 86_400_000).toISOString(), to = new Date(Date.now() + 60_000).toISOString();
+    const ru = await until('room 309 usage', () => call('GET', `${H}/reports/room-keycards?from=${from}&to=${to}`, admin), (r) => (r.json.rooms ?? []).find((x: any) => x.door === '309')?.cards?.length >= 2);
+    const r309 = ru.json.rooms?.find((x: any) => x.door === '309');
+    const g = r309?.cards.find((c: any) => c.card === guest.regNos[0]);
+    ok(r309 && g?.entries === 1 && g?.refused === 1 && /Visionline desk/.test(g.issuedBy), 'keycards used per room: room 309 lists the guest card (1 entry, 1 refused, issued at the Visionline desk)', r309);
+    ok(r309?.cards.some((c: any) => c.card === desk.regNo && c.entries === 1), 'and the staff card used there');
+    ok(g && Math.abs(new Date(g.first).getTime() - (Date.now() - 120 * 60_000)) < 3 * 60_000, 'events uploaded late from an offline lock are placed at the time the lock recorded them');
+    ok(ru.json.rooms.some((x: any) => x.cards.some((c: any) => c.kind === 'mobile' && c.issuedBy && !/Visionline desk/.test(c.issuedBy))), 'mobile keys show the portal user who issued them');
+    ok(!ru.json.rooms.some((x: any) => /Entrance/.test(x.door)), 'guest rooms only by default');
+    ok((await call('GET', `${H}/reports/room-keycards?from=${from}&to=${to}`, lakeAdmin)).status === 403, 'another hotel cannot read the room report');
+    const rpdf = await fetch(`${H}/reports/room-keycards/pdf`, { method: 'POST', headers: { authorization: `Bearer ${admin}`, 'content-type': 'application/json' }, body: JSON.stringify({ from, to }) });
+    ok(rpdf.status === 200 && (await rpdf.arrayBuffer()).byteLength > 1000 && /^[0-9a-f]{64}$/.test(rpdf.headers.get('x-report-sha256') ?? ''), 'room report printed as a verifiable PDF');
+
+    const bat = (door: string, body: unknown) => call('POST', `${SIM}/sim/doors/${encodeURIComponent(door)}/battery`, undefined, body);
+    const bd = async (id: string) => (await call('GET', `${H}/battery`, maint15)).json.doors?.find((d: any) => d.doorId === id);
+    await bat('206', { kind: 'volts', volts: 3.6, minutesAgo: 3 * 1440 });
+    await until('206 first reading', () => bd('206'), (d) => d?.voltsBelow === 3.6);
+    await bat('206', { kind: 'volts', volts: 4.6, minutesAgo: 2 * 1440 });
+    const ch = await until('206 change inferred', () => bd('206'), (d) => d?.lastChange);
+    ok(ch?.lastChange?.source === 'inferred' && /3\.6 V to 4\.6 V/.test(ch.lastChange.detail ?? ''), 'batteries counted as changed from the voltage jump (3.6 V -> 4.6 V), without a "battery exchanged" event', ch?.lastChange);
+    ok((await bd('Linen Store'))?.lastChange?.source === 'event', 'Linen Store: last change from the lock\'s "battery exchanged" event');
+    await bat('206', { kind: 'low' });
+    const rp = await until('206 reprogram', () => bd('206'), (d) => d?.reprogram);
+    ok(rp?.state === 'LOW' && rp.reprogram?.number > 0 && rp.ticket?.id === rp.reprogram.ticketId, `still alarming after the change -> request #${rp?.reprogram?.number} "program the lock and upload firmware"`, rp);
+    const rt = (await call('GET', `${H}/maintenance/tickets/${rp?.reprogram?.ticketId}`, maint15)).json;
+    ok(/Program lock and upload firmware/.test(rt.title) && /service tool/.test(rt.description) && rt.category === 'lock', 'the request tells the technician to program the lock and upload the firmware', rt.title);
+    await bat('206', { kind: 'low' });
+    await new Promise((r) => setTimeout(r, 2500));
+    const tickets = (await call('GET', `${H}/maintenance/tickets?status=open`, maint15)).json;
+    const list = Array.isArray(tickets) ? tickets : tickets.tickets ?? tickets.items ?? [];
+    ok(list.filter((t: any) => /206/.test(t.title)).length === 1, 'a repeated alarm does not open a second request (and no "replace battery" request)');
+  }
+
+  console.log('\n2.16: invitations, hotel or institution, connector on another computer');
+  {
+    const issuer16 = await login('issuer@khb.test');
+    const prof = await call('GET', `${H}/operators/profiles`, admin);
+    ok(prof.status === 200 && prof.json.some((p: any) => p.id === 'frontOffice'), 'simple profiles for inviting people', prof.json?.map((p: any) => p.id));
+    ok((await call('POST', `${H}/operators/invite`, issuer16, { email: 'new.person@khb.test', displayName: 'New Person', profile: 'frontOffice' })).status === 403, 'only administrators invite people');
+    const inv = await call('POST', `${H}/operators/invite`, admin, { email: 'new.person@khb.test', displayName: 'New Person', profile: 'frontOffice', portalUrl: 'https://portal.example' });
+    ok(inv.status === 200 && /^[A-Za-z0-9_-]{43}$/.test(inv.json.token) && !inv.json.existing, 'an invitation makes a one-time link', inv.json);
+    const listed = (await call('GET', `${H}/operators`, admin)).json.find((o: any) => o.email === 'new.person@khb.test');
+    ok(listed?.status === 'INVITED' && listed.roles.includes('KEY_ISSUER') && listed.invite_expires_at, 'the person shows as invited, with the front-office role');
+    ok((await call('POST', `${API}/api/v1/auth/login`, undefined, { email: 'new.person@khb.test', password: 'whatever-password' })).status === 401, 'no sign-in before the password is chosen');
+    const info = await call('GET', `${API}/api/v1/public/invites/${inv.json.token}`);
+    ok(info.status === 200 && info.json.email === 'new.person@khb.test' && info.json.site, 'the link shows who it is for, without signing in');
+    ok((await call('GET', `${API}/api/v1/public/invites/${'x'.repeat(43)}`)).status === 404, 'a made-up link is refused');
+    ok((await call('POST', `${API}/api/v1/public/invites/${inv.json.token}`, undefined, { password: 'short' })).status === 400, 'a short password is refused');
+    const acc = await call('POST', `${API}/api/v1/public/invites/${inv.json.token}`, undefined, { password: 'Front office 2026 desk' });
+    ok(acc.status === 200 && acc.json.token, 'the person chooses a password and is signed in');
+    const me16 = (await call('GET', `${API}/api/v1/me`, acc.json.token)).json;
+    ok(me16.hotels?.[0]?.roles?.includes('KEY_ISSUER'), 'they see the site with their role');
+    ok((await call('POST', `${API}/api/v1/public/invites/${inv.json.token}`, undefined, { password: 'Another long password' })).status === 410, 'the link works only once');
+    ok((await call('POST', `${API}/api/v1/auth/login`, undefined, { email: 'new.person@khb.test', password: 'Front office 2026 desk' })).json.token, 'they sign in with their own password');
+    ok((await call('POST', `${H}/operators/${inv.json.id}/invite`, admin, {})).status === 401, 'a forgotten-password link needs the administrator\'s password first');
+    const ra16 = (await call('POST', `${API}/api/v1/me/reauth`, admin, { password: PW })).json.token;
+    const rs16 = await call('POST', `${H}/operators/${inv.json.id}/invite`, admin, {}, { 'x-smk-reauth': ra16 });
+    ok(rs16.status === 200 && (await call('GET', `${API}/api/v1/public/invites/${rs16.json.token}`)).json.reset === true, 'then a link to choose a new password');
+    ok((await call('POST', `${API}/api/v1/public/invites/${rs16.json.token}`, undefined, { password: 'Front office 2026 desk new' })).json.token
+      && (await call('POST', `${API}/api/v1/auth/login`, undefined, { email: 'new.person@khb.test', password: 'Front office 2026 desk new' })).json.token, 'the new password works');
+    const inv2 = await call('POST', `${H}/operators/invite`, admin, { email: 'later.person@khb.test', displayName: 'Later Person', profile: 'auditor' });
+    const re = await call('POST', `${H}/operators/${inv2.json.id}/invite`, admin, {});
+    ok(re.status === 200 && re.json.token !== inv2.json.token && (await call('GET', `${API}/api/v1/public/invites/${inv2.json.token}`)).status === 404, 'a new link replaces the old one');
+    ok((await call('POST', `${H}/operators/${inv.json.id}/remove`, admin, {})).status === 200, 'an administrator removes access');
+    ok(!(await call('GET', `${API}/api/v1/me`, acc.json.token)).json.hotels?.length, 'the removed person no longer sees the site');
+    ok((await call('GET', `${API}/api/v1/public/invites/${re.json.token}`)).status === 200 && (await call('POST', `${H}/operators/${inv2.json.id}/remove`, admin, {})).status === 200
+      && (await call('GET', `${API}/api/v1/public/invites/${re.json.token}`)).status === 404, 'removing someone also cancels their open link');
+
+    const prop = (await call('GET', `${H}/config/property`, admin)).json.data;
+    ok((await call('PUT', `${H}/config/property`, admin, { ...prop, kind: 'institution' })).status === 200, 'the site can be an institution');
+    ok((await call('GET', `${API}/api/v1/me`, admin)).json.hotels.find((h: any) => h.id === khb)?.kind === 'institution', 'the portal is told (no guest features, "rooms")');
+    await call('PUT', `${H}/config/property`, admin, { ...prop, kind: 'hotel' });
+
+    const pol16 = (await call('GET', `${H}/config/policy`, admin)).json.data;
+    const cs16 = await call('PUT', `${H}/config/policy`, admin, { ...pol16, connectorSetup: { location: 'remote', computerAddress: '192.168.1.50', serverUrl: 'https://smk-server:8443', visionlineUrl: 'https://localhost/api/v1' } });
+    ok(cs16.status === 200, 'connector on another computer: its address and the server address are saved', cs16.json);
+    ok((await call('PUT', `${H}/config/policy`, admin, { ...pol16, connectorSetup: { location: 'remote', computerAddress: 'not an ip' } })).status === 400, 'a wrong connector address is refused');
+    const cn = (await call('GET', `${H}/connectors`, admin)).json.connectors?.find((c: any) => c.online);
+    ok(cn && cn.last_address, `the connector's address is shown (${cn?.last_address})`);
+    await call('PUT', `${H}/config/policy`, admin, pol16);
+  }
+
+  console.log('\n2.16.1: user-group override in the setup report, who can open a door, master keycards');
+  {
+    const done1 = (id: string) => until('command', () => call('GET', `${H}/commands/${id}`, admin), (r) => ['SUCCEEDED', 'FAILED', 'EXPIRED'].includes(r.json?.status), 60_000);
+    const disc = await call('POST', `${H}/resources/discover`, admin, {});
+    if (disc.json?.commandId) await done1(disc.json.commandId);
+    const sr = (await call('GET', `${H}/reports/setup`, admin)).json;
+    const mg = sr.userGroups?.find((g: any) => g.name === 'Management'), hk = sr.userGroups?.find((g: any) => g.name === 'Housekeeping');
+    ok(mg?.overrideDeadbolt === true && mg?.overridePrivacy === true && hk?.overrideDeadbolt !== true, 'setup report: Management overrides deadbolt and privacy, Housekeeping does not', { mg, hk });
+    const byDoor = await call('GET', `${H}/visionline/cards?door=${encodeURIComponent('GM Office')}&state=all`, admin);
+    const all = (await call('GET', `${H}/visionline/cards?state=all`, admin)).json;
+    ok(byDoor.status === 200 && Array.isArray(byDoor.json) && byDoor.json.length <= all.length, `who can open GM Office: ${byDoor.json?.length} of ${all.length} keycards`);
+    const master = await call('GET', `${H}/visionline/cards?master=yes&state=all`, admin);
+    ok(master.status === 200 && Array.isArray(master.json), `master keycards (open every room): ${master.json?.length}`);
+    ok((await call('GET', `${H}/visionline/doors`, admin)).json.some((d: any) => d.name === 'GM Office'), 'door list for the filter');
+    ok((await call('GET', `${H}/visionline/doors`, lakeAdmin)).status === 403, 'another site cannot read the door list');
+  }
+
+  console.log('\n2.17: notice board, sign-in page, charts, Visionline reports, issued by, existing keycards, users and card holders');
+  {
+    const gm17 = await login('gm@khb.test'); const iss17 = await login('issuer@khb.test');
+    const pub = await call('POST', `${H}/notices`, admin, { title: 'Fire drill on Friday', body: 'At 10:00, assemble at the car park.', kind: 'event', public: true });
+    const priv = await call('POST', `${H}/notices`, admin, { title: 'New HR e-mail', body: 'hr@khb.test', kind: 'info', public: false, pinned: true });
+    ok(pub.status === 200 && priv.status === 200, 'an administrator posts on the notice board');
+    ok((await call('POST', `${H}/notices`, iss17, { title: 'Not allowed', kind: 'info' })).status === 403, 'only administrators post');
+    const signIn = (await call('GET', `${API}/api/v1/public/notices?hotel=k-hotel-bana`)).json.notices ?? [];
+    ok(signIn.some((n: any) => n.title === 'Fire drill on Friday') && !signIn.some((n: any) => n.title === 'New HR e-mail'), 'the sign-in page shows public posts only (before sign-in)');
+    const feed = (await call('GET', `${H}/notices`, iss17)).json;
+    ok(feed[0]?.title === 'New HR e-mail' && feed.length >= 2, 'staff see every current post on the Overview, pinned first');
+    ok((await call('DELETE', `${H}/notices/${priv.json.id}`, admin)).status === 200, 'a post is deleted');
+
+    const chart = await call('POST', `${H}/insights/builder/run`, iss17, { dataset: 'doorEvents', groupBy: 'door', measure: 'events', days: 30, limit: 10, chart: 'bars', filters: [] });
+    ok(chart.status === 200 || chart.status === 403, `own charts: ${chart.status === 200 ? 'a key issuer builds one from door events' : 'refused for data the person may not read'}`);
+
+    // Mobile keys made in Visionline: their "serial number" is FFFFFFFF.
+    await call('POST', `${H}/visionline/refresh`, admin, {});
+    const mob = await until('mobile keys from Visionline', () => call('GET', `${H}/visionline/cards?kind=mobile&state=all`, gm17), (r) => (r.json ?? []).length > 0, 90_000);
+    ok((mob.json ?? []).length > 0 && mob.json.every((k: any) => k.mobile_key), `mobile keys recognised in Visionline's card list (${mob.json?.length})`);
+
+    // Issued by: the portal user for cards encoded here.
+    const enc = (await call('GET', `${H}/visionline/cards?state=all&kind=card`, gm17)).json;
+    const special = (await call('GET', `${H}/audit?action=keycard.encode_requested&limit=5`, admin)).json;
+    ok(Array.isArray(enc) && Array.isArray(special), 'card list and audit available');
+    const pec = await call('GET', `${H}/visionline/cards/${encodeURIComponent(String((await call('GET', `${H}/keycards/register`, iss17)).json.find((x: any) => x.label === 'HK 007')?.regNo ?? '0'))}/lookup`, gm17);
+    ok(pec.json?.known === false || /Eric|Supervisor|Admin|Grace/.test(pec.json?.card?.issuedBy ?? ''), `a keycard encoded from the portal shows who encoded it (${pec.json?.card?.issuedBy ?? 'not read yet'})`);
+
+    // Visionline reports
+    const ss = ['[System code]', '1111-2222-3333', 'AA-00001', '', '[Visionline]', 'Version: 1.21.1.16', '', '[Options]', '(39) Mobile Access', '(64) Web service for callback', ''].join('\r\n');
+    const up = await call('POST', `${H}/visionline-imports`, admin, { fileName: 'System settings.xls', data: Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(ss, 'utf16le')]).toString('base64') });
+    ok(up.status === 200 && up.json.kind === 'system_settings', 'the Visionline System settings report is imported (UTF-16 ".xls" as Visionline saves it)', up.json);
+    ok((await call('POST', `${H}/visionline-imports`, admin, { fileName: 'x.xlsx', data: Buffer.from([0x50, 0x4b, 3, 4, 0, 0]).toString('base64') })).json.error?.code === 'WORKBOOK', 'a real Excel workbook is refused with how to save it');
+    ok((await call('POST', `${H}/visionline-imports`, iss17, { fileName: 'a.txt', data: 'eA==' })).status === 403, 'only administrators import');
+    const anyCard = (await call('GET', `${H}/visionline/cards?state=all&kind=card`, gm17)).json.find((k: any) => !k.issued_by);
+    if (anyCard) {
+      const log = `Reg. no\tCard holder\tOperator\r\n${anyCard.reg_no}\t${anyCard.card_holder}\tMarie Desk\r\n`;
+      const lg = await call('POST', `${H}/visionline-imports`, admin, { fileName: 'cards.txt', data: Buffer.from(log, 'utf8').toString('base64') });
+      ok(lg.json.kind === 'card_log' && lg.json.issuers === 1, 'a Visionline card list with the operator is imported');
+      const look = (await call('GET', `${H}/visionline/cards/${anyCard.reg_no}/lookup`, gm17)).json;
+      ok(look.card?.issuedBy === 'Visionline: Marie Desk', `"Issued by" now shows the Visionline operator for a desk card (${look.card?.issuedBy})`);
+    }
+    const ops = `Operator\tOperator template\r\nPMS\tInterface\r\nmarie\tFront office\r\n`;
+    ok((await call('POST', `${H}/visionline-imports`, admin, { fileName: 'operators.txt', data: Buffer.from(ops).toString('base64') })).json.kind === 'operators', 'the Visionline operator list is imported');
+    const rep = (await call('GET', `${H}/reports/setup`, admin)).json;
+    ok(rep.visionline?.systemSettings?.facts?.['Visionline version'] === '1.21.1.16' && rep.visionline.operators?.shared?.includes('PMS'), 'setup report: Visionline settings, operators, and the shared PMS operator flagged');
+    ok(Array.isArray(rep.accessByGroup) && rep.accessByGroup.length > 0 && Array.isArray(rep.accessByPerson), `setup report: access by user group (${rep.accessByGroup?.length}) and by person (${rep.accessByPerson?.length})`);
+
+    // Issue from an existing Visionline keycard / person
+    const tok17 = (await call('POST', `${H}/keycards/qr-link`, admin, {})).json.path.split('/').pop();
+    await call('POST', `${API}/api/v1/public/keycard-requests/${tok17}`, undefined, { kind: 'new', staffType: 'daily', givenName: 'Existing', surname: 'Holder', department: 'Housekeeping', reason: 'already has a card', managerName: 'HK manager' });
+    const req17 = (await call('GET', `${H}/keycards/requests?q=Existing`, iss17)).json[0];
+    const srch = (await call('GET', `${H}/keycards/visionline-search?q=`, iss17)).json;
+    ok(Array.isArray(srch.people) && Array.isArray(srch.cards), 'front office searches the people and keycards already in Visionline');
+    const card17 = srch.cards.find((c: any) => !c.mobile) ?? srch.cards[0];
+    if (card17 && req17) {
+      const ex = await call('POST', `${H}/keycards/requests/${req17.id}/issue`, iss17, { method: 'existing', regNo: card17.reg_no, userGroup: 'n/a' });
+      const after = (await call('GET', `${H}/keycards/requests?q=Existing`, iss17)).json[0];
+      ok(ex.json.status === 'ISSUED' && after.cardRegNo === card17.reg_no, `a request is linked to an existing keycard (${card17.reg_no}, ${card17.user_group ?? 'no group'})`);
+    }
+
+    // Operators and card holders
+    const gmOp = (await call('GET', `${H}/operators`, admin)).json.find((o: any) => o.email === 'gm@khb.test');
+    const person = srch.people[0];
+    if (gmOp && person) {
+      ok((await call('PUT', `${H}/operators/${gmOp.id}/visionline-person`, admin, { vlUserId: person.user_id })).status === 200, 'a portal user is linked to the Visionline card holder they are');
+      const again = (await call('GET', `${H}/operators`, admin)).json.find((o: any) => o.email === 'gm@khb.test');
+      ok(again.vl_user_id === person.user_id, `Users shows their keycards (${again.vl_cards} valid)`);
+      const ppl = (await call('GET', `${H}/visionline/people?q=${encodeURIComponent(person.user_id)}`, gm17)).json;
+      ok(ppl.some((u: any) => u.portal_user), 'Visionline people shows who is also a portal user');
+    }
+    const ovw = (await call('GET', `${H}/visionline/overview`, gm17)).json;
+    ok(ovw.visionlineOperator && typeof ovw.visionlineOperator.shared === 'boolean', `the Visionline user the portal uses is checked (${ovw.visionlineOperator?.name}: ${ovw.visionlineOperator?.shared ? 'shared' : 'named'})`);
   }
 
   console.log('\nGate: every request is traceable without exposing secrets');

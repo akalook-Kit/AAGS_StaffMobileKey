@@ -1,3 +1,4 @@
+import { isMobileCard } from './mobile.ts';
 import { VL, toVisionlineLocal, VL_DOC } from '@smk/shared/node';
 import type { DiscoveredResource, DoorCommandsPayload, EncodeKeycardPayload, ErrorInfo, IssueStaffKeyPayload, RevokeStaffKeyPayload } from '@smk/shared';
 import { VisionlineClient, VisionlineApiError } from './client.ts';
@@ -106,7 +107,11 @@ export class WebApiAdapter implements VisionlineAdapter {
     for (const g of allGroups) {
       try {
         const ug = await this.vl.request<any>('GET', VL.paths.userGroup(g));
-        out.push({ kind: 'usergroup', externalId: String(ug.id ?? g), name: String(ug.id ?? g), data: { uniformAccess: ug.uniformAccess ?? false, doorOperations: ug.doorOperations ?? [], timeSchedule: ug.timeSchedule ?? null } });
+        out.push({ kind: 'usergroup', externalId: String(ug.id ?? g), name: String(ug.id ?? g), data: { uniformAccess: ug.uniformAccess ?? false, doorOperations: ug.doorOperations ?? [], timeSchedule: ug.timeSchedule ?? null,
+          // 0.13.1 [§5.29.2] override rights of the group: deadbolt and privacy (null = Visionline did not say)
+          ignoreDeadbolt: typeof ug.ignoreDeadbolt === 'boolean' ? ug.ignoreDeadbolt : null, ignorePrivacy: typeof ug.ignorePrivacy === 'boolean' ? ug.ignorePrivacy : null,
+          autoBlockInRentedRoom: typeof ug.autoBlockInRentedRoom === 'boolean' ? ug.autoBlockInRentedRoom : null,
+          maxStaffCardsPerUser: Number.isInteger(ug.maxStaffCardsPerUser) ? ug.maxStaffCardsPerUser : null, validation: ug.validation ?? null } });
       } catch (e) {
         if (!isNotFound(e)) throw e;
       }
@@ -150,6 +155,8 @@ export class WebApiAdapter implements VisionlineAdapter {
       doors: [...new Set(ops.flatMap((o: any) => (Array.isArray(o?.doors) ? o.doors : []).map(String)))].slice(0, 300),
       doorGroups: [...new Set(ops.flatMap((o: any) => (Array.isArray(o?.doorGroups) ? o.doorGroups : []).map(String)))].slice(0, 100),
       encoder, readAt: new Date().toISOString(),
+      // 2.17 a phone's mobile key reads as serial FFFFFFFF; only this yes/no is passed on
+      mobile: isMobileCard(d),
     };
   }
 

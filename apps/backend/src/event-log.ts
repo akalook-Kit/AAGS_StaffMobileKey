@@ -130,7 +130,7 @@ export async function queryEvents(hotelId: string, f: EventFilter) {
     sel0 AS (
       SELECT ev.*, COALESCE(dm.name, ev.door_ref) AS door_name, dm.external_id AS door_id,
         vc.reg_no AS m_reg, vc.card_holder AS m_holder, vc.user_group AS m_vgroup, vc.deadbolt_override AS m_deadbolt, vc.key_id AS m_vkey,
-        vc.starts_at AS m_starts, vc.expires_at AS m_expires, vc.cancelled AS m_cancelled
+        vc.starts_at AS m_starts, vc.expires_at AS m_expires, vc.cancelled AS m_cancelled, vc.mobile AS m_vmobile
       FROM ev LEFT JOIN doormap dm ON dm.k = ev.door_ref
         LEFT JOIN vl_cards vc ON vc.hotel_id=$1 AND vc.reg_no=ev.card AND ev.card <> '0' AND ev.id ~ '^[vc]'
       WHERE ev.at BETWEEN $2 AND $3),
@@ -157,12 +157,14 @@ export async function queryEvents(hotelId: string, f: EventFilter) {
         count(*) FILTER (WHERE severity IN ('error','warning'))::int AS errors FROM sel`, params)).rows[0];
     const byCat = (await c.query(`${filtered} SELECT category, count(*)::int AS n FROM sel WHERE ${clsSql} GROUP BY category`, params)).rows;
     const page = (await c.query(`${filtered}
-      SELECT sel.*, wd.label AS watched, op.display_name AS m_issued_by, (kr.id IS NOT NULL OR sel.key_id IS NOT NULL OR sel.m_vkey IS NOT NULL) AS m_mobile
+      SELECT sel.*, wd.label AS watched, COALESCE(op.display_name, pec.operator_name, 'Visionline: ' || vci.operator) AS m_issued_by, (kr.id IS NOT NULL OR sel.key_id IS NOT NULL OR sel.m_vkey IS NOT NULL OR sel.m_vmobile IS TRUE) AS m_mobile
       FROM (SELECT * FROM sel WHERE ${clsSql} ORDER BY at DESC, id DESC LIMIT ${limit + 1}) sel
         LEFT JOIN watched_doors wd ON wd.hotel_id=$1 AND wd.active AND wd.door_id=sel.door_id
         LEFT JOIN LATERAL (SELECT r.id, r.requested_by FROM key_requests r WHERE r.hotel_id=$1 AND sel.card IS NOT NULL AND sel.card <> '0' AND r.card_reg_no=sel.card ORDER BY r.created_at DESC LIMIT 1) kr ON true
         LEFT JOIN key_requests kk ON kk.id = COALESCE(sel.key_id, sel.m_vkey)
         LEFT JOIN operators op ON op.id = COALESCE(kk.requested_by, kr.requested_by)
+        LEFT JOIN portal_encoded_cards pec ON pec.hotel_id=$1 AND pec.reg_no=sel.card
+        LEFT JOIN vl_card_issuers vci ON vci.hotel_id=$1 AND vci.reg_no=sel.card
       ORDER BY at DESC, id DESC`, params)).rows;
     return { counts: agg, byCatRows: byCat, rows: page };
   });
@@ -184,7 +186,7 @@ export async function queryEvents(hotelId: string, f: EventFilter) {
       match: r.card && r.card !== '0' && (r.id.startsWith('v') || r.id.startsWith('c'))
         ? { known, kind: r.m_mobile ? 'mobile' : r.m_reg ? 'card' : null, holderId: r.m_holder ?? null, group: r.m_vgroup ?? null,
           validThen: r.m_reg ? (!r.m_starts || new Date(r.m_starts) <= at) && (!r.m_expires || new Date(r.m_expires) > at) && !r.m_cancelled : null,
-          issuedBy: r.m_issued_by ?? (r.m_reg && !r.m_mobile ? 'Visionline desk' : null), deadbolt: r.m_deadbolt ?? null }
+          issuedBy: r.m_issued_by ?? (r.m_reg ? (r.m_mobile ? 'Visionline (mobile key)' : 'Visionline desk') : null), deadbolt: r.m_deadbolt ?? null }
         : null,
     };
   });

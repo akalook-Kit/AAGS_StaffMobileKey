@@ -32,7 +32,7 @@ told apart without colour.
 The event log cannot be exported to a spreadsheet. **Print PDF** asks the platform to make the PDF:
 
 - A4 landscape; on **every page**: hotel logo, hotel name, report title, the hotel's **system number** and the
-  **Staff Mobile Key version** at the top; report ID, who printed it, page *n of N* and the hotel's footer line at
+  **Access Monitoring Tool version** at the top; report ID, who printed it, page *n of N* and the hotel's footer line at
   the bottom. Page 1 also states the selection and the totals.
 - Up to 5,000 events per PDF (the PDF says so if the selection had more).
 - Every PDF is recorded with the SHA-256 fingerprint of its exact bytes, and the print is written to the audit

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useHotel } from '../App';
+import { useHotel, useTerms } from '../App';
 import { api, download } from '../api';
 import { Drawer, ErrorNote, PageHead, Status, fmt, useApi, waitForCommand } from '../ui';
 
@@ -14,9 +14,12 @@ const ST: Record<string, string> = { SUBMITTED: 'Waiting', ISSUED: 'Issued', REJ
  */
 export function KeycardsPage() {
   const { can } = useHotel();
-  const [tab, setTab] = useState<Tab>(() => (new URLSearchParams(location.search).get('tab') as Tab) ?? 'requests');
+  const t = useTerms();
+  const [tab0, setTab] = useState<Tab>(() => (new URLSearchParams(location.search).get('tab') as Tab) ?? 'requests');
   const tabs: [Tab, string, boolean][] = [['requests', 'Requests', true], ['register', 'Register', can('keycards.read')], ['attention', 'Renewals & duplicates', can('keycards.read')],
-    ['lockouts', 'Unpaid guests', can('lockout.request') || can('lockout.approve')], ['departures', 'Departures', can('lockout.request')], ['encoders', 'Encoders & special cards', can('keycards.read')]];
+    ['lockouts', 'Unpaid guests', !t.institution && (can('lockout.request') || can('lockout.approve'))], ['departures', 'Departures', !t.institution && can('lockout.request')], ['encoders', 'Encoders & special cards', can('keycards.read')]];
+  // 2.16 Guest features (unpaid guests, departures) are for hotels only.
+  const tab = tabs.some((x) => x[0] === tab0 && x[2]) ? tab0 : 'requests';
   return (
     <>
       <PageHead title="Staff keycards" intro="Requests for staff keycards and their cancellation, the cards in use and who holds them. Every card is made in Visionline, the key system." />
@@ -142,7 +145,9 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
   const { base, hotel, can } = useHotel();
   const groups = useApi<any[]>(`${base}/resources?kind=usergroup`);
   const enc = useApi<any>(`${base}/keycards/encoders`);
-  const [method, setMethod] = useState<'encoder' | 'visionline_desk'>('visionline_desk');
+  const [method, setMethod] = useState<'encoder' | 'visionline_desk' | 'existing'>('visionline_desk');
+  // 2.17 The person (or their keycard) may already be in Visionline: pick it instead of making a new one.
+  const [vlUser, setVlUser] = useState<{ id: string; name: string | null; group: string | null } | null>(null);
   const [encoder, setEncoder] = useState('');
   const [label, setLabel] = useState(r.cardLabel ?? '');
   const [group, setGroup] = useState('');
@@ -164,7 +169,7 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
   const issue = async () => {
     setError(null); setOk(null);
     try {
-      const x = await api(`${base}/keycards/requests/${r.id}/issue`, { body: { method, encoder: encoder || undefined, cardLabel: label || null, userGroup: group, regNo: regNo || null, validUntil: until ? new Date(until).toISOString() : null, replaceExisting: r.kind === 'replacement' } });
+      const x = await api(`${base}/keycards/requests/${r.id}/issue`, { body: { method, encoder: encoder || undefined, cardLabel: label || null, userGroup: group || 'n/a', regNo: regNo || null, vlUserId: vlUser?.id ?? null, validUntil: until ? new Date(until).toISOString() : null, replaceExisting: r.kind === 'replacement' } });
       if (x.commandId) await wait(x.commandId, 'Card encoded in Visionline. Give it to the person.'); else setOk('Recorded as issued.');
     } catch (e) { setBusy(null); setError(e); }
   };
@@ -197,17 +202,22 @@ function RequestDrawer({ r, onClose }: { r: any; onClose: () => void }) {
           <div className="seg" style={{ marginBottom: 10 }}>
             <button aria-pressed={method === 'encoder'} disabled={!enc.data?.encodeEnabled} onClick={() => setMethod('encoder')} title={enc.data?.encodeEnabled ? '' : 'Switched off in Settings -> Keycards'}>Encode here</button>
             <button aria-pressed={method === 'visionline_desk'} onClick={() => setMethod('visionline_desk')}>Made at the Visionline desk</button>
+            <button aria-pressed={method === 'existing'} onClick={() => setMethod('existing')} title="The person already holds a keycard in Visionline">Existing keycard</button>
           </div>
+          <VlPicker mode={method === 'existing' ? 'card' : 'person'} initial={`${r.givenName} ${r.surname}`}
+            onPerson={(p) => { setVlUser(p); if (p?.group) setGroup(p.group); }}
+            onCard={(c) => { setRegNo(c.regNo); if (c.group) setGroup(c.group); if (c.holder) setVlUser({ id: c.holder, name: c.name, group: c.group }); }}
+            selected={method === 'existing' ? (regNo ? `Keycard ${regNo}` : null) : vlUser ? `${vlUser.name ?? vlUser.id}${vlUser.group ? ` · ${vlUser.group}` : ''}` : null} />
           <div className="field-row">
             <div className="field"><label htmlFor="i-l">Card number</label><input id="i-l" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="HK 001" /></div>
             <div className="field"><label htmlFor="i-g">Visionline user group</label><select id="i-g" value={group} onChange={(e) => setGroup(e.target.value)}><option value="">Choose…</option>{userGroups.map((g: string) => <option key={g}>{g}</option>)}</select></div>
           </div>
           <div className="field-row">
-            {method === 'encoder' ? <div className="field"><label htmlFor="i-e">Encoder</label><select id="i-e" value={encoder} onChange={(e) => setEncoder(e.target.value)}>{(enc.data?.chosen ?? []).map((n: string) => <option key={n}>{n}</option>)}</select><span className="hint">Place a blank card on it first.</span></div>
+            {method === 'existing' ? null : method === 'encoder' ? <div className="field"><label htmlFor="i-e">Encoder</label><select id="i-e" value={encoder} onChange={(e) => setEncoder(e.target.value)}>{(enc.data?.chosen ?? []).map((n: string) => <option key={n}>{n}</option>)}</select><span className="hint">Place a blank card on it first.</span></div>
               : <div className="field"><label htmlFor="i-r">Visionline card number (optional)</label><input id="i-r" value={regNo} onChange={(e) => setRegNo(e.target.value.replace(/\D/g, ''))} /></div>}
             <div className="field"><label htmlFor="i-u">Valid until</label><input id="i-u" type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} /><span className="hint">Empty: {r.staffType === 'daily' ? 'end of the shift (Settings)' : 'one year (Settings)'}.</span></div>
           </div>
-          <button className="btn primary" disabled={!group || Boolean(busy)} onClick={issue}>{method === 'encoder' ? 'Encode the card' : 'Record as issued'}</button>
+          <button className="btn primary" disabled={(method === 'existing' ? !regNo : !group) || Boolean(busy)} onClick={issue}>{method === 'encoder' ? 'Encode the card' : method === 'existing' ? 'Link this keycard' : 'Record as issued'}</button>
           {r.status === 'SUBMITTED' && <button className="btn" style={{ marginLeft: 8 }} onClick={act(() => api(`${base}/keycards/requests/${r.id}/reject`, { body: { reason: prompt('Why is it rejected?') ?? '' } }), 'Rejected.')}>Reject</button>}
         </section>
       )}
@@ -407,5 +417,43 @@ function Departures() {
           : <p className="empty">No departures today on the in-house list. Import today's Opera in-house report in Breakfast.</p>}
       </section>
     </>
+  );
+}
+
+/** 2.17 Search the people and keycards read from Visionline (to issue without a duplicate, or to link an existing card). */
+function VlPicker({ mode, initial, onPerson, onCard, selected }: {
+  mode: 'person' | 'card'; initial: string; selected: string | null;
+  onPerson: (p: { id: string; name: string | null; group: string | null } | null) => void;
+  onCard: (c: { regNo: string; holder: string | null; name: string | null; group: string | null }) => void;
+}) {
+  const { base } = useHotel();
+  const [q, setQ] = useState(initial);
+  const [open, setOpen] = useState(false);
+  const r = useApi<any>(open ? `${base}/keycards/visionline-search?q=${encodeURIComponent(q.trim())}` : null, [open, q]);
+  return (
+    <div className="vlpick">
+      <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span className="small"><strong>{mode === 'card' ? 'Existing keycard' : 'Already in Visionline?'}</strong></span>
+        {selected ? <span className="chip on">{selected}</span> : <span className="small muted">{mode === 'card' ? 'choose the keycard below' : 'optional: choose the person so no duplicate is created'}</span>}
+        {selected && mode === 'person' && <button type="button" className="btn small" onClick={() => onPerson(null)}>Clear</button>}
+        {!open && <button type="button" className="btn small" onClick={() => setOpen(true)}>Search Visionline</button>}
+      </div>
+      {open && (
+        <div className="vlpick-box">
+          <input className="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, user id or card number" aria-label="Search Visionline" autoFocus />
+          {r.data && (
+            <ul className="vlpick-list">
+              {mode === 'person' && r.data.people.map((p: any) => (
+                <li key={p.user_id}><button type="button" onClick={() => { onPerson({ id: p.user_id, name: p.name, group: p.user_group }); setOpen(false); }}>
+                  <strong>{p.name ?? p.user_id}</strong><span>{p.user_group ?? '—'} · {p.cards} valid card{p.cards === 1 ? '' : 's'} · {p.user_id}</span></button></li>))}
+              {mode === 'card' && r.data.cards.map((c: any) => (
+                <li key={c.reg_no}><button type="button" onClick={() => { onCard({ regNo: c.reg_no, holder: c.card_holder, name: c.name, group: c.user_group }); setOpen(false); }}>
+                  <strong>{c.reg_no} · {c.name ?? c.card_holder ?? '—'}</strong><span>{c.user_group ?? '—'}{c.mobile ? ' · mobile key' : ''}{c.expires_at ? ` · until ${fmt.dt(c.expires_at)}` : ''}</span></button></li>))}
+              {!(mode === 'person' ? r.data.people : r.data.cards).length && <li className="small muted" style={{ padding: 8 }}>Nothing found. People and keycards come from Visionline by themselves (Visionline cards &amp; people).</li>}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

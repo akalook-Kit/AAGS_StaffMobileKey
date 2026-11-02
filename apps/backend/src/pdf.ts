@@ -101,8 +101,8 @@ export async function buildReportPdf(spec: ReportSpec) {
   doc.setTitle(`${spec.title} - ${h.name}`);
   doc.setAuthor(h.name);
   doc.setSubject(`Report ${reportId}`);
-  doc.setCreator(`Staff Mobile Key ${h.version}`);
-  doc.setProducer(`Staff Mobile Key ${h.version}`);
+  doc.setCreator(`Access Monitoring Tool ${h.version}`);
+  doc.setProducer(`Access Monitoring Tool ${h.version}`);
   doc.setCreationDate(printedAt); doc.setModificationDate(printedAt);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -129,7 +129,7 @@ export async function buildReportPdf(spec: ReportSpec) {
     const sub = [h.legalName && h.legalName !== h.name ? h.legalName : null, [h.city, h.country].filter(Boolean).join(', ') || null].filter(Boolean).join(' · ');
     p.drawText(S(spec.title, bold), { x, y: top - 28, size: 10.5, font: bold, color: INK });
     if (sub) p.drawText(S(sub), { x, y: top - 40, size: 8, font, color: MUTED });
-    const right = [`System no. ${h.systemNumber ?? 'not set'}`, `Staff Mobile Key ${h.version}`, `Printed ${fmtTime}`];
+    const right = [`System no. ${h.systemNumber ?? 'not set'}`, `Access Monitoring Tool ${h.version}`, `Printed ${fmtTime}`];
     right.forEach((t, i) => { const tt = S(t); p.drawText(tt, { x: A4L.w - M - font.widthOfTextAtSize(tt, 8.5), y: top - 10 - i * 12, size: 8.5, font: i === 0 ? bold : font, color: i === 0 ? INK : MUTED }); });
     p.drawLine({ start: { x: M, y: headerBottom }, end: { x: A4L.w - M, y: headerBottom }, thickness: 0.8, color: LINE });
     return p;

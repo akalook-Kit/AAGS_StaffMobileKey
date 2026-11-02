@@ -2,6 +2,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useHotel } from '../App';
 import { ErrorNote, PageHead, Status, fmt, useApi } from '../ui';
 import { NoData } from '../components/charts';
+import { GettingStarted } from '../components/GettingStarted';
+import { PinnedReports } from '../components/ReportBuilder';
+import { Notices } from '../components/Notices';
 
 export function Overview() {
   const { base, hotel, me, can } = useHotel();
@@ -15,10 +18,12 @@ export function Overview() {
   const hour = new Date().getHours();
   return (
     <>
-      <PageHead title={`Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}, ${me.displayName.split(' ')[0]}`} intro={`What is happening with staff access at ${hotel.name} right now.`}>
+      <PageHead title={`Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}, ${me.displayName.split(' ')[0]}`} intro={`What is happening at ${hotel.name} right now: doors, keycards and locks.`}>
         {can('key.issue') && <Link className="btn primary" to="/keys">Issue a key</Link>}
       </PageHead>
       <ErrorNote error={s.error} />
+      <GettingStarted />
+      <Notices />
       <TodoNow />
       {(mon || att?.battery || att?.maintenance) && (
         <div className="attn">
@@ -61,7 +66,7 @@ export function Overview() {
               ) : <NoData text="No keys issued yet" hint="New activity appears here by itself." />}
             </div>
             <div className="panel">
-              <h2>Hotel connector</h2>
+              <h2>Connector</h2>
               {d.connector ? (
                 <>
                   <p><Status s={d.connector.online ? 'ACTIVE' : 'FAILED'} label={d.connector.online ? 'Online' : 'Offline'} /> <span className="muted small">last seen {fmt.rel(d.connector.lastSeenAt)}</span></p>
@@ -78,16 +83,25 @@ export function Overview() {
           </div>
         </>
       )}
+      <OverviewCharts />
     </>
   );
 }
 
+/** 2.17 Charts people pinned (My charts), at the end of their Overview. */
+function OverviewCharts() {
+  const { hotel } = useHotel();
+  const ok = (['reports.read', 'events.read', 'maintenance.read', 'key.read', 'breakfast.read'] as const).some((p) => hotel.permissions.includes(p as any));
+  if (!ok) return null;
+  return <div className="grid12" style={{ marginTop: 18 }}><PinnedReports /></div>;
+}
+
 /** 2.14 "To do now": the few things waiting for this person, refreshed every 20 seconds, with quick actions. */
 function TodoNow() {
-  const { base, can } = useHotel();
+  const { base, can, hotel } = useHotel();
   const t = useApi<any>(`${base}/today`, [], 20_000);
   const items = t.data?.items ?? [];
-  const quick: [string, string, boolean][] = [['/keycards', 'Keycard request', can('keycards.request')], ['/keycards?tab=lockouts', 'Unpaid guest', can('lockout.request')],
+  const quick: [string, string, boolean][] = [['/keycards', 'Keycard request', can('keycards.request')], ['/keycards?tab=lockouts', 'Unpaid guest', can('lockout.request') && hotel.kind !== 'institution'],
     ['/visionline?tab=lookup', 'Read a card', can('reports.read')], ['/muster', 'Who is in the building', can('muster.read')], ['/access', 'Access history', can('events.read')]];
   return (
     <section className="todo-now" aria-label="To do now">

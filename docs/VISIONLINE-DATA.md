@@ -57,7 +57,7 @@ and events. The connector makes sure the portal never crowds the others out:
 - Encoder reads are limited to one every 3 seconds and 20 a minute.
 - Settings on the connector (only if the GRMS vendor asks): in `connector.config.json`,
   `"visionline": { "maxConcurrent": 1, "minGapMs": 100 }` (or the variables `VL_MAX_CONCURRENT`, `VL_MIN_GAP_MS`),
-  then restart the *Staff Mobile Key Connector* service. *Connector health* shows the queue.
+  then restart the *Access Monitoring Tool Connector* service. *Connector health* shows the queue.
 
 The long-poll that waits for Visionline events is not counted: it holds a connection open but costs Visionline nothing
 while idle.

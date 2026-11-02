@@ -20,7 +20,7 @@ export function PrintFrame({ title, subtitle, children }: { title: string; subti
         <div className="ph">
           {h?.logo && <img src={h.logo} alt="" style={{ height: REPORT_LOGO_PX[(h.logoSize ?? 'medium') as keyof typeof REPORT_LOGO_PX] }} />}
           <div className="ph-main"><strong>{h?.name ?? ''}</strong><span className="ph-title">{title}</span>{subtitle && <span>{subtitle}</span>}</div>
-          <div className="ph-meta"><b>System no. {h?.systemNumber ?? 'not set'}</b><span>Staff Mobile Key {h?.version ?? ''}</span><span>Printed {printed}</span></div>
+          <div className="ph-meta"><b>System no. {h?.systemNumber ?? 'not set'}</b><span>Access Monitoring Tool {h?.version ?? ''}</span><span>Printed {printed}</span></div>
         </div>
       </td></tr></thead>
       <tfoot><tr><td>

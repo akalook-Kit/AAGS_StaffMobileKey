@@ -52,7 +52,7 @@ $newVer = Get-Version $Source
 $envFile = Join-Path $Target '.env'
 $cfg = Read-EnvFile $envFile
 $project = if ($cfg.COMPOSE_PROJECT_NAME) { $cfg.COMPOSE_PROJECT_NAME } else { 'khb-staffkey' }
-Write-Host "Upgrade Staff Mobile Key $oldVer -> $newVer" -ForegroundColor Green
+Write-Host "Upgrade Access Monitoring Tool $oldVer -> $newVer" -ForegroundColor Green
 Write-Host "  Installed folder: $Target"
 Write-Host "  New version from: $Source"
 
@@ -96,7 +96,7 @@ if (-not $SkipDataBackup) {
 
 $rollbackCmd = "powershell -ExecutionPolicy Bypass -File `"$Target\scripts\windows\rollback.ps1`" -Backup `"$backup`""
 @(
-  "Staff Mobile Key backup taken before upgrading $oldVer -> $newVer on $(Get-Date -Format 'yyyy-MM-dd HH:mm')",
+  "Access Monitoring Tool backup taken before upgrading $oldVer -> $newVer on $(Get-Date -Format 'yyyy-MM-dd HH:mm')",
   "Installed folder: $Target",
   "files\  program files and .env of version $oldVer",
   $(if ($dataSaved) { "data\   database (smk.dump), connector keys (connector-data.tgz), simulator certificates (certs.tgz)" } else { "data\   not saved (-SkipDataBackup)" }),

@@ -42,6 +42,9 @@ export const SCHEMAS = {
     languages: z.array(z.string().min(2).max(8)).min(1).default(['en']),
   }),
   property: z.object({
+    /** 2.16 A hotel, or an institution (offices, a hospital, a school...). Institutions do not see the guest
+     *  features (breakfast, unpaid guests, departures, the Accounts report) and the portal says "rooms", not "guest rooms". */
+    kind: z.enum(['hotel', 'institution']).default('hotel'),
     displayName: z.string().min(2),
     homepage: httpsUrl.optional().nullable(),
     supportEmail: z.string().email(),
@@ -106,7 +109,13 @@ export const SCHEMAS = {
         highRange: z.object({ low: z.number().min(6).max(9).nullable().default(null), critical: z.number().min(6).max(9).nullable().default(null) }).default({ low: null, critical: null }),
         lowRange: z.object({ low: z.number().min(3).max(4.8).nullable().default(null), critical: z.number().min(3).max(4.8).nullable().default(null) }).default({ low: null, critical: null }),
       }).default({ highRange: { low: null, critical: null }, lowRange: { low: null, critical: null } }),
-    }).default({ staleAfterDays: 30, autoTicket: 'critical', voltage: { highRange: { low: null, critical: null }, lowRange: { low: null, critical: null } } }),
+      /** 2.15 Batteries count as changed when a lock's "below X volts" reading rises by at least this much at once
+       *  (e.g. 3.5 V -> 4.5 V), even when the lock never sent "Battery exchanged". */
+      changeJumpVolts: z.number().min(0.3).max(3).default(0.8),
+      /** 2.15 A battery alarm this many days after a battery change means the lock must be programmed and its
+       *  firmware uploaded with the service tool (a maintenance request is opened). 0 = off. */
+      stillAlarmingDays: z.number().int().min(0).max(90).default(14),
+    }).default({ staleAfterDays: 30, autoTicket: 'critical', voltage: { highRange: { low: null, critical: null }, lowRange: { low: null, critical: null } }, changeJumpVolts: 0.8, stillAlarmingDays: 14 }),
     /** 2.6 event log: door entrances are lock events too. The connector's Visionline watch also asks for these codes
      *  [Web API §7.14.1; 64 = staff card accepted]. Add others (e.g. guest card accepted) from the hotel's lock
      *  documentation; switch off to receive refused entries and battery events only. */
@@ -196,6 +205,17 @@ export const SCHEMAS = {
         /** Put the doors back to normal when the emergency is ended. */
         closeOnEnd: z.boolean().default(true),
       }).prefault({}),
+    }).prefault({}),
+    /** 2.16 Where the connector runs. "server" = installed with Access Monitoring Tool on this server; "remote" = on
+     *  another computer of the network (the portal writes the commands; nothing here is a secret). */
+    connectorSetup: z.object({
+      location: z.enum(['server', 'remote']).default('server'),
+      /** The connector computer's address on the network, e.g. 192.168.1.50. */
+      computerAddress: z.string().regex(/^(\d{1,3}(\.\d{1,3}){3}|[0-9a-fA-F:]{3,45})$/, 'An IP address, e.g. 192.168.1.50').optional().nullable(),
+      /** This server's address as the connector computer reaches it, e.g. https://smk-server:8443 */
+      serverUrl: z.string().regex(/^https:\/\/[^\s/]+(:\d+)?\/?$/, 'https://<server name or address>:<port>').optional().nullable(),
+      /** The Visionline Web API as the connector computer reaches it. */
+      visionlineUrl: z.string().regex(/^https:\/\/[^\s]+\/api\/v1\/?$/, 'https://<Visionline server>/api/v1').optional().nullable(),
     }).prefault({}),
     /** 2.14 Daily e-mail for the Accounts team (in-house, arrivals, occupied rooms, lock-outs). */
     accountsReport: z.object({

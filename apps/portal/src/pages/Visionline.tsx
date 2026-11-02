@@ -31,7 +31,7 @@ export function VisionlinePage() {
   };
   return (
     <>
-      <PageHead title="Visionline cards & people" intro="Read from the hotel's Visionline by the connector, by itself: doors and user groups every few hours, people and keycards on a schedule, and a card made at the Visionline desk within seconds. Read-only; nothing here changes Visionline.">
+      <PageHead title="Visionline cards & people" intro="Read from your Visionline by the connector, by itself: doors and user groups every few hours, people and keycards on a schedule, and a card made at the Visionline desk within seconds. Read-only; nothing here changes Visionline.">
         {can('resources.discover') && <button className="btn" onClick={refresh} disabled={busy}>{busy ? 'Asking the connector…' : 'Refresh now'}</button>}
       </PageHead>
       <ErrorNote error={error ?? ov.error} />
@@ -50,13 +50,16 @@ function Status({ d }: { d: any }) {
   const problem = !c ? 'No connector is registered yet (Connector health).'
     : !c.online ? 'The connector is offline: nothing new arrives until it is back.'
     : !c.credentials ? 'The connector has no Visionline account yet: enter it in Settings → Visionline.'
-    : !c.canSync ? 'This connector does not read people and keycards (installed for a Visionline that is not the hotel\'s own, or older than 0.6.0).'
+    : !c.canSync ? 'This connector does not read people and keycards (installed for a Visionline that is not your own, or older than 0.6.0).'
     : !d.sync.enabled ? 'Reading people and keycards is switched off (Settings → Reports & sync).'
     : null;
   const lastSync = d.sync.last;
   return (
     <>
       {problem && <div className="alert warn">{problem}</div>}
+      {d.visionlineOperator?.shared && (
+        <div className="alert warn"><strong>Visionline user "{d.visionlineOperator.name}" is shared (PMS / interface type).</strong> Visionline records every keycard made from this portal under that name, so its own card log cannot say who made it. Change it or add operators: give each person their own Visionline operator and let them store it under <em>Your account → Visionline</em>, then switch on <em>Personal Visionline credentials required</em> (Settings → Visionline). This portal always records the portal user for keycards made here.</div>
+      )}
       <div className="mon-tiles">
         <div className="mon-tile ok"><strong>{d.counts.validCards}</strong><span>valid keycards{d.counts.mobileKeys ? ` · ${d.counts.mobileKeys} mobile keys` : ''}{d.counts.newCards24h ? ` · ${d.counts.newCards24h} new in 24 h` : ''}</span></div>
         <div className="mon-tile ok"><strong>{d.counts.people}</strong><span>people in Visionline</span></div>
@@ -95,8 +98,13 @@ function Filters({ q, setQ, group, setGroup, children }: { q: string; setQ: (v: 
 
 function Cards() {
   const { base } = useHotel();
+  const [sp0] = useSearchParams();
   const [q, setQ] = useState(''); const [group, setGroup] = useState(''); const [state, setState] = useState('valid'); const [kind, setKind] = useState('all'); const [deadbolt, setDeadbolt] = useState('any');
-  const qs = new URLSearchParams({ state, kind, deadbolt, ...(q.trim() ? { q: q.trim() } : {}), ...(group ? { group } : {}) });
+  // 2.16.1 "Who can open this door?" and "who has a master keycard?"
+  const [door, setDoor] = useState(sp0.get('door') ?? ''); const [master, setMaster] = useState(sp0.get('master') === 'yes');
+  const doors = useApi<{ id: string; name: string; group: string | null }[]>(`${base}/visionline/doors`);
+  const qs = new URLSearchParams({ state, kind, deadbolt, ...(q.trim() ? { q: q.trim() } : {}), ...(group ? { group } : {}), ...(door ? { door } : {}), ...(master ? { master: 'yes' } : {}) });
+  const quick = (doors.data ?? []).filter((d) => /cash|safe|master|store|office|server|bar|kitchen|gm/i.test(d.name)).slice(0, 5);
   const cards = useApi<any[]>(`${base}/visionline/cards?${qs}`, [qs.toString()], 30_000);
   const sel = { border: '1px solid var(--line)', borderRadius: 'var(--radius)', padding: '7px 10px' };
   return (
@@ -106,7 +114,16 @@ function Cards() {
           <select aria-label="State" value={state} onChange={(e) => setState(e.target.value)} style={sel}><option value="valid">Valid now</option><option value="ended">No longer valid</option><option value="all">All</option></select>
           <select aria-label="Kind" value={kind} onChange={(e) => setKind(e.target.value)} style={sel}><option value="all">Keycards and mobile keys</option><option value="card">Keycards only</option><option value="mobile">Mobile keys only</option></select>
           <select aria-label="Deadbolt override" value={deadbolt} onChange={(e) => setDeadbolt(e.target.value)} style={sel}><option value="any">Deadbolt override: any</option><option value="yes">Overrides the deadbolt</option><option value="no">Does not override</option><option value="unknown">Not reported by Visionline</option></select>
+          <select aria-label="Who can open this door" value={door} onChange={(e) => setDoor(e.target.value)} style={sel}><option value="">Opens: any door</option>{(doors.data ?? []).map((d) => <option key={d.id} value={d.id}>Opens {d.name}{d.group ? ` (${d.group})` : ''}</option>)}</select>
         </Filters>
+        <div className="row chips" style={{ margin: '10px 0 4px', flexWrap: 'wrap', gap: 6 }}>
+          <span className="small muted">Quick:</span>
+          <button type="button" className={`chip${master ? ' on' : ''}`} aria-pressed={master} onClick={() => { setMaster(!master); setDoor(''); }}>Who has a master keycard</button>
+          <button type="button" className={`chip${deadbolt === 'yes' ? ' on' : ''}`} aria-pressed={deadbolt === 'yes'} onClick={() => setDeadbolt(deadbolt === 'yes' ? 'any' : 'yes')}>Who can override the deadbolt</button>
+          {quick.map((d) => <button type="button" key={d.id} className={`chip${door === d.id ? ' on' : ''}`} aria-pressed={door === d.id} onClick={() => { setDoor(door === d.id ? '' : d.id); setMaster(false); }}>Who can open {d.name}</button>)}
+          {(door || master || deadbolt !== 'any' || group) && <button type="button" className="chip" onClick={() => { setDoor(''); setMaster(false); setDeadbolt('any'); setGroup(''); }}>Clear</button>}
+        </div>
+        {(door || master) && cards.data && <p className="small" style={{ margin: '4px 0 0' }}><strong>{cards.data.length}</strong> {state === 'valid' ? 'valid ' : ''}keycard{cards.data.length === 1 ? '' : 's'} {master ? 'open every room (master)' : `open ${(doors.data ?? []).find((d) => d.id === door)?.name ?? door}`}{group ? `, user group ${group}` : ''}. Door access comes from the card, its door groups and a uniform-access user group.</p>}
       </div>
       <ErrorNote error={cards.error} />
       {!cards.data ? null : !cards.data.length ? <div style={{ padding: 16 }}><NoData text="No keycards for now" hint="They arrive from Visionline by themselves; new cards within seconds of being made." /></div> : (
@@ -123,7 +140,7 @@ function Cards() {
                 <td className="nowrap">{k.expires_at ? fmt.dt(k.expires_at) : '—'}</td>
                 <td className="num">{k.door_count || (k.door_groups?.length ? `${k.door_groups.length} groups` : '—')}</td>
                 <td>{k.deadbolt_override === null || k.deadbolt_override === undefined ? <span className="muted">—</span> : k.deadbolt_override ? <span className="badge warn">Override</span> : 'No'}</td>
-                <td>{k.issued_by ?? (k.mobile_key ? '—' : <span className="muted">Visionline desk</span>)}</td>
+                <td>{k.issued_by ?? <span className="muted" title="Made in Visionline, not from this portal: the Visionline Web API does not say which operator made it (Visionline's card log does).">Visionline{k.mobile_key ? ' (mobile key)' : ' desk'}</span>}</td>
                 <td>{STATE(k)}</td>
                 <td className="nowrap">{fmt.rel(k.first_seen_at)}{k.source === 'live' && <span className="sub">live from Visionline</span>}</td>
               </tr>
@@ -148,7 +165,7 @@ function People() {
       {!people.data ? null : !people.data.length ? <div style={{ padding: 16 }}><NoData text="No people for now" hint="They are read from Visionline by themselves." /></div> : (
         <div style={{ overflowX: 'auto' }}>
           <table className="grid">
-            <thead><tr><th>Name</th><th>Visionline user</th><th>User group</th><th className="num">Valid keycards</th><th>Valid until</th><th>Staff in the portal</th></tr></thead>
+            <thead><tr><th>Name</th><th>Visionline user</th><th>User group</th><th className="num">Valid keycards</th><th>Valid until</th><th>Also in the portal</th></tr></thead>
             <tbody>{people.data.map((u) => (
               <tr key={u.user_id}>
                 <td>{[u.given_name, u.surname].filter(Boolean).join(' ') || '—'}</td>
@@ -156,7 +173,7 @@ function People() {
                 <td>{u.user_group ?? '—'}</td>
                 <td className="num">{u.valid_cards}</td>
                 <td className="nowrap">{u.valid_until ? fmt.dt(u.valid_until) : '—'}</td>
-                <td>{u.staff_name ?? <span className="muted">—</span>}</td>
+                <td>{u.portal_user ? <span className="badge">Portal user: {u.portal_user}</span> : null}{u.staff_name && <span className="sub">Staff app: {u.staff_name}</span>}{!u.portal_user && !u.staff_name && <span className="muted">—</span>}</td>
               </tr>
             ))}</tbody>
           </table>
@@ -200,7 +217,9 @@ function Lookup({ encoders, canRead }: { encoders: string[]; canRead: boolean })
   const [q, setQ] = useState(sp.get('card') ?? '');
   const reg = sp.get('card');
   const r = useApi<any>(reg ? `${base}/visionline/cards/${encodeURIComponent(reg)}/lookup` : null, [reg]);
-  const [enc, setEnc] = useState(encoders[0] ?? '');
+  // 2.17 The encoder is always chosen here (remembered on this computer).
+  const [enc, setEnc0] = useState(() => { try { const v = localStorage.getItem('smk.encoder'); return v && encoders.includes(v) ? v : encoders[0] ?? ''; } catch { return encoders[0] ?? ''; } });
+  const setEnc = (v: string) => { setEnc0(v); try { localStorage.setItem('smk.encoder', v); } catch { /* ignore */ } };
   const [reading, setReading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const show = (v: string) => { const n = new URLSearchParams(sp); n.set('tab', 'lookup'); n.set('card', v.trim()); setSp(n, { replace: true }); };
@@ -226,11 +245,13 @@ function Lookup({ encoders, canRead }: { encoders: string[]; canRead: boolean })
           <input className="search" style={{ flex: 1 }} inputMode="numeric" placeholder="Card number (registration number)…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Card number" />
           <button className="btn primary" disabled={!q.trim()}>Look up</button>
         </form>
+        {encoders.length === 0 && <span className="small muted">To read a card lying on an encoder: switch it on in Settings → Reports &amp; sync → Encoders.</span>}
         {encoders.length > 0 && (
           <div className="row">
-            {encoders.length > 1 && <select className="search" style={{ minWidth: 140 }} value={enc} onChange={(e) => setEnc(e.target.value)} aria-label="Encoder">{encoders.map((e) => <option key={e}>{e}</option>)}</select>}
-            <button className="btn" onClick={readAtEncoder} disabled={reading || !canRead} title={canRead ? 'Put the card on the encoder first' : 'Needs connector 0.10.0'}>{reading ? 'Reading the card…' : `Read card on ${encoders.length > 1 ? 'encoder' : encoders[0]}`}</button>
-            <span className="badge" title="Pilot: confirm on the hotel's Visionline before relying on it.">pilot</span>
+            <label className="small muted" htmlFor="enc-pick">Encoder</label>
+            <select id="enc-pick" className="search" style={{ minWidth: 160 }} value={enc || encoders[0]} onChange={(e) => setEnc(e.target.value)}>{encoders.map((e) => <option key={e} value={e}>{e}</option>)}</select>
+            <button className="btn" onClick={readAtEncoder} disabled={reading || !canRead} title={canRead ? 'Put the card on the encoder first' : 'Needs connector 0.10.0'}>{reading ? 'Reading the card…' : `Read the card on ${enc || encoders[0]}`}</button>
+            <span className="badge" title="Pilot: confirm on your Visionline before relying on it.">pilot</span>
           </div>
         )}
       </div>
@@ -245,7 +266,8 @@ function Lookup({ encoders, canRead }: { encoders: string[]; canRead: boolean })
               <dt>Holder</dt><dd>{x.card.holderId ? <Link to={`/access?holder=${encodeURIComponent(x.card.holderId)}`}>{x.card.holder}</Link> : x.card.holder ?? '—'}</dd>
               <dt>User group</dt><dd>{x.card.group ?? '—'}</dd>
               <dt>Valid</dt><dd>{x.card.startsAt ? `${fmt.dt(x.card.startsAt)} → ` : 'until '}{x.card.expiresAt ? fmt.dt(x.card.expiresAt) : 'no end'}</dd>
-              <dt>Issued by</dt><dd>{x.card.issuedBy ?? '—'}</dd>
+              <dt>Kind</dt><dd>{x.card.mobile ? 'Mobile key (a phone: Visionline shows its serial as FFFFFFFF)' : 'Keycard'}</dd>
+              <dt>Issued by</dt><dd>{x.card.issuedBy ?? <span className="muted" title="The Visionline Web API does not say which Visionline operator made a card; Visionline's own card log does.">Visionline (operator not reported)</span>}</dd>
               <dt>Deadbolt override</dt><dd>{x.card.deadbolt == null ? <span className="muted">not reported by Visionline</span> : x.card.deadbolt ? <span className="badge warn">Yes</span> : 'No'}</dd>
               {x.card.timeSchedule && <><dt>Time schedule</dt><dd>{x.card.timeSchedule}</dd></>}
               {x.card.cancelled && <><dt>State</dt><dd className="bad-text">Cancelled in Visionline</dd></>}

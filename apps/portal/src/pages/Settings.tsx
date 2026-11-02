@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { LicencePanel } from '../components/Licence';
+import { sharedVisionlineOperator } from '@smk/shared';
+import { ConnectorSetupEditor, ConnectorsAside } from '../components/ConnectorSetup';
 import { ApiError, api, sealCredential } from '../api';
 import { useHotel } from '../App';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -10,22 +12,23 @@ type Field = { k: string; label: string; type?: 'text' | 'number' | 'bool' | 'se
 const PHASE_LATER = new Set(['guestKeys', 'pmsOccupancy', 'partnerLinks']);
 
 const GENERIC: Record<string, { intro: string; fields: Field[] }> = {
-  property: { intro: 'The hotel as it appears in the staff app and at the top of every printed report. The time zone is the one Visionline works in.', fields: [
-    { k: 'displayName', label: 'Hotel name' },
-    { k: 'legalName', label: 'Legal / company name', nullable: true, hint: 'Printed on reports when different from the hotel name.' },
+  property: { intro: 'Your organisation as it appears in the staff app and at the top of every printed report. The time zone is the one Visionline works in.', fields: [
+    { k: 'kind', label: 'Type', type: 'select', options: [{ v: 'hotel', l: 'Hotel' }, { v: 'institution', l: 'Institution (offices, hospital, school…)' }], hint: 'An institution does not see the guest features (breakfast, unpaid guests, departures, the Accounts report).' },
+    { k: 'displayName', label: 'Name' },
+    { k: 'legalName', label: 'Legal / company name', nullable: true, hint: 'Printed on reports when different from the name above.' },
     { k: 'country', label: 'Country code', hint: 'Two letters, e.g. KE, CM, RW' },
     { k: 'city', label: 'City', nullable: true },
     { k: 'address', label: 'Main address', nullable: true, hint: 'Shown in the app with the key.' },
-    { k: 'timezone', label: 'Time zone', hint: 'IANA name, e.g. Africa/Nairobi or Africa/Douala. Visionline works in local hotel time.' },
-    { k: 'systemNumber', label: 'Hotel system number', nullable: true, hint: 'Printed at the top of every report page. Leave empty to use the ASSA ABLOY System ID (Credential Services tab).' },
+    { k: 'timezone', label: 'Time zone', hint: 'IANA name, e.g. Africa/Nairobi or Africa/Douala. Visionline works in local time.' },
+    { k: 'systemNumber', label: 'System number', nullable: true, hint: 'Printed at the top of every report page. Leave empty to use the ASSA ABLOY System ID (Credential Services tab).' },
     { k: 'registrationNumber', label: 'Company registration number', nullable: true },
     { k: 'taxId', label: 'Tax ID / VAT number', nullable: true },
     { k: 'generalManager', label: 'General manager', nullable: true },
     { k: 'supportEmail', label: 'Support email' },
     { k: 'supportPhone', label: 'Support phone' },
     { k: 'homepage', label: 'Website', hint: 'https:// only', nullable: true },
-    { k: 'reportFooter', label: 'Report footer', nullable: true, hint: 'One line at the bottom of every report page, e.g. "Confidential - hotel management only".' },
-    { k: 'checkInTime', label: 'Standard check-in' }, { k: 'checkOutTime', label: 'Standard check-out' },
+    { k: 'reportFooter', label: 'Report footer', nullable: true, hint: 'One line at the bottom of every report page, e.g. "Confidential - management only".' },
+    { k: 'checkInTime', label: 'Standard check-in (hotels)' }, { k: 'checkOutTime', label: 'Standard check-out (hotels)' },
   ] },
   policy: { intro: 'Limits the platform enforces before anything reaches Visionline.', fields: [
     { k: 'maxValidityHours', label: 'Longest key (hours)', type: 'number' },
@@ -40,9 +43,9 @@ const GENERIC: Record<string, { intro: string; fields: Field[] }> = {
     { k: 'systemId', label: 'System ID', type: 'number', hint: 'Must match the Visionline Mobile Access account (checked on Connector health).' },
   ] },
   features: { intro: 'Modules can be switched on only when they are released, licensed and supported by the connector.', fields: [
-    { k: 'portalFocus', label: 'Portal focus', type: 'select', options: [{ v: 'full', l: 'Everything switched on below' }, { v: 'visionline', l: 'Visionline only (cards, people, access history, event log, reports)' }], hint: 'Visionline only hides mobile keys, attendance, breakfast, battery and maintenance from everyone except hotel administrators. Nothing is deleted. Each person can also tidy their own menu (Your account -> Menu & appearance).' },
+    { k: 'portalFocus', label: 'Portal focus', type: 'select', options: [{ v: 'full', l: 'Everything switched on below' }, { v: 'visionline', l: 'Visionline only (cards, people, access history, event log, reports)' }], hint: 'Visionline only hides mobile keys, attendance, breakfast, battery and maintenance from everyone except administrators. Nothing is deleted. Each person can also tidy their own menu (Your account -> Menu & appearance).' },
     { k: 'staffMobileKeys', label: 'Staff mobile keys', type: 'bool' },
-    { k: 'mobileKeysVisibleTo', label: 'Mobile keys module visible to', type: 'select', options: [{ v: 'everyone', l: 'Everyone whose role allows it' }, { v: 'administrators', l: 'Hotel administrators only (while it is being finalised)' }], hint: 'Hides mobile keys, staff phones, app settings and the key settings tabs from everyone except hotel administrators. Per person: Operators -> Modules.' },
+    { k: 'mobileKeysVisibleTo', label: 'Mobile keys module visible to', type: 'select', options: [{ v: 'everyone', l: 'Everyone whose role allows it' }, { v: 'administrators', l: 'Administrators only (while it is being finalised)' }], hint: 'Hides mobile keys, staff phones, app settings and the key settings tabs from everyone except administrators. Per person: Operators -> Modules.' },
     { k: 'timeAttendance', label: 'Time & attendance', type: 'bool', hint: 'Check-in desk, timesheets, leave, payroll exports. Door entrances count when attendance doors are set (Time & attendance -> Setup).' },
     { k: 'breakfast', label: 'Breakfast', type: 'bool', hint: 'In-house guest list (imported from the PMS report or typed), restaurant check-off by room, daily report. Role "Restaurant (breakfast)" for the restaurant team.' },
     { k: 'batteryMonitoring', label: 'Battery monitoring', type: 'bool', hint: 'Lock battery alarms from Visionline, read by the connector (version 0.5.0 or newer, with its Visionline watch on).' },
@@ -53,10 +56,11 @@ const GENERIC: Record<string, { intro: string; fields: Field[] }> = {
 };
 
 const TABS = [
-  { id: 'property', label: 'Hotel details', group: 'Hotel' },
-  { id: 'buildings', label: 'Building addresses', group: 'Hotel' },
-  { id: 'features', label: 'Modules', group: 'Hotel' },
+  { id: 'property', label: 'Name & details', group: 'General' },
+  { id: 'buildings', label: 'Building addresses', group: 'General' },
+  { id: 'features', label: 'Modules', group: 'General' },
   { id: 'visionline', label: 'Visionline', group: 'Visionline' },
+  { id: 'connector', label: 'Connector', group: 'Visionline' },
   { id: 'reports', label: 'Reports & sync', group: 'Visionline' },
   { id: 'eventlog', label: 'Event log', group: 'Visionline' },
   { id: 'templates', label: 'Access templates', group: 'Mobile keys' },
@@ -77,9 +81,10 @@ const TABS = [
 
 /** 2.13 Words people search for, per tab (labels and field names are searched too). */
 const KEYWORDS: Record<string, string> = {
-  property: 'name address time zone timezone check-in check-out phone email website footer legal tax manager system number',
+  property: 'name type hotel institution organisation address time zone timezone check-in check-out phone email website footer legal tax manager system number',
   buildings: 'wing building address map', features: 'modules switch on off focus visionline only breakfast attendance battery maintenance mobile keys',
-  visionline: 'server url user password connector property credentials uuid revoke start time', reports: 'sync insights people keycards night quiet groups grms pms',
+  visionline: 'server url user password connector property credentials uuid revoke start time',
+  connector: 'connector another computer remote server address certificate token install network', reports: 'sync insights people keycards night quiet groups grms pms',
   eventlog: 'events entrance codes record', templates: 'access template doors', policy: 'key validity broad approval wrong door limit',
   credential_services: 'seos tenant system id credential', alerts: 'email sms smtp contacts notifications', thresholds: 'offline vip alarms disk monitoring',
   battery: 'battery voltage maintenance due technicians', safety: 'muster occupancy fire evacuation emergency template responders visitors floors',
@@ -94,7 +99,9 @@ const KEY_TABS = new Set(['visionline', 'templates', 'policy', 'credential_servi
 export function SettingsPage() {
   const { hotel } = useHotel();
   const keysHidden = (hotel.hiddenModules ?? []).includes('mobileKeys');
-  const tabs = TABS.filter((x) => !(keysHidden && KEY_TABS.has(x.id)));
+  const inst = hotel.kind === 'institution';
+  // 2.16 The Accounts daily report (guests in house) is for hotels only.
+  const tabs = TABS.filter((x) => !(keysHidden && KEY_TABS.has(x.id)) && !(inst && x.id === 'accounts'));
   const [tab0, setTab] = useState(() => new URLSearchParams(location.search).get('tab') ?? 'property');
   const tab = tabs.some((x) => x.id === tab0) ? tab0 : 'property';
   const [find, setFind] = useState('');
@@ -123,17 +130,18 @@ export function SettingsPage() {
         : tab === 'reports' ? <ConfigForm key="reports" kind="visionline" intro="Insights can read people, valid keycards and lock alarms from Visionline, read-only. Each save is a new version of the Visionline settings." render={(d, set) => <ReportsSync data={d} set={set} />} aside={<SyncHistory />} />
         : tab === 'alerts' ? <ConfigForm key="alerts" kind="notifications" intro="How alerts reach people. The mail server password and the SMS key are entered under Passwords and keys below: stored encrypted on the server and never shown again." render={(d, set) => <ChannelsEditor data={d} set={set} />} aside={<><SecretsPanel areas={['email', 'sms']} /><AlertContacts /></>} />
         : tab === 'credential_services' ? <ConfigForm key="cs" kind="credential_services" intro={GENERIC.credential_services!.intro} fields={GENERIC.credential_services!.fields} aside={<SecretsPanel areas={['credential_services']} />} />
-        : tab === 'safety' ? <ConfigForm key="safety" kind="policy" intro="Live occupancy and emergencies. Part of the hotel policy; each save is a new policy version." render={(d, set) => <SafetyPolicy data={d} set={set} />} />
-        : tab === 'idcard' ? <ConfigForm key="idcard" kind="policy" intro="What is printed on staff ID cards (CR80, 85.6 × 54 mm). Part of the hotel policy." render={(d, set) => <IdCardPolicy data={d} set={set} />} />
-        : tab === 'security' ? <ConfigForm key="security" kind="policy" intro="Extra protection for the people who can change settings. Part of the hotel policy." render={(d, set) => <AdminSecurityPolicy data={d} set={set} />} />
+        : tab === 'safety' ? <ConfigForm key="safety" kind="policy" intro="Live occupancy and emergencies. Part of the policy; each save is a new policy version." render={(d, set) => <SafetyPolicy data={d} set={set} />} />
+        : tab === 'idcard' ? <ConfigForm key="idcard" kind="policy" intro="What is printed on staff ID cards (CR80, 85.6 × 54 mm). Part of the policy." render={(d, set) => <IdCardPolicy data={d} set={set} />} />
+        : tab === 'security' ? <ConfigForm key="security" kind="policy" intro="Extra protection for the people who can change settings. Part of the policy." render={(d, set) => <AdminSecurityPolicy data={d} set={set} />} />
         : tab === 'privacy' ? <ConfigForm key="privacy" kind="policy" intro="How long personal data is kept. Older data is deleted automatically every hour, a little at a time. The audit trail is always kept." render={(d, set) => <PrivacyPolicy data={d} set={set} />} />
-        : tab === 'keycards' ? <ConfigForm key="keycards" kind="policy" intro="Staff keycard requests, who is told, and encoding from the portal. Part of the hotel policy." render={(d, set) => <KeycardPolicy data={d} set={set} />} />
+        : tab === 'keycards' ? <ConfigForm key="keycards" kind="policy" intro="Staff keycard requests, who is told, and encoding from the portal. Part of the policy." render={(d, set) => <KeycardPolicy data={d} set={set} />} />
         : tab === 'accounts' ? <ConfigForm key="accounts" kind="policy" intro="A daily e-mail for the Accounts team: guests who checked in yesterday, guests in house and occupied rooms (from the Opera in-house list), unpaid-guest lock-outs." render={(d, set) => <AccountsPolicy data={d} set={set} />} />
+        : tab === 'connector' ? <ConfigForm key="connector" kind="policy" intro="Where the connector runs: on this server, or on another computer of the network. For another computer this page writes the commands with your addresses filled in." render={(d, set) => <ConnectorSetupEditor data={d} set={set} />} aside={<ConnectorsAside />} />
         : tab === 'backups' ? <BackupsPanel />
         : tab === 'licence' ? <LicencePanel />
-        : tab === 'thresholds' ? <ConfigForm key="thresholds" kind="policy" intro="When Monitoring raises an alert. Part of the hotel policy; each save is a new policy version." render={(d, set) => <ThresholdsEditor data={d} set={set} />} />
-        : tab === 'eventlog' ? <ConfigForm key="eventlog" kind="policy" intro="Which lock events the connector records for the Event log. Refused entries and battery events are always recorded. Part of the hotel policy; each save is a new policy version." render={(d, set) => <EventLogPolicy data={d} set={set} />} />
-        : tab === 'battery' ? <ConfigForm key="battery" kind="policy" intro="How battery alarms and maintenance requests are handled. Part of the hotel policy; each save is a new policy version." render={(d, set) => <Phase2Policy data={d} set={set} />} />
+        : tab === 'thresholds' ? <ConfigForm key="thresholds" kind="policy" intro="When Monitoring raises an alert. Part of the policy; each save is a new policy version." render={(d, set) => <ThresholdsEditor data={d} set={set} />} />
+        : tab === 'eventlog' ? <ConfigForm key="eventlog" kind="policy" intro="Which lock events the connector records for the Event log. Refused entries and battery events are always recorded. Part of the policy; each save is a new policy version." render={(d, set) => <EventLogPolicy data={d} set={set} />} />
+        : tab === 'battery' ? <ConfigForm key="battery" kind="policy" intro="How battery alarms and maintenance requests are handled. Part of the policy; each save is a new policy version." render={(d, set) => <Phase2Policy data={d} set={set} />} />
         : tab === 'buildings' ? <ConfigForm key="buildings" kind="property" intro="Extra addresses for buildings or wings. Staff see the address (and a map link) for keys that include doors from these door groups." render={(d, set) => <BuildingsEditor data={d} set={set} />} />
         : <ConfigForm key={tab} kind={tab} intro={GENERIC[tab]!.intro} fields={GENERIC[tab]!.fields} />}
       </ErrorBoundary>
@@ -224,7 +232,7 @@ function BuildingsEditor({ data, set }: { data: any; set: (p: any) => void }) {
   const update = (i: number, patch: any) => set({ buildings: list.map((b, j) => (j === i ? { ...b, ...patch } : b)) });
   return (
     <>
-      {data.address && <p className="small">Main address: <strong>{data.address}</strong> (Hotel details). It is used for doors not listed below.</p>}
+      {data.address && <p className="small">Main address: <strong>{data.address}</strong> (Name & details). It is used for doors not listed below.</p>}
       {list.length === 0 && <div className="empty" style={{ padding: 18 }}>No extra buildings. Add one if some doors are at a different address.</div>}
       {list.map((b, i) => (
         <div key={i} className="panel" style={{ background: 'var(--surface-2)' }}>
@@ -290,7 +298,7 @@ function ConnectionPanel({ conn, canManage, onSaved }: { conn: any; canManage: b
         <dl className="kv" style={{ marginBottom: 16 }}>
           <dt>Visionline URL</dt><dd className="mono">{h.visionlineBaseUrl ?? '—'}</dd>
           <dt>Reachable</dt><dd><Status s={h.visionlineReachable ? 'ACTIVE' : 'FAILED'} label={h.visionlineReachable ? `Yes${h.visionlineApiVersion ? ` · API ${h.visionlineApiVersion}` : ''}` : 'No'} /></dd>
-          <dt>Property credentials</dt><dd>{h.credentialsConfigured ? <><span className="mono">{h.propertyUsername ?? 'set on the connector'}</span> <Status s="ACTIVE" label="In use" /></> : <Status s="FAILED" label="Not set" />}</dd>
+          <dt>Property credentials</dt><dd>{h.credentialsConfigured ? <><span className="mono">{h.propertyUsername ?? 'set on the connector'}</span> <Status s="ACTIVE" label="In use" />{sharedVisionlineOperator(h.propertyUsername) && <div className="alert warn" style={{ marginTop: 8 }}>"{h.propertyUsername}" looks like a shared Visionline user (PMS / interface). Visionline then logs every card made from the portal under that name. Use a named Visionline operator here, or ask each person to store their own (Your account → Visionline) and tick "Operators must use their own Visionline credentials" below.</div>}</> : <Status s="FAILED" label="Not set" />}</dd>
           <dt>Connector</dt><dd>{conn.name} · version {h.connectorVersion ?? '—'} · seen {fmt.rel(conn.last_seen_at)}</dd>
         </dl>
       )}
@@ -343,7 +351,7 @@ function VisionlineFields({ data, set, accounts, discovered, onDiscovered }: {
       <div className="field-row">
         <div className="field"><label htmlFor="uuid">Mobile Access UUID</label>
           <input id="uuid" type="number" min={0} max={65535} value={data.mobileAccessUuid ?? ''} onChange={(e) => f('mobileAccessUuid', e.target.value === '' ? null : Number(e.target.value))} />
-          <span className="hint">Copy from Visionline: Options → Mobile Access → UUID. Each hotel has its own number. The staff app uses it to find this hotel’s locks.</span></div>
+          <span className="hint">Copy from Visionline: Options → Mobile Access → UUID. Each site has its own number. The staff app uses it to find these locks.</span></div>
         <div className="field"><label htmlFor="rm">Revoke mobile key</label>
           <select id="rm" value={data.revokeMode ?? 'overridden'} onChange={(e) => f('revokeMode', e.target.value)}>
             <option value="overridden">When overridden</option><option value="expired">When expired</option>
@@ -516,7 +524,7 @@ function TemplatesSettings() {
 
 /** Settings → Battery & maintenance: policy.battery and policy.maintenance. */
 function Phase2Policy({ data, set }: { data: any; set: (patch: any) => void }) {
-  const b = { staleAfterDays: 30, autoTicket: 'critical', voltage: { highRange: { low: null, critical: null }, lowRange: { low: null, critical: null } }, ...(data.battery ?? {}) };
+  const b = { staleAfterDays: 30, autoTicket: 'critical', changeJumpVolts: 0.8, stillAlarmingDays: 14, voltage: { highRange: { low: null, critical: null }, lowRange: { low: null, critical: null } }, ...(data.battery ?? {}) };
   const m = { dueHours: { low: 168, normal: 72, high: 24, urgent: 4 }, notifyJobRoles: ['Maintenance'], staffCanReport: true, ...(data.maintenance ?? {}) };
   const setB = (patch: any) => set({ battery: { ...b, ...patch } });
   const setM = (patch: any) => set({ maintenance: { ...m, ...patch } });
@@ -539,6 +547,13 @@ function Phase2Policy({ data, set }: { data: any; set: (patch: any) => void }) {
         <div className="field"><label htmlFor="hc">6–9 V packs: Critical at or below</label><input id="hc" type="number" step={0.2} min={6} max={9} value={b.voltage.highRange.critical ?? ''} onChange={(e) => volt('highRange', 'critical', e.target.value)} /></div>
         <div className="field"><label htmlFor="ll">3–4.8 V cells: Low at or below</label><input id="ll" type="number" step={0.2} min={3} max={4.8} value={b.voltage.lowRange.low ?? ''} onChange={(e) => volt('lowRange', 'low', e.target.value)} /></div>
         <div className="field"><label htmlFor="lc">3–4.8 V cells: Critical at or below</label><input id="lc" type="number" step={0.2} min={3} max={4.8} value={b.voltage.lowRange.critical ?? ''} onChange={(e) => volt('lowRange', 'critical', e.target.value)} /></div>
+      </div>
+      <h3 className="section-title">Battery changes</h3>
+      <div className="field-row">
+        <div className="field"><label htmlFor="jump">Count batteries as changed when the voltage reading rises by at least (V)</label><input id="jump" type="number" step={0.1} min={0.3} max={3} value={b.changeJumpVolts} onChange={(e) => setB({ changeJumpVolts: Number(e.target.value) })} />
+          <span className="hint">For example 3.6 V then 4.6 V. Used when the lock does not send “Battery exchanged”.</span></div>
+        <div className="field"><label htmlFor="still">An alarm this many days after a change means “program the lock and upload firmware”</label><input id="still" type="number" min={0} max={90} value={b.stillAlarmingDays} onChange={(e) => setB({ stillAlarmingDays: Number(e.target.value) })} />
+          <span className="hint">A high-priority maintenance request is opened. 0 = off.</span></div>
       </div>
       <h3 className="section-title">Maintenance requests</h3>
       <p className="small muted" style={{ marginBottom: 6 }}>Time to complete a new request, by priority (hours).</p>
@@ -575,7 +590,7 @@ function ReportsSync({ data, set }: { data: any; set: (patch: any) => void }) {
     <>
       <label className="check"><input type="checkbox" checked={ds.enabled} onChange={(e) => setD({ enabled: e.target.checked })} />
         <span><strong>Read people and keycards from Visionline</strong>
-          <span className="hint" style={{ display: 'block' }}>GET requests only: names, user groups, valid keycards (validity, doors, privileges) and lock alarms. PIN codes, e-mail addresses, phone numbers and card serial numbers are never read or kept, and nothing in Visionline changes. Only for the hotel's own Visionline.</span></span></label>
+          <span className="hint" style={{ display: 'block' }}>GET requests only: names, user groups, valid keycards (validity, doors, privileges) and lock alarms. PIN codes, e-mail addresses, phone numbers and card serial numbers are never read or kept, and nothing in Visionline changes. Only for your own Visionline.</span></span></label>
       <fieldset className="plain" disabled={!ds.enabled}>
         <h3 style={{ marginTop: 16 }}>Whose cards</h3>
         <div className="seg" role="radiogroup" aria-label="Whose cards" style={{ marginBottom: 10 }}>
@@ -602,7 +617,7 @@ function ReportsSync({ data, set }: { data: any; set: (patch: any) => void }) {
         <label className="check"><input type="checkbox" checked={ds.includeAlarms} onChange={(e) => setD({ includeAlarms: e.target.checked })} /><span>Lock alarms<span className="hint" style={{ display: 'block' }}>Needs the Visionline option "Web service for checking and confirming alarms". Alarms are only read, never marked completed.</span></span></label>
       </fieldset>
       <h3 style={{ marginTop: 22 }}>Encoders <span className="badge">pilot</span></h3>
-      <p className="hint small">Read the keycard lying on a Visionline encoder from <b>Visionline cards &amp; people → Card lookup</b>: whose card it is, its doors, who issued it and where it was used. Read-only. Needs connector 0.10.0; confirm on the hotel's Visionline before relying on it.</p>
+      <p className="hint small">Read the keycard lying on a Visionline encoder from <b>Visionline cards &amp; people → Card lookup</b>: whose card it is, its doors, who issued it and where it was used. Read-only. Needs connector 0.10.0; confirm on your Visionline before relying on it.</p>
       <label className="check"><input type="checkbox" checked={er.enabled} onChange={(e) => setE({ enabled: e.target.checked })} /><span>Allow reading cards at these encoders</span></label>
       <div className="field-row" style={{ marginTop: 8 }}>
         <div className="field"><label htmlFor="encs">Encoder names in Visionline</label><input id="encs" value={encText} disabled={!er.enabled} placeholder="fd1, fd2" onChange={(e) => setEncText(e.target.value)}
@@ -628,7 +643,7 @@ function ChannelsEditor({ data, set }: { data: any; set: (patch: any) => void })
     <>
       <h3>E-mail</h3>
       <label className="check"><input type="checkbox" checked={e.enabled} onChange={(x) => setE({ enabled: x.target.checked })} /><span><strong>Send alerts by e-mail</strong>
-        <span className="hint" style={{ display: 'block' }}>Through the hotel's own mail server or mailbox (Microsoft 365, Google Workspace, the hotel's SMTP server). No cost per message.</span></span></label>
+        <span className="hint" style={{ display: 'block' }}>Through your own mail server or mailbox (Microsoft 365, Google Workspace, your SMTP server). No cost per message.</span></span></label>
       <div className="field-row">
         <div className="field"><label htmlFor="eh">Mail server (SMTP)</label><input id="eh" value={e.host} disabled={!e.enabled} placeholder="smtp.office365.com" onChange={(x) => setE({ host: x.target.value.trim() })} /></div>
         <div className="field"><label htmlFor="ep">Port</label><input id="ep" type="number" value={e.port} disabled={!e.enabled} onChange={(x) => setE({ port: Number(x.target.value) })} /></div>
@@ -636,16 +651,16 @@ function ChannelsEditor({ data, set }: { data: any; set: (patch: any) => void })
       </div>
       <div className="field-row">
         <div className="field"><label htmlFor="eu">User name</label><input id="eu" value={e.user} disabled={!e.enabled} autoComplete="off" onChange={(x) => setE({ user: x.target.value.trim() })} /><span className="hint">Empty for a relay without sign-in. The password goes under Passwords and keys.</span></div>
-        <div className="field"><label htmlFor="ef">Sender</label><input id="ef" value={e.from} disabled={!e.enabled} placeholder="Hotel alerts <alerts@yourhotel.com>" onChange={(x) => setE({ from: x.target.value })} /></div>
+        <div className="field"><label htmlFor="ef">Sender</label><input id="ef" value={e.from} disabled={!e.enabled} placeholder="Alerts <alerts@example.com>" onChange={(x) => setE({ from: x.target.value })} /></div>
       </div>
       <h3 style={{ marginTop: 16 }}>SMS</h3>
       <label className="check"><input type="checkbox" checked={m.enabled} onChange={(x) => setM({ enabled: x.target.checked })} /><span><strong>Send alerts by SMS</strong>
-        <span className="hint" style={{ display: 'block' }}>There is no free SMS service. The cheapest option is an <b>Android phone in the hotel</b> with the free app "SMS Gateway for Android" (local server mode): messages go out from its SIM, so they cost only what the SIM bundle costs. A paid service such as Africa's Talking works too.</span></span></label>
+        <span className="hint" style={{ display: 'block' }}>There is no free SMS service. The cheapest option is an <b>Android phone on site</b> with the free app "SMS Gateway for Android" (local server mode): messages go out from its SIM, so they cost only what the SIM bundle costs. A paid service such as Africa's Talking works too.</span></span></label>
       <div className="field-row">
         <div className="field"><label htmlFor="mp">Service</label><select id="mp" value={m.provider} disabled={!m.enabled} onChange={(x) => setM({ provider: x.target.value })}>
-          <option value="android-gateway">Android phone in the hotel (SMS Gateway for Android)</option><option value="africastalking">Africa's Talking</option><option value="http">Other SMS service (HTTP)</option></select></div>
+          <option value="android-gateway">Android phone on site (SMS Gateway for Android)</option><option value="africastalking">Africa's Talking</option><option value="http">Other SMS service (HTTP)</option></select></div>
         {m.provider !== 'africastalking' && <div className="field"><label htmlFor="mu">Address</label><input id="mu" value={m.url} disabled={!m.enabled} placeholder={m.provider === 'android-gateway' ? 'http://192.168.1.50:8080' : 'https://api.example.com/sms'} onChange={(x) => setM({ url: x.target.value.trim() })} />
-          <span className="hint">{m.provider === 'android-gateway' ? 'Shown in the app under "Local server". Give the phone a fixed address on the hotel Wi-Fi.' : 'The service\'s send address.'}</span></div>}
+          <span className="hint">{m.provider === 'android-gateway' ? 'Shown in the app under "Local server". Give the phone a fixed address on your Wi-Fi.' : 'The service\'s send address.'}</span></div>}
         <div className="field"><label htmlFor="mn">User name</label><input id="mn" value={m.username} disabled={!m.enabled} autoComplete="off" onChange={(x) => setM({ username: x.target.value.trim() })} /><span className="hint">The password or API key goes under Passwords and keys.</span></div>
         {m.provider === 'africastalking' && <div className="field"><label htmlFor="ms">Sender ID</label><input id="ms" value={m.sender} disabled={!m.enabled} maxLength={20} onChange={(x) => setM({ sender: x.target.value })} /><span className="hint">Optional; must be registered with Africa's Talking.</span></div>}
       </div>
@@ -745,7 +760,7 @@ function ThresholdsEditor({ data, set }: { data: any; set: (patch: any) => void 
         <div className="field"><label htmlFor="tld">in the last (days)</label><input id="tld" type="number" min={1} value={door.learnDays} disabled={!door.enabled} onChange={(e) => setMon({ doorOffline: { ...door, learnDays: Number(e.target.value) } })} /></div>
       </div>
       <div className="field-row">
-        <div className="field"><label htmlFor="toff">"Lock offline" event codes</label><input id="toff" value={off} disabled={!door.enabled} onChange={(e) => { setOff(e.target.value); setMon({ doorOffline: { ...door, offlineEventCodes: codes(e.target.value) } }); }} /><span className="hint">From the hotel's lock / online-system documentation, if the locks report it. The connector then listens for them.</span></div>
+        <div className="field"><label htmlFor="toff">"Lock offline" event codes</label><input id="toff" value={off} disabled={!door.enabled} onChange={(e) => { setOff(e.target.value); setMon({ doorOffline: { ...door, offlineEventCodes: codes(e.target.value) } }); }} /><span className="hint">From your lock / online-system documentation, if the locks report it. The connector then listens for them.</span></div>
         <div className="field"><label htmlFor="ton">"Lock back online" event codes</label><input id="ton" value={on} disabled={!door.enabled} onChange={(e) => { setOn(e.target.value); setMon({ doorOffline: { ...door, onlineEventCodes: codes(e.target.value) } }); }} /></div>
         <div className="field"><label htmlFor="tkw">Visionline alarm words meaning "offline"</label><input id="tkw" value={kw} disabled={!door.enabled} onChange={(e) => { setKw(e.target.value); setMon({ doorOffline: { ...door, alarmKeywords: e.target.value.split(',').map((x) => x.trim()).filter((x) => x.length >= 2) } }); }} /></div>
       </div>
@@ -909,9 +924,9 @@ function SafetyPolicy({ data, set }: { data: any; set: (patch: any) => void }) {
       <div className="field"><label htmlFor="vg">Visionline user groups that are visitors or contractors</label><input id="vg" value={vg} onChange={(e) => setVg(e.target.value)} onBlur={() => setS({ visitorGroups: vg.split(',').map((x: string) => x.trim()).filter(Boolean) })} placeholder="e.g. Contractors, Visitors" />
         <span className="hint">Counted separately from staff. Separate with commas.</span></div>
       <h3 className="section-title">Remote door commands (online locks)</h3>
-      <label className="check"><input type="checkbox" checked={dc.enabled} onChange={(e) => setS({ doorCommands: { ...dc, enabled: e.target.checked } })} /> <span>Allow "Emergency open all guest rooms" during a confirmed emergency<br /><span className="small muted">Needs the Visionline option "Web service for sending open/close commands to doors" and online (ZigBee / Ethernet) locks. Test it on one door first.</span></span></label>
+      <label className="check"><input type="checkbox" checked={dc.enabled} onChange={(e) => setS({ doorCommands: { ...dc, enabled: e.target.checked } })} /> <span>Allow "Emergency open all rooms" during a confirmed emergency<br /><span className="small muted">Needs the Visionline option "Web service for sending open/close commands to doors" and online (ZigBee / Ethernet) locks. Test it on one door first.</span></span></label>
       <label className="check"><input type="checkbox" checked={dc.closeOnEnd} onChange={(e) => setS({ doorCommands: { ...dc, closeOnEnd: e.target.checked } })} /> Put the doors back to normal when the emergency ends</label>
-      <div className="field" style={{ maxWidth: 320 }}><label htmlFor="dcs">Doors</label><select id="dcs" value={dc.scope} onChange={(e) => setS({ doorCommands: { ...dc, scope: e.target.value } })}><option value="rooms">Guest rooms</option><option value="all">Every online door</option></select></div>
+      <div className="field" style={{ maxWidth: 320 }}><label htmlFor="dcs">Doors</label><select id="dcs" value={dc.scope} onChange={(e) => setS({ doorCommands: { ...dc, scope: e.target.value } })}><option value="rooms">Rooms</option><option value="all">Every online door</option></select></div>
       <h3 className="section-title">Emergency keys</h3>
       <div className="field-row">
         <div className="field"><label htmlFor="et">Template for emergency mobile keys</label>
@@ -928,7 +943,7 @@ function SafetyPolicy({ data, set }: { data: any; set: (patch: any) => void }) {
 /** 2.13 Staff ID card layout. */
 function IdCardPolicy({ data, set }: { data: any; set: (patch: any) => void }) {
   const c = { orientation: 'portrait', title: 'STAFF', showDepartment: true, showJobTitle: true, showIdNumber: true, showValidUntil: false, showBarcode: true,
-    backText: 'This card is the property of the hotel. If found, please return it to reception.', safeMarginMm: 1.5, ...(data.idCard ?? {}) };
+    backText: 'This card remains our property. If found, please return it to reception.', safeMarginMm: 1.5, ...(data.idCard ?? {}) };
   const setC = (patch: any) => set({ idCard: { ...c, ...patch } });
   const box = (k: string, l: string) => <label className="check"><input type="checkbox" checked={Boolean(c[k])} onChange={(e) => setC({ [k]: e.target.checked })} /> {l}</label>;
   return (
@@ -941,7 +956,7 @@ function IdCardPolicy({ data, set }: { data: any; set: (patch: any) => void }) {
       </div>
       {box('showJobTitle', 'Job title')}{box('showDepartment', 'Department')}{box('showIdNumber', 'ID number')}{box('showValidUntil', 'Valid until')}{box('showBarcode', 'Barcode of the ID number (attendance scanners)')}
       <div className="field" style={{ marginTop: 10 }}><label htmlFor="icb">Text on the back</label><textarea id="icb" rows={3} maxLength={240} value={c.backText} onChange={(e) => setC({ backText: e.target.value })} /></div>
-      <p className="small muted">The hotel logo comes from Branding. Preview and print in Staff ID cards.</p>
+      <p className="small muted">The logo comes from Branding. Preview and print in Staff ID cards.</p>
     </>
   );
 }
@@ -953,7 +968,7 @@ function AdminSecurityPolicy({ data, set }: { data: any; set: (patch: any) => vo
   return (
     <>
       <label className="check"><input type="checkbox" checked={a.requireAdminMfa} onChange={(e) => set({ adminSecurity: { ...a, requireAdminMfa: e.target.checked } })} />
-        <span><strong>Require two-step sign-in for administrators</strong><br /><span className="small muted">Settings, Operators, Branding and the connector stay closed to a hotel administrator until two-step sign-in is on for their account (an authenticator app such as Microsoft or Google Authenticator).</span></span></label>
+        <span><strong>Require two-step sign-in for administrators</strong><br /><span className="small muted">Settings, Operators, Branding and the connector stay closed to an administrator until two-step sign-in is on for their account (an authenticator app such as Microsoft or Google Authenticator).</span></span></label>
       {a.requireAdminMfa && !me.mfaEnabled && <div className="alert warn">Turn on two-step sign-in for your own account first (Your account → Two-step sign-in), or you will close Settings for yourself.</div>}
       <ul className="small muted" style={{ marginTop: 14 }}>
         <li>Starting or confirming an emergency always asks for the password again (and the code, when two-step sign-in is on).</li>
@@ -993,7 +1008,7 @@ function KeycardPolicy({ data, set }: { data: any; set: (patch: any) => void }) 
     <>
       <div className="field-row">
         <div className="field"><label htmlFor="k-hr">HR e-mail</label><input id="k-hr" type="email" value={k.hrEmail ?? ''} onChange={(e) => setK({ hrEmail: e.target.value || null })} /><span className="hint">Told when a keycard is cancelled and returned.</span></div>
-        <div className="field"><label htmlFor="k-n">Also tell (e-mails)</label><input id="k-n" value={emails} onChange={(e) => setEmails(e.target.value)} onBlur={() => setK({ notifyEmails: emails.split(',').map((x: string) => x.trim()).filter(Boolean) })} placeholder="security@hotel.com" /></div>
+        <div className="field"><label htmlFor="k-n">Also tell (e-mails)</label><input id="k-n" value={emails} onChange={(e) => setEmails(e.target.value)} onBlur={() => setK({ notifyEmails: emails.split(',').map((x: string) => x.trim()).filter(Boolean) })} placeholder="security@example.com" /></div>
       </div>
       <label className="check"><input type="checkbox" checked={k.notifySecurityManagers} onChange={(e) => setK({ notifySecurityManagers: e.target.checked })} /> E-mail every Security Manager about new requests and cancellations</label>
       <div className="field-row">
@@ -1020,8 +1035,8 @@ function AccountsPolicy({ data, set }: { data: any; set: (patch: any) => void })
     <>
       <label className="check"><input type="checkbox" checked={a.enabled} onChange={(e) => set({ accountsReport: { ...a, enabled: e.target.checked } })} /> Send it every day</label>
       <div className="field-row">
-        <div className="field"><label htmlFor="ar-t">At (hotel time)</label><input id="ar-t" type="time" value={a.time} onChange={(e) => set({ accountsReport: { ...a, time: e.target.value } })} /></div>
-        <div className="field"><label htmlFor="ar-e">To (e-mails)</label><input id="ar-e" value={emails} onChange={(e) => setEmails(e.target.value)} onBlur={() => set({ accountsReport: { ...a, emails: emails.split(',').map((x: string) => x.trim()).filter(Boolean) } })} placeholder="accounts@hotel.com" /></div>
+        <div className="field"><label htmlFor="ar-t">At (local time)</label><input id="ar-t" type="time" value={a.time} onChange={(e) => set({ accountsReport: { ...a, time: e.target.value } })} /></div>
+        <div className="field"><label htmlFor="ar-e">To (e-mails)</label><input id="ar-e" value={emails} onChange={(e) => setEmails(e.target.value)} onBlur={() => set({ accountsReport: { ...a, emails: emails.split(',').map((x: string) => x.trim()).filter(Boolean) } })} placeholder="accounts@example.com" /></div>
       </div>
       <p className="small muted">The guest keycards of every room are read from Visionline 30 minutes before the report (one room at a time, after the PMS and GRMS), to list rooms with more than one active guest keycard.</p>
       <div className="row">

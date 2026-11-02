@@ -3,7 +3,7 @@
 ## What it is and where it runs
 
 The connector is the only part of the platform that talks to Visionline. It is a small Node.js program
-that runs as a **Windows service** named **Staff Mobile Key Connector** (`StaffMobileKeyConnector`)
+that runs as a **Windows service** named **Access Monitoring Tool Connector** (`StaffMobileKeyConnector`)
 on the **Visionline PC**, or on a PC on the same network that can reach the Visionline Web API.
 
 ```
@@ -17,7 +17,7 @@ on the **Visionline PC**, or on a PC on the same network that can reach the Visi
 | Question | Answer |
 |---|---|
 | Where is the code? | `apps/connector` in the project. Released as `staff-mobile-key-connector-<version>.zip` (one JavaScript file with all dependencies, plus the installer). |
-| What service runs? | `StaffMobileKeyConnector`, display name *Staff Mobile Key Connector*. It runs as **LOCAL SERVICE** (no admin rights), starts with Windows (delayed start) and restarts on failure. |
+| What service runs? | `StaffMobileKeyConnector`, display name *Access Monitoring Tool Connector*. It runs as **LOCAL SERVICE** (no admin rights), starts with Windows (delayed start) and restarts on failure. |
 | What does the service start? | `StaffMobileKeyConnector.exe`, a small service host compiled during installation from `service\ConnectorService.cs` with the C# compiler built into Windows. It starts `node connector.mjs`, restarts it if it stops, and writes `logs\connector.log`. |
 | Where are its files? | Program: `C:\Program Files\StaffMobileKey\Connector`. Data: `C:\ProgramData\StaffMobileKey\Connector`, holding `connector.config.json`, the encrypted `secrets.enc`, `master.key.dpapi`, the command journal and `logs\`. The data folder is readable only by SYSTEM, Administrators and LOCAL SERVICE. |
 | Which ports? | **None inbound.** The connector only makes outbound connections, to the platform (HTTPS) and to Visionline. Its status page listens on `127.0.0.1:8090` (this PC only, password protected). |

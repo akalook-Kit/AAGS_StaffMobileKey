@@ -131,8 +131,10 @@ export async function requireOperator(req: FastifyRequest): Promise<OperatorCtx>
   for (const h of await many(pool, `SELECT hotel_id, hidden_modules FROM operator_module_access WHERE operator_id=$1`, [op.id])) hidden.set(h.hotel_id, h.hidden_modules ?? []);
   if (!op.is_platform_admin && roles.size) {
     for (const f of await many(pool, `SELECT DISTINCT ON (hotel_id) hotel_id, data FROM hotel_config_versions WHERE kind='features' AND hotel_id = ANY($1) ORDER BY hotel_id, version DESC`, [[...roles.keys()]])) {
-      const adminsOnly = f.data?.mobileKeysVisibleTo === 'administrators' || f.data?.staffMobileKeys === false;
-      if (adminsOnly && !(roles.get(f.hotel_id) ?? []).includes('HOTEL_ADMIN')) hidden.set(f.hotel_id, [...new Set([...(hidden.get(f.hotel_id) ?? []), 'mobileKeys'])]);
+      // 2.17 Mobile keys switched off (the default): hidden from everyone; switch on in Settings -> Modules.
+      const off = f.data?.staffMobileKeys !== true;
+      const adminsOnly = f.data?.mobileKeysVisibleTo === 'administrators';
+      if (off || (adminsOnly && !(roles.get(f.hotel_id) ?? []).includes('HOTEL_ADMIN'))) hidden.set(f.hotel_id, [...new Set([...(hidden.get(f.hotel_id) ?? []), 'mobileKeys'])]);
       // 2.13 Visionline focus: the portal shows only the Visionline side to everyone but hotel administrators.
       if (f.data?.portalFocus === 'visionline' && !(roles.get(f.hotel_id) ?? []).includes('HOTEL_ADMIN'))
         hidden.set(f.hotel_id, [...new Set([...(hidden.get(f.hotel_id) ?? []), 'mobileKeys', 'attendance', 'breakfast', 'battery', 'maintenance'])]);
@@ -156,10 +158,10 @@ export function permsIn(op: OperatorCtx, hotelId: string): Set<Permission> {
 /** Enforces hotel membership (tenant isolation) and a permission. Returns the operator. */
 export async function requirePerm(req: FastifyRequest, hotelId: string, perm: Permission): Promise<OperatorCtx> {
   const op = await requireOperator(req);
-  if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this hotel.');
+  if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this site.');
   if (!permsIn(op, hotelId).has(perm)) throw forbidden(`Missing permission: ${perm}`);
   if (ADMIN_AREAS.has(perm) && !op.mfa && op.mfaRequiredIn?.has(hotelId) && (op.isPlatformAdmin || (op.roles.get(hotelId) ?? []).includes('HOTEL_ADMIN')))
-    throw new ApiError(403, 'MFA_REQUIRED', 'This hotel requires two-step sign-in for administrators. Turn it on in Your account -> Two-step sign-in, then sign in again.');
+    throw new ApiError(403, 'MFA_REQUIRED', 'Two-step sign-in is required for administrators here. Turn it on in Your account -> Two-step sign-in, then sign in again.');
   return op;
 }
 const ADMIN_AREAS = new Set<Permission>(['settings.manage', 'operators.manage', 'connector.manage', 'branding.manage']);

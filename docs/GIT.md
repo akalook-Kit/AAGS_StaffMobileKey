@@ -31,7 +31,7 @@ cd C:\khb\staff-mobile-key\staff-mobile-key
 git init
 git add -A
 git status                                # check: no .env, no node_modules, no dist in the list
-git commit -m "Staff Mobile Key platform $(Get-Content VERSION)"
+git commit -m "Access Monitoring Tool platform $(Get-Content VERSION)"
 git tag "v$(Get-Content VERSION)"
 git remote add origin https://github.com/<your-account>/staff-mobile-key.git
 git push -u origin main --tags
@@ -84,3 +84,38 @@ Two cautions:
   it from Git history is not enough.
 - The connector package (`dist\connector\…zip`) is a build output. Rebuild it with
   `.\scripts\windows\connector-package.ps1` instead of committing it.
+
+## Updating an old copy to a new release (e.g. 2.17.0) and pushing it
+
+For a PC whose copy has not been updated for a while. The release comes as
+`access-monitoring-tool-project-<version>.zip` (the whole project, without `node_modules` or `dist`).
+
+```powershell
+cd C:\khb\staff-mobile-key\staff-mobile-key
+git status                                   # anything listed was changed on this PC
+git stash push -u -m "before 2.17.0"         # only if git status listed changes (get them back: git stash pop)
+git fetch origin
+git switch main
+git pull --ff-only origin main               # this PC now matches GitHub
+git switch -c release/2.17.0
+
+# Put the new release over the old files (.git, .env, local-test, node_modules and dist are left alone)
+$zip = "$env:USERPROFILE\Downloads\access-monitoring-tool-project-2.17.0.zip"
+$tmp = Join-Path $env:TEMP 'amt-2.17.0'
+Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+Expand-Archive -Path $zip -DestinationPath $tmp
+robocopy "$tmp\access-monitoring-tool-project-2.17.0" . /MIR /XD .git node_modules dist local-test backups /XF .env /NFL /NDL /NJH /NP
+if ($LASTEXITCODE -ge 8) { Write-Host 'robocopy failed' -ForegroundColor Red } else { Write-Host 'Files updated' -ForegroundColor Green }
+
+git status                                   # check: no .env, no node_modules, no dist
+git add -A
+git commit -m "Release 2.17.0: Access Monitoring Tool"
+git push -u origin release/2.17.0
+git switch main
+git merge --ff-only release/2.17.0
+git push origin main
+git tag v2.17.0
+git push origin v2.17.0
+```
+
+Optional check before pushing (needs Node.js 22): `npm ci` then `npm run typecheck`.

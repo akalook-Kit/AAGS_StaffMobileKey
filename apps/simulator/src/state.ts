@@ -78,12 +78,12 @@ export function createState() {
   addAlarm('4', 'Emergency open is activated', 21, 'Main Entrance', true); addAlarm('2', 'Door left open too long', 1, '203', false);
   return {
     doors,
-    userGroups: new Map<string, { id: string; uniformAccess: boolean; doorOperations: ReturnType<typeof op>; timeSchedule?: string }>([
+    userGroups: new Map<string, { id: string; uniformAccess: boolean; doorOperations: ReturnType<typeof op>; timeSchedule?: string; ignoreDeadbolt?: boolean; ignorePrivacy?: boolean }>([
       ['Housekeeping', { id: 'Housekeeping', uniformAccess: false, doorOperations: op(['Staff Entrance', 'Linen Store']) }],
       ['Maintenance', { id: 'Maintenance', uniformAccess: false, doorOperations: op(['Staff Entrance', 'Linen Store', 'Gym']) }],
-      ['Management', { id: 'Management', uniformAccess: false, doorOperations: op(['Staff Entrance', 'GM Office']) }],
+      ['Management', { id: 'Management', uniformAccess: false, doorOperations: op(['Staff Entrance', 'GM Office']), ignoreDeadbolt: true, ignorePrivacy: true }],
       // Uniform access: Visionline forces these doors on every card of the group [Web API §5.29.3].
-      ['Security', { id: 'Security', uniformAccess: true, doorOperations: op(['Main Entrance', 'Staff Entrance', 'Linen Store', 'GM Office']) }],
+      ['Security', { id: 'Security', uniformAccess: true, doorOperations: op(['Main Entrance', 'Staff Entrance', 'Linen Store', 'GM Office']), ignoreDeadbolt: true, ignorePrivacy: false }],
       ['Front Office', { id: 'Front Office', uniformAccess: false, doorOperations: op(['Main Entrance']) }],
       ['Engineering', { id: 'Engineering', uniformAccess: false, doorOperations: op(['Staff Entrance', 'Gym']) }],
     ]),

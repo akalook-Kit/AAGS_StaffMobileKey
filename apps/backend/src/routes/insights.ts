@@ -12,7 +12,7 @@ import { notFound } from '../lib/errors.ts';
 const P = '/api/v1';
 const hid = (req: FastifyRequest) => {
   const id = (req.params as any).hotelId as string;
-  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Hotel');
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Site');
   return id;
 };
 const Filters = z.object({
@@ -92,8 +92,8 @@ export function insightsRoutes(app: FastifyInstance) {
       const p = await maintenancePolicy(pool, hotelId);
       const b = await batteryInsights(hotelId, null, names, p.battery.staleAfterDays);
       const all = [...b.draining.map((d: any) => ({ ...d, list: 'draining fast' })), ...b.dueSoon.map((d: any) => ({ ...d, list: 'due soon' })), ...b.healthy.map((d: any) => ({ ...d, list: 'doing well' }))];
-      body = csv(['list', 'door', 'door_group', 'state', 'last_exchange', 'days_to_low_last_cycle', 'average_days_to_low', 'alarms_90_days', 'volts_per_30_days', 'predicted_low'],
-        all.map((d) => [d.list, d.name, d.group, d.state, d.lastExchange, d.lifeDays, d.avgLifeDays, d.alarms90, d.voltsPer30d, d.predictedLowAt]));
+      body = csv(['list', 'door', 'door_group', 'state', 'last_exchange', 'last_exchange_from', 'days_to_low_last_cycle', 'average_days_to_low', 'alarms_90_days', 'volts_per_30_days', 'predicted_low'],
+        all.map((d) => [d.list, d.name, d.group, d.state, d.lastExchange, d.lastExchange ? (d.lastExchangeInferred ? 'voltage rise' : 'lock event / maintenance') : '', d.lifeDays, d.avgLifeDays, d.alarms90, d.voltsPer30d, d.predictedLowAt]));
     } else if (report === 'departments') {
       const d = await insights(hotelId, f);
       body = csv(['department', 'staff', 'phones_set_up', 'active_mobile_keys', `keys_issued_last_${f.days}_days`], d.keys.byDepartment.map((r) => [r.department, r.staff, r.withPhone, r.activeKeys, r.issued]));

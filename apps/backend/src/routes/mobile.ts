@@ -53,7 +53,7 @@ export function mobileRoutes(app: FastifyInstance) {
     let hotelId: string;
     if (hotelSlug) {
       const h = await one(pool, 'SELECT id FROM hotels WHERE slug=$1', [hotelSlug]);
-      if (!h) throw new ApiError(404, 'NOT_FOUND', 'Unknown hotel');
+      if (!h) throw new ApiError(404, 'NOT_FOUND', 'Unknown site');
       hotelId = h.id;
     } else hotelId = (await requireStaff(req)).hotelId;
     const [hotel, branding, property, appPolicy, features, vl] = await Promise.all([

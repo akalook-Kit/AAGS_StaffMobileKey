@@ -43,6 +43,8 @@ const tz = z.string().trim().min(3).max(64).refine((v) => { try { new Intl.DateT
 const Body = z.object({
   code: z.string().trim().min(6).max(40),
   hotel: z.object({
+    /** 2.16 A hotel or an institution. */
+    kind: z.enum(['hotel', 'institution']).default('hotel'),
     name: z.string().trim().min(2).max(80),
     code: z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9-]{1,39}$/, 'Lower-case letters, digits and dashes (2-40)').optional().or(z.literal('').transform(() => undefined)),
     timeZone: tz,
@@ -87,9 +89,9 @@ export function setupRoutes(app: FastifyInstance) {
     if (cs?.user && !secretStoreEnabled()) throw new ApiError(409, 'SECRET_STORE_OFF', 'This server cannot store passwords from the portal. Leave the Credential Services account empty.');
 
     const existingHotel = await one(pool, 'SELECT id FROM hotels LIMIT 1');
-    if (!existingHotel && !b.hotel) throw new ApiError(400, 'VALIDATION', 'hotel: Enter the hotel details.');
+    if (!existingHotel && !b.hotel) throw new ApiError(400, 'VALIDATION', 'hotel: Enter the name and details.');
     const profile = b.hotel && genericProfile({
-      HOTEL_NAME: b.hotel.name, PROVISION_HOTEL: b.hotel.code || slugify(b.hotel.name) || 'hotel', HOTEL_TIMEZONE: b.hotel.timeZone, HOTEL_COUNTRY: b.hotel.country,
+      HOTEL_KIND: b.hotel.kind, HOTEL_NAME: b.hotel.name, PROVISION_HOTEL: b.hotel.code || slugify(b.hotel.name) || 'hotel', HOTEL_TIMEZONE: b.hotel.timeZone, HOTEL_COUNTRY: b.hotel.country,
       HOTEL_SYSTEM_ID: String(b.hotel.systemId), HOTEL_SYSTEM_NUMBER: b.hotel.systemNumber || undefined,
       HOTEL_SUPPORT_EMAIL: b.hotel.supportEmail, HOTEL_SUPPORT_PHONE: b.hotel.supportPhone || undefined,
     });

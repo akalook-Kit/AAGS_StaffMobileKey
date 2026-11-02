@@ -1,5 +1,5 @@
 <#
-  Installs (or upgrades) the Staff Mobile Key hotel connector as a Windows service.
+  Installs (or upgrades) the Access Monitoring Tool hotel connector as a Windows service.
   Run in PowerShell opened with "Run as administrator", from the unzipped connector folder.
 
   First installation, testing on your own PC against the simulator:
@@ -9,10 +9,16 @@
   First installation on the Visionline PC:
     .\install.ps1 -PlatformUrl https://<your platform address> -CaFile C:\khb\visionline-ca.crt
 
+  On a computer that is not the Access Monitoring Tool server (2.16; the portal's Settings -> Connector writes this
+  command for you):
+    .\install.ps1 -PlatformUrl https://<server>:8443 -PlatformCaFile .\gateway.cer -VisionlineUrl https://<visionline server>/api/v1 -CaFile .\visionline.crt
+
   Upgrade (keeps the settings, keys and passwords already stored):
     .\install.ps1
 
   -PlatformUrl     Address of the platform (portal) the connector reports to.
+  -PlatformCaFile  The Access Monitoring Tool server's certificate (gateway.cer from set-connector-access.ps1),
+                   when the connector is on another computer. Exactly this certificate is trusted.
   -VisionlineUrl   Visionline Web API. Default https://localhost/api/v1 (Visionline on this PC).
   -CaFile          Certificate that Visionline's certificate must chain to (see VISIONLINE-PROBE in the docs).
   -ServerName      Name in Visionline's certificate, when it is not the host name in -VisionlineUrl.
@@ -31,6 +37,7 @@
 #>
 param(
   [string]$PlatformUrl = '',
+  [string]$PlatformCaFile = '',
   [string]$VisionlineUrl = '',
   [string]$CaFile = '',
   [string]$ServerName = '',
@@ -81,7 +88,7 @@ if (-not (Test-Path $csc)) { Fail "The .NET Framework 4 C# compiler (csc.exe) wa
 
 $newVersion = (Get-Content (Join-Path $Here 'VERSION') -TotalCount 1).Trim()
 $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-Write-Host "Staff Mobile Key connector $newVersion" -ForegroundColor Green
+Write-Host "Access Monitoring Tool connector $newVersion" -ForegroundColor Green
 Write-Host ("  " + $(if ($svc) { "Upgrading the installed service $ServiceName" } else { "New installation as service $ServiceName" }))
 Write-Host "  Program: $InstallDir"
 Write-Host "  Data:    $DataDir (settings, encrypted secrets, journal, logs)"
@@ -112,12 +119,19 @@ if ($CaFile) {
   if ((Resolve-Path $CaFile).Path -ne $caTarget) { Copy-Item $CaFile $caTarget -Force }
   $CaFile = $caTarget
 }
+if ($PlatformCaFile) {
+  if (-not (Test-Path $PlatformCaFile)) { Fail "Certificate file not found: $PlatformCaFile" }
+  $pcTarget = Join-Path $DataDir 'platform.cer'
+  if ((Resolve-Path $PlatformCaFile).Path -ne $pcTarget) { Copy-Item $PlatformCaFile $pcTarget -Force }
+  $PlatformCaFile = $pcTarget
+}
 $platform = Pick $b.ContainsKey('PlatformUrl') $PlatformUrl $(if ($old) { $old.platformUrl }) ''
 if (-not $platform) { Fail 'Give the platform address with -PlatformUrl (for testing on this PC: http://localhost:14080).' }
 $readOnlyValue = $(if ($ReadOnly) { $true } elseif ($ReadWrite) { $false } elseif ($old -and $old.visionline) { [bool]$old.visionline.readOnly } else { $false })
 $watchValue = $(if ($NoWatch) { $false } elseif ($Watch) { $true } elseif ($old -and $old.visionline -and $null -ne $old.visionline.watch) { [bool]$old.visionline.watch } else { $true })
 $cfg = [ordered]@{
   platformUrl = $platform.TrimEnd('/')
+  platformCaFile = Pick $b.ContainsKey('PlatformCaFile') $PlatformCaFile $(if ($old) { $old.platformCaFile }) ''
   dataDir     = $DataDir
   localAdmin  = [ordered]@{ host = '127.0.0.1'; port = [int](Pick ($AdminPort -gt 0) $AdminPort $(if ($old -and $old.localAdmin) { $old.localAdmin.port }) 8090) }
   visionline  = [ordered]@{
@@ -132,7 +146,7 @@ $cfg = [ordered]@{
   heartbeatSec = 15
 }
 Write-Utf8NoBom $cfgFile ($cfg | ConvertTo-Json -Depth 5)
-Write-Host "  Platform:   $($cfg.platformUrl)"
+Write-Host "  Platform:   $($cfg.platformUrl)$(if ($cfg.platformCaFile) { "  (trusting $($cfg.platformCaFile))" })"
 Write-Host "  Visionline: $($cfg.visionline.baseUrl)$(if ($cfg.visionline.caFile) { "  (trusting $($cfg.visionline.caFile))" })"
 Write-Host "  Status page: http://127.0.0.1:$($cfg.localAdmin.port)/"
 if (-not $watchValue) { Write-Host "  Visionline watch: OFF (no cancelled-card, wrong-door or battery events are read)." -ForegroundColor Yellow }
@@ -192,8 +206,8 @@ if ($ResetSecrets -or -not (Test-Path (Join-Path $DataDir 'secrets.enc'))) {
 Write-Step 'Windows service'
 $bin = "`"$exe`" --node `"$NodePath`" --script `"$(Join-Path $InstallDir 'app\connector.mjs')`" --config `"$cfgFile`" --logs `"$(Join-Path $DataDir 'logs')`""
 if (-not $svc) {
-  New-Service -Name $ServiceName -BinaryPathName $bin -DisplayName 'Staff Mobile Key Connector' -StartupType Automatic `
-    -Description 'Connects the hotel Visionline system to the Staff Mobile Key platform. Outbound connections only.' | Out-Null
+  New-Service -Name $ServiceName -BinaryPathName $bin -DisplayName 'Access Monitoring Tool Connector' -StartupType Automatic `
+    -Description 'Connects the hotel Visionline system to the Access Monitoring Tool platform. Outbound connections only.' | Out-Null
 } else {
   $r = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" | Invoke-CimMethod -MethodName Change -Arguments @{ PathName = $bin }
   if ($r.ReturnValue -ne 0) { Fail "Updating the service failed (code $($r.ReturnValue))." }

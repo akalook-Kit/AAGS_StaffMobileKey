@@ -1,8 +1,8 @@
 <#
-  Staff Mobile Key - who may reach the platform from OUTSIDE the hotel, changed without reinstalling.
+  Access Monitoring Tool - who may reach the platform from OUTSIDE the hotel, changed without reinstalling.
   Run as administrator on the server. The public IP addresses are settings, not part of the program:
   they live in C:\ProgramData\StaffMobileKey\Platform\gateway.config.json and in the Windows Firewall rule
-  "Staff Mobile Key - external", and this script keeps both in step.
+  "Access Monitoring Tool - external", and this script keeps both in step.
 
     .\set-external-access.ps1 -Show
     .\set-external-access.ps1 -ExternalPort 9443 -AllowExternal "41.202.219.10/32"      open, or replace the list
@@ -82,9 +82,9 @@ if ($LASTEXITCODE -ne 0) { Remove-Item $tmp -Force; Fail 'Nothing was changed.' 
 Copy-Item $file "$file.bak" -Force
 Move-Item $tmp $file -Force
 
-Get-NetFirewallRule -Group 'Staff Mobile Key' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'Staff Mobile Key - external*' } | Remove-NetFirewallRule
+Get-NetFirewallRule -Group 'Staff Mobile Key','Access Monitoring Tool' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*- external*' } | Remove-NetFirewallRule
 if (-not $Disable) {
-  New-NetFirewallRule -DisplayName "Staff Mobile Key - external ($port)" -Group 'Staff Mobile Key' -Direction Inbound -Protocol TCP -LocalPort $port -RemoteAddress $list -Action Allow | Out-Null
+  New-NetFirewallRule -DisplayName "Access Monitoring Tool - external ($port)" -Group 'Access Monitoring Tool' -Direction Inbound -Protocol TCP -LocalPort $port -RemoteAddress $list -Action Allow | Out-Null
 }
 Restart-Service StaffMobileKeyGateway
 Start-Sleep -Seconds 3

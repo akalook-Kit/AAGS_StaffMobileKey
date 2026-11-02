@@ -61,12 +61,12 @@ export function ConnectorPage() {
           </div>
           <div className="panel">
             <h2>To check on site</h2>
-            <p className="small muted">How the platform handles each point, from the Visionline Web API manual; check them once on the hotel's own Visionline.</p>
+            <p className="small muted">How the platform handles each point, from the Visionline Web API manual; check them once on your own Visionline.</p>
             {(ready.data?.vendorConfirmations ?? []).map((v: any) => (
               <details key={v.id} style={{ borderTop: '1px solid var(--line-2)', padding: '8px 0' }}>
                 <summary style={{ cursor: 'pointer', fontWeight: 500 }}>{v.question}</summary>
                 <p className="small" style={{ marginTop: 6 }}><strong>Documented:</strong> {v.documented}</p>
-                {v.decided && <p className="small"><strong>Hotel decision:</strong> {v.decided}</p>}
+                {v.decided && <p className="small"><strong>Your decision:</strong> {v.decided}</p>}
                 <p className="small"><strong>What the platform does:</strong> {v.implemented}</p>
               </details>
             ))}

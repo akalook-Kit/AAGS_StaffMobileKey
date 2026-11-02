@@ -18,7 +18,7 @@ import { ApiError, badRequest, forbidden, notFound } from '../lib/errors.ts';
 const P = '/api/v1';
 const hid = (req: FastifyRequest) => {
   const id = (req.params as any).hotelId as string;
-  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Hotel');
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Site');
   return id;
 };
 const opActor = (op: OperatorCtx): Actor => ({ type: 'operator', id: op.id, name: op.displayName });
@@ -90,7 +90,8 @@ export function phase2Routes(app: FastifyInstance) {
         UNION ALL
         SELECT s.door_id, s.door_id, NULL, NULL, false FROM battery_status s
           WHERE s.hotel_id=$1 AND NOT EXISTS (SELECT 1 FROM resources r WHERE r.hotel_id=$1 AND r.kind='door' AND r.active AND r.external_id=s.door_id))
-      SELECT d.*, s.state, s.last_event_code, s.volts_below, s.reported_at, s.received_at,
+      SELECT d.*, s.state, s.last_event_code, s.volts_below, s.reported_at, s.received_at, s.last_change_at, s.last_change_source, s.last_change_detail, s.reprogram_at,
+        rt.id AS rp_id, rt.number AS rp_number, rt.status AS rp_status,
         a.id AS alert_id, a.severity, a.status AS alert_status, a.opened_at, a.occurrences, a.acknowledged_at, ao.display_name AS acknowledged_by,
         t.id AS ticket_id, t.number AS ticket_number, t.status AS ticket_status, ts.full_name AS ticket_assignee
       FROM doors d
@@ -99,6 +100,7 @@ export function phase2Routes(app: FastifyInstance) {
       LEFT JOIN operators ao ON ao.id=a.acknowledged_by
       LEFT JOIN maintenance_tickets t ON t.id=a.ticket_id
       LEFT JOIN staff ts ON ts.id=t.assignee_staff_id
+      LEFT JOIN maintenance_tickets rt ON rt.id=s.reprogram_ticket_id
       ORDER BY d.door_group NULLS LAST, d.name`, [hotelId]);
     const staleBefore = Date.now() - p.battery.staleAfterDays * 86_400_000;
     const doors = rows.map((r) => ({
@@ -108,12 +110,17 @@ export function phase2Routes(app: FastifyInstance) {
       voltsBelow: r.volts_below != null ? Number(r.volts_below) : null, reportedAt: r.reported_at, receivedAt: r.received_at,
       alert: r.alert_id ? { id: r.alert_id, severity: r.severity, status: r.alert_status, openedAt: r.opened_at, occurrences: r.occurrences, acknowledgedAt: r.acknowledged_at, acknowledgedBy: r.acknowledged_by } : null,
       ticket: r.ticket_id ? { id: r.ticket_id, number: r.ticket_number, status: r.ticket_status, assignee: r.ticket_assignee } : null,
+      /** 2.15 Last battery change: from the lock's "Battery exchanged" event, a voltage jump, or a maintenance request. */
+      lastChange: r.last_change_at ? { at: r.last_change_at, source: r.last_change_source, detail: r.last_change_detail } : null,
+      /** 2.15 Batteries changed but the lock still alarms: program the lock and upload its firmware. */
+      reprogram: r.rp_id ? { at: r.reprogram_at, ticketId: r.rp_id, number: r.rp_number, status: r.rp_status } : null,
     }));
     const count = (pred: (d: (typeof doors)[number]) => boolean) => doors.filter(pred).length;
     return {
       doors,
       summary: { total: doors.length, good: count((d) => d.state === 'GOOD'), low: count((d) => d.state === 'LOW'), critical: count((d) => d.state === 'CRITICAL'),
-        reported: count((d) => d.state === 'REPORTED'), never: count((d) => d.state === 'NEVER'), stale: count((d) => d.stale) },
+        reported: count((d) => d.state === 'REPORTED'), never: count((d) => d.state === 'NEVER'), stale: count((d) => d.stale),
+        reprogram: count((d) => Boolean(d.reprogram && OPEN_STATUSES.includes(d.reprogram.status))), neverChanged: count((d) => !d.lastChange) },
       policy: p.battery,
     };
   });
@@ -122,11 +129,11 @@ export function phase2Routes(app: FastifyInstance) {
     const hotelId = hid(req);
     await requirePerm(req, hotelId, 'battery.read');
     const doorId = (req.params as any).doorId as string;
-    const readings = await many(pool, `SELECT event_code, state, volts_below, reported_at, received_at FROM battery_readings WHERE hotel_id=$1 AND door_id=$2 ORDER BY reported_at DESC, id DESC LIMIT 100`, [hotelId, doorId]);
+    const readings = await many(pool, `SELECT event_code, state, volts_below, reported_at, received_at, change_inferred FROM battery_readings WHERE hotel_id=$1 AND door_id=$2 ORDER BY reported_at DESC, id DESC LIMIT 100`, [hotelId, doorId]);
     const alerts = await many(pool, `SELECT a.id, a.severity, a.status, a.opened_at, a.last_seen_at, a.occurrences, a.resolved_at, a.resolved_reason, t.number AS ticket_number
       FROM battery_alerts a LEFT JOIN maintenance_tickets t ON t.id=a.ticket_id WHERE a.hotel_id=$1 AND a.door_id=$2 ORDER BY a.opened_at DESC LIMIT 20`, [hotelId, doorId]);
     return {
-      readings: readings.map((r) => ({ code: r.event_code, event: batteryEventName(r.event_code), state: r.state, voltsBelow: r.volts_below != null ? Number(r.volts_below) : null, reportedAt: r.reported_at, receivedAt: r.received_at })),
+      readings: readings.map((r) => ({ code: r.event_code, event: batteryEventName(r.event_code), state: r.state, voltsBelow: r.volts_below != null ? Number(r.volts_below) : null, reportedAt: r.reported_at, receivedAt: r.received_at, changeInferred: r.change_inferred })),
       alerts: alerts.map((a) => ({ id: a.id, severity: a.severity, status: a.status, openedAt: a.opened_at, lastSeenAt: a.last_seen_at, occurrences: a.occurrences, resolvedAt: a.resolved_at, resolvedReason: a.resolved_reason, ticketNumber: a.ticket_number })),
     };
   });
@@ -399,7 +406,7 @@ export function phase2Routes(app: FastifyInstance) {
     const { staffId, hotelId } = await requireStaff(req);
     await requireModule(hotelId, 'maintenance');
     const p = await maintenancePolicy(pool, hotelId);
-    if (!p.maintenance.staffCanReport) throw forbidden('Reporting problems from the app is switched off for this hotel.');
+    if (!p.maintenance.staffCanReport) throw forbidden('Reporting problems from the app is switched off here.');
     const b = z.object({ title: z.string().trim().min(3).max(120), description: z.string().max(2000).optional(), location: z.string().trim().min(1).max(120), category: z.enum(CATEGORIES).optional() }).parse(req.body);
     const actor: Actor = { type: 'staff', id: staffId, name: await staffName(staffId) };
     const t = await tx(async (c) => { await lockHotel(c, hotelId); return createTicket(c, hotelId, { ...b, source: 'app' }, actor); });

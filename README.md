@@ -1,4 +1,4 @@
-# Staff Mobile Key Platform
+# Access Monitoring Tool (formerly Staff Mobile Key)
 
 White-label platform for issuing and managing **staff mobile keys** through an on-premises
 **ASSA ABLOY Visionline** system. K Hotel Bana is the first tenant, branded with the K Hotel identity

@@ -54,7 +54,7 @@ export function UsagePage() {
           <div className="cols" style={{ marginTop: 14 }}>
             <section className="panel">
               <h2>What it did</h2>
-              <p className="small muted">Minutes saved per item, compared with doing it by hand in Visionline or on paper. Change them to match your hotel.</p>
+              <p className="small muted">Minutes saved per item, compared with doing it by hand in Visionline or on paper. Change them to match your site.</p>
               <table className="grid">
                 <thead><tr><th>Outcome</th><th className="num">Count</th><th className="num">Min. each</th><th className="num">Saved</th></tr></thead>
                 <tbody>{x.outcomes.map((o: any) => (

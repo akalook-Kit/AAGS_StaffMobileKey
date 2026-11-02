@@ -30,13 +30,13 @@ import { secretStoreEnabled, setStoredSecret, storedSecret } from '../secret-sto
 const P = '/api/v1';
 const hid = (req: FastifyRequest) => {
   const id = (req.params as any).hotelId as string;
-  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Hotel');
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Site');
   return id;
 };
 const uuid = z.string().uuid();
 const member = async (req: FastifyRequest, hotelId: string) => {
   const op = await requireOperator(req);
-  if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this hotel.');
+  if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this site.');
   return op;
 };
 

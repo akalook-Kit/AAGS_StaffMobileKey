@@ -1,4 +1,4 @@
-// Windows service host for the Staff Mobile Key hotel connector.
+// Windows service host for the Access Monitoring Tool hotel connector.
 //
 // Compiled ON the Visionline PC by install.ps1 with the C# compiler that ships with Windows
 // (.NET Framework 4.x csc.exe), so no third-party service wrapper binary is needed and this file is the

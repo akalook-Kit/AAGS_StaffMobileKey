@@ -1,5 +1,5 @@
 <#
-  Removes the Staff Mobile Key connector service and its program files.
+  Removes the Access Monitoring Tool connector service and its program files.
   Run in PowerShell opened with "Run as administrator".
 
     .\uninstall.ps1              # keeps the data folder (settings, encrypted secrets, logs) for a later reinstall

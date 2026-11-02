@@ -4,6 +4,7 @@
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { sharedVisionlineOperator } from '@smk/shared';
 import { pool, one, many } from '../db.ts';
 import { requirePerm } from '../auth.ts';
 import { getConfig } from '../hotel-config.ts';
@@ -19,7 +20,7 @@ import { queryEvents } from '../event-log.ts';
 const P = '/api/v1';
 const hid = (req: FastifyRequest) => {
   const id = (req.params as any).hotelId as string;
-  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Hotel');
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Site');
   return id;
 };
 const VALID = `NOT (k.cancelled OR k.discarded OR k.overridden OR k.expired OR k.not_issued) AND k.active AND (k.expires_at IS NULL OR k.expires_at > now())`;
@@ -32,7 +33,7 @@ export function visionlineDataRoutes(app: FastifyInstance) {
     const res = await many(pool, `SELECT kind, count(*)::int AS n FROM resources WHERE hotel_id=$1 AND active GROUP BY kind`, [hotelId]);
     const n = (k: string) => res.find((r) => r.kind === k)?.n ?? 0;
     const people = await one(pool, `SELECT count(*)::int AS n FROM vl_users WHERE hotel_id=$1 AND active`, [hotelId]);
-    const cards = await one(pool, `SELECT count(*) FILTER (WHERE ${VALID})::int AS valid, count(*) FILTER (WHERE ${VALID} AND k.key_id IS NOT NULL)::int AS mobile,
+    const cards = await one(pool, `SELECT count(*) FILTER (WHERE ${VALID})::int AS valid, count(*) FILTER (WHERE ${VALID} AND (k.key_id IS NOT NULL OR k.mobile IS TRUE))::int AS mobile,
         count(*) FILTER (WHERE k.first_seen_at > now() - interval '24 hours')::int AS new24h FROM vl_cards k WHERE k.hotel_id=$1`, [hotelId]);
     const lastDiscovery = await one(pool, `SELECT status, created_at, completed_at, error FROM commands WHERE hotel_id=$1 AND type='DISCOVER_RESOURCES' ORDER BY created_at DESC LIMIT 1`, [hotelId]);
     const lastOkDiscovery = await one(pool, `SELECT max(completed_at) AS t FROM commands WHERE hotel_id=$1 AND type='DISCOVER_RESOURCES' AND status='SUCCEEDED'`, [hotelId]);
@@ -46,7 +47,11 @@ export function visionlineDataRoutes(app: FastifyInstance) {
       sync: { enabled: Boolean(vl?.directorySync?.enabled), everyHours: vl?.directorySync?.everyHours ?? 24, scope: vl?.directorySync?.scope ?? 'staffGroups', last: lastSync ?? null, lastOkAt: lastOkSync?.t ?? null },
       connector: conn ? { name: conn.name, online: isOnline(conn.last_seen_at), credentials: Boolean(conn.health?.credentialsConfigured), visionlineReachable: Boolean(conn.health?.visionlineReachable),
         version: conn.health?.connectorVersion ?? null, canSync: caps.includes('directory-sync'), liveCards: caps.includes('directory-sync-users'), watch: conn.health?.visionlineWatch ?? null, canReadCards: caps.includes('encoder-read') } : null,
-      encoders: vl?.encoderRead?.enabled ? (vl.encoderRead.encoders ?? []) : [],
+      encoders: vl?.encoderRead?.enabled ? [...new Set([...(vl.encoderRead.encoders ?? []), ...(await many(pool, `SELECT external_id FROM resources WHERE hotel_id=$1 AND kind='encoder' AND active ORDER BY external_id`, [hotelId])).map((r) => r.external_id as string)])] : [],
+      // 2.17 Cards made from the portal are logged in Visionline under the connector's Visionline user: a shared one
+      // (PMS interface user, "sym"...) hides who made them.
+      visionlineOperator: conn?.health?.propertyUsername ? { name: conn.health.propertyUsername, shared: sharedVisionlineOperator(conn.health.propertyUsername),
+        personalRequired: Boolean(vl?.requirePersonalCredentials) } : null,
     };
   });
 
@@ -67,21 +72,44 @@ export function visionlineDataRoutes(app: FastifyInstance) {
       q: z.string().trim().max(80).optional(), group: z.string().max(80).optional(),
       state: z.enum(['valid', 'ended', 'all']).default('valid'), kind: z.enum(['all', 'mobile', 'card']).default('all'),
       deadbolt: z.enum(['any', 'yes', 'no', 'unknown']).default('any'),
+      /** 2.16.1 "Who can open this door?" (door id or name) and "who has a master keycard" (opens every room). */
+      door: z.string().trim().max(120).optional(),
+      master: z.enum(['any', 'yes']).default('any'),
       limit: z.coerce.number().int().min(1).max(2000).default(500),
     }).parse(req.query);
+    const ROOM = `(d.data->>'doorCategory' = 'guest' OR d.name ~ '^[0-9]{2,5}[A-Za-z]?$')`;
+    // Does card k open door d? Its own doors and door groups, and those of a uniform-access user group.
+    const OPENS = `(d.external_id = ANY(k.doors) OR d.name = ANY(k.doors) OR (d.data->>'doorGroup') = ANY(k.door_groups) OR EXISTS (
+        SELECT 1 FROM resources g, jsonb_array_elements(COALESCE(g.data->'doorOperations', '[]'::jsonb)) o
+        WHERE g.hotel_id=k.hotel_id AND g.kind='usergroup' AND g.active AND g.external_id = COALESCE(u.user_group, k.user_group) AND (g.data->>'uniformAccess')::boolean
+          AND (COALESCE(o->'doors', '[]'::jsonb) ? d.external_id OR COALESCE(o->'doors', '[]'::jsonb) ? d.name OR COALESCE(o->'doorGroups', '[]'::jsonb) ? (d.data->>'doorGroup'))))`;
+    const DOORS = `SELECT 1 FROM resources d WHERE d.hotel_id=k.hotel_id AND d.kind='door' AND d.active`;
+    const doorSql = q.door ? `AND EXISTS (${DOORS} AND (d.external_id = $5 OR d.name = $5) AND ${OPENS})` : 'AND $5::text IS NULL';
+    // A master keycard opens every room.
+    const masterSql = q.master === 'yes' ? `AND EXISTS (${DOORS} AND ${ROOM}) AND NOT EXISTS (${DOORS} AND ${ROOM} AND NOT ${OPENS})` : '';
     const state = q.state === 'valid' ? `AND ${VALID}` : q.state === 'ended' ? `AND NOT (${VALID})` : '';
-    const kind = q.kind === 'mobile' ? 'AND k.key_id IS NOT NULL' : q.kind === 'card' ? 'AND k.key_id IS NULL' : '';
+    const kind = q.kind === 'mobile' ? 'AND (k.key_id IS NOT NULL OR k.mobile IS TRUE)' : q.kind === 'card' ? 'AND k.key_id IS NULL AND k.mobile IS NOT TRUE' : '';
     const db = q.deadbolt === 'yes' ? 'AND k.deadbolt_override' : q.deadbolt === 'no' ? 'AND k.deadbolt_override = false' : q.deadbolt === 'unknown' ? 'AND k.deadbolt_override IS NULL' : '';
     const rows = await many(pool, `SELECT k.reg_no, k.card_holder, COALESCE(u.user_group, k.user_group) AS user_group, NULLIF(trim(coalesce(u.given_name,'') || ' ' || coalesce(u.surname,'')), '') AS holder_name,
         k.format, k.starts_at, k.expires_at, k.cancelled, k.discarded, k.overridden, k.expired, k.not_issued, k.active, k.door_count, k.door_groups, k.time_schedule,
-        k.key_id IS NOT NULL AS mobile_key, k.source, k.first_seen_at, k.last_seen_at, ${VALID} AS valid, k.operations, k.deadbolt_override,
-        (SELECT o.display_name FROM key_requests r JOIN operators o ON o.id=r.requested_by WHERE r.id=k.key_id) AS issued_by
+        (k.key_id IS NOT NULL OR k.mobile IS TRUE) AS mobile_key, k.source, k.first_seen_at, k.last_seen_at, ${VALID} AS valid, k.operations, k.deadbolt_override,
+        COALESCE((SELECT o.display_name FROM key_requests r JOIN operators o ON o.id=r.requested_by WHERE r.id=k.key_id),
+          (SELECT p.operator_name FROM portal_encoded_cards p WHERE p.hotel_id=k.hotel_id AND p.reg_no=k.reg_no),
+          (SELECT o.display_name FROM keycard_requests q JOIN operators o ON o.id=q.handled_by WHERE q.hotel_id=k.hotel_id AND q.card_reg_no=k.reg_no ORDER BY q.updated_at DESC LIMIT 1),
+          (SELECT 'Visionline: ' || i.operator FROM vl_card_issuers i WHERE i.hotel_id=k.hotel_id AND i.reg_no=k.reg_no)) AS issued_by
       FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder
-      WHERE k.hotel_id=$1 ${state} ${kind} ${db}
+      WHERE k.hotel_id=$1 ${state} ${kind} ${db} ${doorSql} ${masterSql}
         AND ($2::text IS NULL OR COALESCE(u.user_group, k.user_group) = $2)
         AND ($3::text IS NULL OR k.reg_no ILIKE '%'||$3||'%' OR k.card_holder ILIKE '%'||$3||'%' OR u.given_name ILIKE '%'||$3||'%' OR u.surname ILIKE '%'||$3||'%')
-      ORDER BY k.first_seen_at DESC, k.reg_no LIMIT $4`, [hotelId, q.group ?? null, q.q || null, q.limit]);
+      ORDER BY k.first_seen_at DESC, k.reg_no LIMIT $4`, [hotelId, q.group ?? null, q.q || null, q.limit, q.door || null]);
     return rows;
+  });
+
+  /** 2.16.1 Doors for the "who can open…" filter (names only). */
+  app.get(`${P}/hotels/:hotelId/visionline/doors`, async (req) => {
+    const hotelId = hid(req);
+    await requirePerm(req, hotelId, 'reports.read');
+    return many(pool, `SELECT external_id AS id, name, data->>'doorGroup' AS "group" FROM resources WHERE hotel_id=$1 AND kind='door' AND active ORDER BY name`, [hotelId]);
   });
 
   app.get(`${P}/hotels/:hotelId/visionline/people`, async (req) => {
@@ -91,7 +119,8 @@ export function visionlineDataRoutes(app: FastifyInstance) {
     return many(pool, `SELECT u.user_id, u.given_name, u.surname, u.user_group, u.first_seen_at, u.last_seen_at,
         (SELECT count(*)::int FROM vl_cards k WHERE k.hotel_id=u.hotel_id AND k.card_holder=u.user_id AND ${VALID}) AS valid_cards,
         (SELECT max(k.expires_at) FROM vl_cards k WHERE k.hotel_id=u.hotel_id AND k.card_holder=u.user_id AND ${VALID}) AS valid_until,
-        (SELECT s.full_name FROM staff s WHERE s.hotel_id=u.hotel_id AND s.visionline_user=u.user_id LIMIT 1) AS staff_name
+        (SELECT s.full_name FROM staff s WHERE s.hotel_id=u.hotel_id AND s.visionline_user=u.user_id LIMIT 1) AS staff_name,
+        (SELECT o.display_name FROM operator_vl_links l JOIN operators o ON o.id=l.operator_id WHERE l.hotel_id=u.hotel_id AND l.vl_user_id=u.user_id LIMIT 1) AS portal_user
       FROM vl_users u WHERE u.hotel_id=$1 AND u.active AND ($2::text IS NULL OR u.user_group=$2)
         AND ($3::text IS NULL OR u.user_id ILIKE '%'||$3||'%' OR u.given_name ILIKE '%'||$3||'%' OR u.surname ILIKE '%'||$3||'%')
       ORDER BY u.surname NULLS LAST, u.given_name LIMIT $4`, [hotelId, q.group ?? null, q.q || null, q.limit]);
@@ -123,7 +152,10 @@ export function visionlineDataRoutes(app: FastifyInstance) {
     await requirePerm(req, hotelId, 'reports.read');
     const regNo = z.string().trim().min(1).max(64).parse((req.params as any).regNo);
     const k = await one(pool, `SELECT k.*, NULLIF(trim(coalesce(u.given_name,'') || ' ' || coalesce(u.surname,'')), '') AS holder_name, COALESCE(u.user_group, k.user_group) AS group_name,
-        (SELECT o.display_name FROM key_requests r JOIN operators o ON o.id=r.requested_by WHERE r.id=k.key_id) AS issued_by_name,
+        COALESCE((SELECT o.display_name FROM key_requests r JOIN operators o ON o.id=r.requested_by WHERE r.id=k.key_id),
+          (SELECT p.operator_name FROM portal_encoded_cards p WHERE p.hotel_id=k.hotel_id AND p.reg_no=k.reg_no),
+          (SELECT o.display_name FROM keycard_requests q JOIN operators o ON o.id=q.handled_by WHERE q.hotel_id=k.hotel_id AND q.card_reg_no=k.reg_no ORDER BY q.updated_at DESC LIMIT 1),
+          (SELECT 'Visionline: ' || i.operator FROM vl_card_issuers i WHERE i.hotel_id=k.hotel_id AND i.reg_no=k.reg_no)) AS issued_by_name,
         (SELECT s.full_name FROM key_requests r JOIN staff s ON s.id=r.staff_id WHERE r.id=k.key_id) AS staff_name
       FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder WHERE k.hotel_id=$1 AND k.reg_no=$2`, [hotelId, regNo]);
     const key = k ? null : await one(pool, `SELECT r.id, r.status, r.starts_at, r.expires_at, s.full_name, o.display_name AS issued_by FROM key_requests r JOIN staff s ON s.id=r.staff_id JOIN operators o ON o.id=r.requested_by
@@ -135,11 +167,11 @@ export function visionlineDataRoutes(app: FastifyInstance) {
     const now = Date.now();
     return {
       known: true, regNo,
-      card: k ? { kind: k.key_id ? 'Mobile key' : 'Keycard', holderId: k.card_holder, holder: k.holder_name ?? k.staff_name ?? k.card_holder, group: k.group_name,
+      card: k ? { kind: k.key_id || k.mobile ? 'Mobile key' : 'Keycard', mobile: Boolean(k.key_id || k.mobile), holderId: k.card_holder, holder: k.holder_name ?? k.staff_name ?? k.card_holder, group: k.group_name,
         startsAt: k.starts_at, expiresAt: k.expires_at, valid: k.active && !k.cancelled && !k.discarded && !k.overridden && (!k.expires_at || new Date(k.expires_at).getTime() > now),
         cancelled: k.cancelled, overridden: k.overridden, deadbolt: k.deadbolt_override, operations: k.operations, timeSchedule: k.time_schedule,
-        doors: doorNames.map((d) => d.name), doorCount: k.door_count, doorGroups: k.door_groups, issuedBy: k.issued_by_name ?? (k.key_id ? null : 'Visionline desk'), firstSeen: k.first_seen_at, lastSeen: k.last_seen_at }
-        : { kind: 'Mobile key', holder: key!.full_name, startsAt: key!.starts_at, expiresAt: key!.expires_at, valid: ['ISSUED'].includes(key!.status), issuedBy: key!.issued_by, doors: [], doorGroups: [], deadbolt: null },
+        doors: doorNames.map((d) => d.name), doorCount: k.door_count, doorGroups: k.door_groups, issuedBy: k.issued_by_name ?? null, firstSeen: k.first_seen_at, lastSeen: k.last_seen_at }
+        : { kind: 'Mobile key', mobile: true, holder: key!.full_name, startsAt: key!.starts_at, expiresAt: key!.expires_at, valid: ['ISSUED'].includes(key!.status), issuedBy: key!.issued_by, doors: [], doorGroups: [], deadbolt: null },
       uses: uses.map((e) => ({ at: e.at, door: e.door, category: e.category, event: e.event })),
     };
   });
@@ -150,10 +182,12 @@ export function visionlineDataRoutes(app: FastifyInstance) {
     const b = z.object({ encoder: z.string().max(40) }).parse(req.body);
     const er = (await getConfig(pool, hotelId, 'visionline'))?.encoderRead;
     if (!er?.enabled) throw new ApiError(409, 'ENCODER_READ_OFF', 'Reading cards at an encoder is switched off (Settings → Reports & sync → Encoders).');
-    if (!er.encoders.includes(b.encoder)) throw new ApiError(400, 'UNKNOWN_ENCODER', 'This encoder is not in Settings → Reports & sync → Encoders.');
+    // 2.17 Any encoder listed in Settings or read from Visionline (Staff keycards → Encoders & special cards).
+    const known = new Set([...(er.encoders ?? []), ...(await many(pool, `SELECT external_id FROM resources WHERE hotel_id=$1 AND kind='encoder' AND active`, [hotelId])).map((r) => r.external_id as string)]);
+    if (!known.has(b.encoder)) throw new ApiError(400, 'UNKNOWN_ENCODER', 'Unknown encoder: choose one from the list (Settings → Reports & sync → Encoders, or read them from Visionline in Staff keycards → Encoders).');
     const conn = await one(pool, `SELECT id, last_seen_at FROM connectors WHERE hotel_id=$1 AND status='ACTIVE' AND health->'capabilities' ? 'encoder-read' ORDER BY last_seen_at DESC NULLS LAST LIMIT 1`, [hotelId]);
     if (!conn) throw new ApiError(409, 'CONNECTOR_CAPABILITY', 'Reading cards at an encoder needs connector 0.10.0 or newer.');
-    if (!isOnline(conn.last_seen_at)) throw new ApiError(409, 'CONNECTOR_OFFLINE', 'The hotel connector is offline.');
+    if (!isOnline(conn.last_seen_at)) throw new ApiError(409, 'CONNECTOR_OFFLINE', 'The connector is offline.');
     // 2.13: card reads share Visionline with the GRMS and the desk: at most one every 3 seconds per hotel.
     const recent = await one(pool, `SELECT count(*) FILTER (WHERE created_at > now() - interval '3 seconds')::int AS s3, count(*)::int AS m1 FROM commands WHERE hotel_id=$1 AND type='READ_CARD' AND created_at > now() - interval '1 minute'`, [hotelId]);
     if (recent!.s3 > 0 || recent!.m1 >= 20) throw new ApiError(429, 'TOO_FAST', 'A card was just read. Wait a few seconds before reading the next one.');

@@ -135,7 +135,7 @@ function KeyDetail({ id, onClose, onChanged }: { id: string; onClose: () => void
             <>
               <h3>Reported by Visionline</h3>
               <table className="grid" style={{ marginBottom: 16 }}>
-                <thead><tr><th>Lock time (hotel)</th><th>Door</th><th>What happened</th></tr></thead>
+                <thead><tr><th>Lock time (local)</th><th>Door</th><th>What happened</th></tr></thead>
                 <tbody>{key.lockEvents.map((e: any, i: number) => (
                   <tr key={i}><td className="mono small">{fmtVl(e.event_time) ?? fmt.dt(e.received_at)}</td><td>{e.door_id ?? '—'}</td>
                     <td>{e.kind === 'card' ? ({ 0: 'Card cancelled', 2: 'Card overridden', 4: 'Card expired', 6: 'Card discarded' } as Record<number, string>)[e.card_status] ?? `Card status ${e.card_status}` : e.eventName}</td></tr>

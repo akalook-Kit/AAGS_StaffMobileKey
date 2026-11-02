@@ -157,6 +157,8 @@ export const DirectoryChunk = z.object({
     issuedCount: z.number().int().nullable(), doors: z.array(z.string().max(100)).max(300), doorGroups: z.array(z.string().max(100)).max(100), timeSchedule: z.string().max(100).nullable(),
     // 2.12 (connector 0.9.1+): door operations on the card and the deadbolt-override privilege when Visionline reports it.
     operations: z.array(z.string().max(40)).max(20).default([]), deadboltOverride: z.boolean().nullable().default(null),
+    /** 2.17 A mobile key (serial number FFFFFFFF, or a mobile-access endpoint): a phone, not a plastic card. */
+    mobile: z.boolean().nullable().default(null),
   })).max(2000).default([]),
   alarms: z.array(z.object({
     id: z.string().min(1).max(64), alarmType: z.string().max(64).nullable(), alarmTypeName: z.string().max(200).nullable(), alarmText: z.string().max(500).nullable(),

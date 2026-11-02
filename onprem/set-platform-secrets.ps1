@@ -1,5 +1,5 @@
 <#
-  Staff Mobile Key - server-level secrets. Run as administrator.
+  Access Monitoring Tool - server-level secrets. Run as administrator.
   NORMALLY NOT NEEDED (2.9): the Credential Services account, the mail (SMTP) password and the SMS key are
   entered in the portal (Settings -> Credential Services / Alerts & notifications -> Passwords and keys).
   A value set here OVERRIDES the portal and is shown there as "set in the server's own settings".

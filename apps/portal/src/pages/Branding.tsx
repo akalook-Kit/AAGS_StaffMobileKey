@@ -57,7 +57,7 @@ export function BrandingPage() {
             </div>
             <div className="field-row">
               <div className="field"><label htmlFor="lg">Logo</label><input id="lg" type="file" accept="image/png,image/jpeg,image/webp" onChange={image('logo', 500)} /><span className="hint">PNG, JPEG or WebP, at least 64 px wide, up to 500 KB.</span>{b.logo && <button className="btn small" style={{ marginTop: 6, alignSelf: 'start' }} onClick={() => set('logo', null)}>Remove logo</button>}</div>
-              <div className="field"><label htmlFor="hi">Hotel photo</label><input id="hi" type="file" accept="image/png,image/jpeg,image/webp" onChange={image('heroImage', 1500)} /><span className="hint">At least 600 px wide, up to 1.5 MB.</span>{b.heroImage && <button className="btn small" style={{ marginTop: 6, alignSelf: 'start' }} onClick={() => set('heroImage', null)}>Remove photo</button>}</div>
+              <div className="field"><label htmlFor="hi">Photo</label><input id="hi" type="file" accept="image/png,image/jpeg,image/webp" onChange={image('heroImage', 1500)} /><span className="hint">At least 600 px wide, up to 1.5 MB.</span>{b.heroImage && <button className="btn small" style={{ marginTop: 6, alignSelf: 'start' }} onClick={() => set('heroImage', null)}>Remove photo</button>}</div>
             </div>
           </div>
           <div className="panel">
@@ -75,7 +75,7 @@ export function BrandingPage() {
               <div className="report-head-preview" aria-label="Report header preview">
                 <img src={b.logo} alt="" style={{ height: REPORT_LOGO_PX[ls.reports] }} />
                 <div><strong>{hotel.name}</strong><span>Event log · page 1 of 3</span></div>
-                <div className="rh-meta"><span>System no. 3460</span><span>Staff Mobile Key version</span></div>
+                <div className="rh-meta"><span>System no. 3460</span><span>Access Monitoring Tool version</span></div>
               </div>
             ) : <p className="small muted">Upload a logo above to see the report header.</p>}
           </div>

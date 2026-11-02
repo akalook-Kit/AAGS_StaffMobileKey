@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useHotel } from '../App';
+import { useHotel, useTerms } from '../App';
 import { api } from '../api';
 import { ErrorNote, PageHead, fmt, useApi } from '../ui';
 import { useReauth } from '../components/Reauth';
@@ -14,6 +14,7 @@ const STATUS: Record<string, string> = { REQUESTED: 'Waiting for confirmation', 
  * who is in the building: that is always available on Live occupancy.
  */
 export function EmergencyPage() {
+  const t = useTerms();
   const { base, me, can } = useHotel();
   const d = useApi<any>(`${base}/emergency`, [], 15_000);
   const [withReauth, reauthDialog] = useReauth();
@@ -100,7 +101,7 @@ export function EmergencyPage() {
             <li><span className={`dot${r.emergencyCards > 0 ? ' ok' : ''}`} /><div><strong>Emergency keycards in Visionline: {r.emergencyCards}</strong><div className="small muted">Counted from the keycards read from Visionline (group or type “emergency”). Keep them in the fire box and at reception; they open every lock, also with the deadbolt on.</div></div></li>
             <li><span className={`dot${r.template ? ' ok' : ''}`} /><div><strong>Emergency key template: {r.template?.name ?? 'not chosen'}</strong><div className="small muted">Settings → Safety & emergency.</div></div></li>
             <li><span className={`dot${r.responders.length ? ' ok' : ''}`} /><div><strong>Responders with a phone ready: {r.responders.length}</strong><div className="small muted">Security, engineering and duty managers with the staff app set up.</div></div></li>
-            <li><span className={`dot${r.remoteOpen.available ? ' ok' : ''}`} /><div><strong>Emergency open of guest rooms: {r.remoteOpen.enabled ? `${r.remoteOpen.online} online lock(s)` : 'switched off'}</strong><div className="small muted">{r.remoteOpen.offline} room(s) with offline locks need the emergency card. {r.remoteOpen.reason}{!r.remoteOpen.enabled ? ' Switch it on in Settings → Safety & emergency after testing one door.' : ''}</div></div></li>
+            <li><span className={`dot${r.remoteOpen.available ? ' ok' : ''}`} /><div><strong>Emergency open of {t.rooms}: {r.remoteOpen.enabled ? `${r.remoteOpen.online} online lock(s)` : 'switched off'}</strong><div className="small muted">{r.remoteOpen.offline} room(s) with offline locks need the emergency card. {r.remoteOpen.reason}{!r.remoteOpen.enabled ? ' Switch it on in Settings → Safety & emergency after testing one door.' : ''}</div></div></li>
           </ul>
         </section>
         <section className="panel">
@@ -117,14 +118,15 @@ export function EmergencyPage() {
 
 /** 2.14 Emergency open of every guest room with an online lock, and back to normal; which doors answered. */
 function DoorsPanel({ id, enabled, withReauth, setError, setOk }: { id: string; enabled: boolean; withReauth: (run: (t: string) => Promise<unknown>) => Promise<void>; setError: (e: unknown) => void; setOk: (s: string) => void }) {
+  const t = useTerms();
   const { base } = useHotel();
   const runs = useApi<any[]>(`${base}/emergency/${id}/doors`, [id], 4000);
   const send = (command: 'emergencyOpen' | 'emergencyClose') => withReauth((t) => api(`${base}/emergency/${id}/doors`, { body: { command }, headers: { 'x-smk-reauth': t } }).then((x: any) => { setOk(`${command === 'emergencyOpen' ? 'Emergency open' : 'Back to normal'} sent to ${x.online} online lock(s). ${x.offline.length} offline room(s): use the emergency card.`); return runs.reload(); })).catch(setError);
   return (
     <div style={{ marginTop: 18 }}>
-      <h3>Open all guest rooms</h3>
+      <h3>Open all {t.rooms}</h3>
       {!enabled ? <p className="muted small">Switched off. Settings → Safety & emergency → Remote door commands (test on one door first).</p> : (
-        <div className="row"><button className="btn danger-solid" onClick={() => send('emergencyOpen')}>Emergency open all guest rooms</button><button className="btn" onClick={() => send('emergencyClose')}>Back to normal</button></div>)}
+        <div className="row"><button className="btn danger-solid" onClick={() => send('emergencyOpen')}>Emergency open all {t.rooms}</button><button className="btn" onClick={() => send('emergencyClose')}>Back to normal</button></div>)}
       {(runs.data ?? []).map((x, i) => (
         <div key={i} className="small" style={{ marginTop: 8 }}><strong>{x.command === 'emergencyOpen' ? 'Open' : 'Normal'}</strong> · {fmt.dt(x.at)} · {x.reached} of {x.doors} online locks answered{x.pending ? ` · ${x.pending} batch(es) still going` : ''}
           {x.failed.length > 0 && <div className="bad-text">Not reached: {x.failed.map((f: any) => f.door).join(', ')}</div>}

@@ -1,4 +1,4 @@
-# Security and compliance pack (for hotel groups, e.g. Marriott vendor review) — 2.13
+# Security and compliance pack (for hotel groups and institutions, e.g. Marriott vendor review) — Access Monitoring Tool 2.17
 
 **What this is.** The answers a hotel group's IT security team asks of a vendor, prepared in advance. **Approval itself
 can only come from the group** (for Marriott: its third-party / vendor risk assessment, normally a questionnaire,
@@ -67,6 +67,33 @@ e-mails it. The software never "phones home".
 - **Two people** for unpaid-guest lock-outs and emergency door opening; door commands only during a confirmed
   emergency (never a drill) and only when the hotel switched them on.
 - Every keycard encoded, cancelled or overwritten, every lock-out and every door command is in the audit trail.
+
+## 3c. New in 2.15 / 2.16
+
+- **Connector on another computer**: the connector API stays closed on the outside entrance; on the network entrance
+  it is open only to the listed connector computer address (`connectorFrom`, a single address or a small range,
+  never "private"). The connector checks the server's certificate exactly (`gateway.cer`, fingerprint match) and still
+  signs in with its own token. Certificate verification is never switched off.
+- **Invitations**: a one-time link (256-bit secret, only its SHA-256 stored, 72 hours, replaced by a new link,
+  cancelled when the person is removed); the person chooses their own password (12+ characters). A password link for
+  an existing account needs the administrator's password first and keeps two-step sign-in. Every invitation, link,
+  acceptance and removal is in the audit trail; the secret never is.
+- **Keycards per room** report: same permission and PDF fingerprint as the Event log; no spreadsheet export.
+
+## 3d. New in 2.17
+
+- **Installer questions**: the answers given in the setup window are saved to
+  `%ProgramData%\AccessMonitoringToolSetup\answers.json`, readable only by SYSTEM, Administrators and the person installing; a connector token
+  typed there is encrypted with Windows DPAPI (machine scope) and the file is deleted when the installation ends (it is
+  ignored after 6 hours). For a connector on another computer, the portal certificate's SHA-256 fingerprint is shown in
+  the window and checked again before anything is installed. Installation logs never contain the token.
+- **Visionline reports import**: only administrators (`settings.manage`) can upload; files are parsed as text (no
+  macros or workbooks are opened), limited to 12 MB, kept in the database and listed in the audit trail. A card log keeps
+  card number, operator name and time only.
+- **Notice board**: posts marked "also on the sign-in page" are visible before signing in (title, text, picture
+  only; no author); everything else needs a signed-in user.
+- **Mobile keys** are recognised from Visionline's data (no physical serial); still no PIN, e-mail, phone or card serial
+  is kept by the directory sync.
 
 ## 4. Hosting the database (on-premises)
 

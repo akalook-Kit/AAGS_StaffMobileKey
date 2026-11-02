@@ -90,3 +90,36 @@ describe('gateway configuration check (set-external-access.ps1)', () => {
     expect(() => checkGatewayConfig({ ...base, secretPath: '/short', listeners: [{ name: 'a', host: '0.0.0.0', port: 1, allow: ['private'] }] } as any)).toThrow(/secretPath/);
   });
 });
+
+describe('gateway: connector on another computer of the hotel network (2.16)', () => {
+  let upstream: http.Server; let gw: Awaited<ReturnType<typeof startGateway>>;
+  const ports: number[] = [];
+  beforeAll(async () => {
+    upstream = http.createServer((req, res) => { res.writeHead(200); res.end(`up:${req.url}`); });
+    await new Promise<void>((r) => upstream.listen(0, '127.0.0.1', () => r()));
+    const up = (upstream.address() as AddressInfo).port;
+    gw = startGateway({ upstream: `http://127.0.0.1:${up}`, secretPath: '/k-test-secret-path-123456789', listeners: [
+      { name: 'lan', host: '127.0.0.1', port: 0, allow: ['private'], requireSecretPath: false, connectorFrom: ['127.0.0.1'] },
+      { name: 'lan2', host: '127.0.0.1', port: 0, allow: ['private'], requireSecretPath: false, connectorFrom: ['192.168.1.50'] },
+    ] }, {});
+    await new Promise((r) => setTimeout(r, 100));
+    for (const s of gw.servers) ports.push((s.address() as AddressInfo).port);
+  });
+  afterAll(async () => { await gw.close(); upstream.close(); });
+  it('the listed computer reaches the connector API; Credential Services callbacks stay closed', async () => {
+    expect(await (await fetch(`http://127.0.0.1:${ports[0]}/connector/v1/hello`, { method: 'POST' })).text()).toBe('up:/connector/v1/hello');
+    expect((await fetch(`http://127.0.0.1:${ports[0]}/integrations/credential-services/callback/x`)).status).toBe(404);
+  });
+  it('any other address of the hotel network does not', async () => {
+    expect((await fetch(`http://127.0.0.1:${ports[1]}/connector/v1/hello`, { method: 'POST' })).status).toBe(404);
+    expect((await fetch(`http://127.0.0.1:${ports[1]}/api/v1/x`)).status).toBe(200);
+  });
+  it('refuses connectorFrom on the outside entrance or as a whole network', async () => {
+    const { checkGatewayConfig } = await import('./gateway.ts');
+    const base = { upstream: 'http://127.0.0.1:4000', secretPath: '/k-abcdefghijklmnopqrstuvwx' };
+    expect(() => checkGatewayConfig({ ...base, listeners: [{ name: 'external', host: '0.0.0.0', port: 9443, allow: ['41.1.1.1'], requireSecretPath: true, connectorFrom: ['41.1.1.1'] }] })).toThrow(/outside entrance/);
+    expect(() => checkGatewayConfig({ ...base, listeners: [{ name: 'lan', host: '0.0.0.0', port: 8443, allow: ['private'], requireSecretPath: false, connectorFrom: ['private'] }] })).toThrow(/own address/);
+    expect(() => checkGatewayConfig({ ...base, listeners: [{ name: 'lan', host: '0.0.0.0', port: 8443, allow: ['private'], requireSecretPath: false, connectorFrom: ['10.0.0.0/8'] }] })).toThrow(/own address/);
+    expect(checkGatewayConfig({ ...base, listeners: [{ name: 'lan', host: '0.0.0.0', port: 8443, allow: ['private'], requireSecretPath: false, connectorFrom: ['192.168.1.50'] }] })).toBe(true);
+  });
+});

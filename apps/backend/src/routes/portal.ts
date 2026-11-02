@@ -23,7 +23,7 @@ import { ApiError, badRequest, conflict, forbidden, notFound } from '../lib/erro
 const P = '/api/v1';
 const hid = (req: FastifyRequest) => {
   const id = (req.params as any).hotelId as string;
-  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Hotel');
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Site');
   return id;
 };
 
@@ -57,7 +57,7 @@ export function portalRoutes(app: FastifyInstance) {
     if (cur?.mfa_enabled) throw new ApiError(409, 'MFA_ALREADY_ON', 'Two-step sign-in is already on for this account. If the phone was lost, a platform administrator resets it.');
     const secret = newTotpSecret();
     await pool.query('UPDATE operators SET totp_secret=$2, mfa_enabled=false WHERE id=$1 AND NOT mfa_enabled', [op.id, secret]);
-    return { secret, otpauthUrl: `otpauth://totp/StaffMobileKey:${encodeURIComponent(op.email)}?secret=${secret}&issuer=StaffMobileKey` };
+    return { secret, otpauthUrl: `otpauth://totp/AccessMonitoringTool:${encodeURIComponent(op.email)}?secret=${secret}&issuer=AccessMonitoringTool` };
   });
   app.post(`${P}/auth/mfa/enable`, async (req) => {
     const op = await requireOperator(req);
@@ -75,6 +75,9 @@ export function portalRoutes(app: FastifyInstance) {
       ? await many(pool, 'SELECT id, slug, name FROM hotels ORDER BY name')
       : await many(pool, 'SELECT id, slug, name FROM hotels WHERE id = ANY($1) ORDER BY name', [[...op.roles.keys()]]);
     const r = await one(pool, 'SELECT mfa_enabled, prefs FROM operators WHERE id=$1', [op.id]);
+    // 2.16 Hotel or institution, for the portal's words and the guest features.
+    const kinds = new Map((await many(pool, `SELECT DISTINCT ON (hotel_id) hotel_id, data->>'kind' AS kind FROM hotel_config_versions WHERE kind='property' AND hotel_id = ANY($1) ORDER BY hotel_id, version DESC`,
+      [hotels.map((h) => h.id)])).map((x) => [x.hotel_id, x.kind === 'institution' ? 'institution' : 'hotel']));
     return {
       id: op.id, email: op.email, displayName: op.displayName, isPlatformAdmin: op.isPlatformAdmin, mfaEnabled: r.mfa_enabled, prefs: r.prefs ?? {},
       hotels: hotels.map((h) => {
@@ -82,7 +85,7 @@ export function portalRoutes(app: FastifyInstance) {
         // 2.13 Administration stays closed until two-step sign-in is on, when the hotel requires it for administrators.
         const mfaRequired = Boolean(op.mfaRequiredIn?.has(h.id) && (op.isPlatformAdmin || roles.includes('HOTEL_ADMIN')));
         const perms = [...permsIn(op, h.id)].filter((p) => !mfaRequired || !['settings.manage', 'operators.manage', 'connector.manage', 'branding.manage'].includes(p));
-        return { ...h, roles, permissions: perms, hiddenModules: op.hidden?.get(h.id) ?? [], mfaRequired };
+        return { ...h, kind: kinds.get(h.id) ?? 'hotel', roles, permissions: perms, hiddenModules: op.hidden?.get(h.id) ?? [], mfaRequired };
       }),
       roleLabels: ROLE_LABELS,
       modules: Object.fromEntries(MODULE_IDS.map((m) => [m, MODULES[m].label])),
@@ -218,7 +221,7 @@ export function portalRoutes(app: FastifyInstance) {
   app.get(`${P}/hotels/:hotelId/commands/:commandId`, async (req) => {
     const hotelId = hid(req);
     const op = await requireOperator(req);
-    if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this hotel.');
+    if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this site.');
     const perms = permsIn(op, hotelId);
     const c = await one(pool, 'SELECT id, type, status, attempts, result, error, correlation_id, created_at, completed_at FROM commands WHERE id=$1 AND hotel_id=$2', [z.string().uuid().parse((req.params as any).commandId), hotelId]);
     // 2.14 People who send keycard, lock-out and emergency commands may follow them without connector rights.
@@ -321,8 +324,13 @@ export function portalRoutes(app: FastifyInstance) {
     const hotelId = hid(req);
     await requirePerm(req, hotelId, 'operators.manage');
     return many(pool, `SELECT o.id, o.email, o.display_name, o.status, o.mfa_enabled, o.last_sign_in_at, o.idp_subject, array_agg(m.role ORDER BY m.role) AS roles,
-        COALESCE((SELECT a.hidden_modules FROM operator_module_access a WHERE a.operator_id=o.id AND a.hotel_id=$1), '{}') AS hidden_modules
-      FROM operators o JOIN memberships m ON m.operator_id=o.id WHERE m.hotel_id=$1 GROUP BY o.id ORDER BY o.display_name`, [hotelId]);
+        COALESCE((SELECT a.hidden_modules FROM operator_module_access a WHERE a.operator_id=o.id AND a.hotel_id=$1), '{}') AS hidden_modules,
+        (SELECT max(i.expires_at) FROM operator_invites i WHERE i.operator_id=o.id AND i.hotel_id=$1 AND i.used_at IS NULL AND i.revoked_at IS NULL) AS invite_expires_at,
+        l.vl_user_id, NULLIF(trim(coalesce(vu.given_name,'') || ' ' || coalesce(vu.surname,'')), '') AS vl_name, vu.user_group AS vl_group,
+        (SELECT count(*)::int FROM vl_cards k WHERE k.hotel_id=$1 AND k.card_holder=l.vl_user_id AND k.active AND NOT (k.cancelled OR k.discarded OR k.overridden OR k.expired) AND (k.expires_at IS NULL OR k.expires_at > now())) AS vl_cards
+      FROM operators o JOIN memberships m ON m.operator_id=o.id
+        LEFT JOIN operator_vl_links l ON l.operator_id=o.id AND l.hotel_id=$1 LEFT JOIN vl_users vu ON vu.hotel_id=$1 AND vu.user_id=l.vl_user_id
+      WHERE m.hotel_id=$1 GROUP BY o.id, l.vl_user_id, vu.given_name, vu.surname, vu.user_group ORDER BY o.display_name`, [hotelId]);
   });
   /** 2.13 Lost phone: an administrator of the hotel turns two-step sign-in off for a member (password confirmed). */
   app.post(`${P}/hotels/:hotelId/operators/:operatorId/mfa/reset`, async (req) => {
@@ -384,7 +392,7 @@ export function portalRoutes(app: FastifyInstance) {
   app.get(`${P}/hotels/:hotelId/connectors`, async (req) => {
     const hotelId = hid(req);
     await requirePerm(req, hotelId, 'connector.read');
-    const rows = await many(pool, `SELECT id, name, status, installation_uuid, last_seen_at, health, created_at FROM connectors WHERE hotel_id=$1 ORDER BY created_at`, [hotelId]);
+    const rows = await many(pool, `SELECT id, name, status, installation_uuid, last_seen_at, last_address, health, created_at FROM connectors WHERE hotel_id=$1 ORDER BY created_at`, [hotelId]);
     const queue = await one(pool, `SELECT count(*) FILTER (WHERE status='PENDING')::int AS pending, count(*) FILTER (WHERE status='LEASED')::int AS leased,
       count(*) FILTER (WHERE status='EXPIRED' AND created_at > now() - interval '24 hours')::int AS expired24h,
       count(*) FILTER (WHERE status='FAILED' AND created_at > now() - interval '24 hours')::int AS failed24h FROM commands WHERE hotel_id=$1`, [hotelId]);
@@ -416,7 +424,7 @@ export function portalRoutes(app: FastifyInstance) {
     if (kind === 'branding') {
       // Every member of the hotel sees its colours and logo (the restaurant role too).
       const op = await requireOperator(req);
-      if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this hotel.');
+      if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this site.');
     } else await requirePerm(req, hotelId, 'staff.read');
     return getConfigWithVersion(hotelId, kind);
   });
@@ -468,7 +476,7 @@ export function portalRoutes(app: FastifyInstance) {
     const item = (id: string, label: string, ok: boolean, detail: string) => ({ id, label, ok, detail });
     return {
       checks: [
-        item('connector', 'Hotel connector online', isOnline(conn?.last_seen_at), conn?.last_seen_at ? `Last seen ${Math.round((Date.now() - new Date(conn.last_seen_at).getTime()) / 1000)} s ago` : 'No connector has checked in'),
+        item('connector', 'Connector online', isOnline(conn?.last_seen_at), conn?.last_seen_at ? `Last seen ${Math.round((Date.now() - new Date(conn.last_seen_at).getTime()) / 1000)} s ago` : 'No connector has checked in'),
         item('credentials', 'Property Visionline credentials stored on the connector', Boolean(h.credentialsConfigured), h.credentialsConfigured ? `Operator ${h.propertyUsername ?? ''} · encrypted on the Visionline PC` : 'Enter them under Settings → Visionline (or on the connector page)'),
         item('tls', 'Visionline certificate trusted', String(h.tlsTrust ?? '').startsWith('verified'), h.tlsTrust ?? 'unknown'),
         item('api', 'Visionline Web API reachable and session created', Boolean(h.visionlineReachable && h.lastSuccessfulSessionAt), h.visionlineReachable && h.lastSuccessfulSessionAt ? `Last session ${h.lastSuccessfulSessionAt}` : h.lastError ?? 'No session yet'),

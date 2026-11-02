@@ -1,5 +1,5 @@
 @echo off
-rem Staff Mobile Key - install or upgrade on this server. Double-click it: Windows asks for administrator rights.
+rem Access Monitoring Tool - install or upgrade on this server. Double-click it: Windows asks for administrator rights.
 rem Options can be added after the name, for example:  Install.cmd -LanPort 9443
 setlocal
 cd /d "%~dp0"

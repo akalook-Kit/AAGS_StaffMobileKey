@@ -3,7 +3,7 @@ STAFF MOBILE KEY - HOTEL CONNECTOR FOR WINDOWS
 
 What it is
 ----------
-A small Windows service ("Staff Mobile Key Connector") that sits next to Visionline. It is the only
+A small Windows service ("Access Monitoring Tool Connector") that sits next to Visionline. It is the only
 part of the platform that talks to Visionline:
 
   platform (cloud or your PC)  <-- outbound HTTPS --  CONNECTOR  -- HTTPS, signed -->  Visionline Web API
@@ -31,7 +31,11 @@ Requirements
 ------------
 - Windows 10/11 or Windows Server 2016+, PowerShell 5.1 (built in).
 - Node.js 22 LTS installed for all users (https://nodejs.org, or: winget install OpenJS.NodeJS.LTS).
-- A connector token: portal -> Connector health -> Register a connector.
+- A connector token: portal -> Settings -> Connector -> Make a token (or Connector health).
+- ON ANOTHER COMPUTER than the Access Monitoring Tool server (2.16): first run set-connector-access.ps1 -Allow <this
+  computer's IP> on the server, copy C:\ProgramData\StaffMobileKey\Platform\gateway.cer from the server to this
+  folder and add  -PlatformUrl https://<server>:8443 -PlatformCaFile .\gateway.cer  to install.ps1. The portal's
+  Settings -> Connector page shows the exact commands with your addresses.
 - For a real Visionline: the Visionline certificate (or its CA) as a .crt file. Run the probe first.
 
 Install

@@ -2,6 +2,7 @@ import { VL, toVisionlineLocal } from '@smk/shared/node';
 import type { DirectoryChunk, SyncDirectoryPayload } from '@smk/shared';
 import { VisionlineApiError, type VisionlineClient } from './client.ts';
 import { firstText, isNotFound } from './adapter.ts';
+import { isMobileCard } from './mobile.ts';
 import { utcForms, withTimeForms } from './time-forms.ts';
 
 /**
@@ -122,6 +123,7 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
           timeSchedule: firstText(c?.timeSchedule),
           operations: [...new Set(ops.map((o: any) => firstText(o?.operation)).filter((x: unknown): x is string => Boolean(x)))].slice(0, 20) as string[],
           deadboltOverride: deadbolt(c),
+          mobile: isMobileCard(c),
         });
         counts.cards++;
       }

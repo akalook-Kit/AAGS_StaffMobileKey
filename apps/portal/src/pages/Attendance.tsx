@@ -53,7 +53,7 @@ export function AttendancePage() {
 function ModuleOff({ error }: { error: unknown }) {
   const { can } = useHotel();
   if (error instanceof ApiError && error.code === 'MODULE_OFF' || (typeof error === 'string' && /switched off/.test(error)))
-    return <div className="alert warn">Time & attendance is switched off for this hotel. {can('settings.manage') ? <Link to="/settings?tab=features">Settings → Modules</Link> : 'Ask a hotel administrator to switch it on (Settings → Modules).'}</div>;
+    return <div className="alert warn">Time & attendance is switched off here. {can('settings.manage') ? <Link to="/settings?tab=features">Settings → Modules</Link> : 'Ask an administrator to switch it on (Settings → Modules).'}</div>;
   return <ErrorNote error={error} />;
 }
 
@@ -177,7 +177,7 @@ function Timesheets() {
           </tbody></table>
         )}
       </div>
-      <p className="small muted">Hours are h:mm. Click a person for their days and clock records. Times are hotel time ({t.data?.tz}).</p>
+      <p className="small muted">Hours are h:mm. Click a person for their days and clock records. Times are local time ({t.data?.tz}).</p>
       {open && <PersonDays person={open} range={range} tz={t.data.tz} onClose={() => setOpen(null)} onChanged={() => t.reload()} />}
     </>
   );
@@ -436,7 +436,7 @@ function Payroll() {
       </div>
       <div className="panel">
         <h2>Send to payroll</h2>
-        <p className="small muted">CSV opens in Excel and imports into most payroll systems (one row per person per day, or one row per person). JSON is for a payroll system that reads it directly. The PDF has the hotel header on every page and can be checked later (Event log → Verify a PDF).</p>
+        <p className="small muted">CSV opens in Excel and imports into most payroll systems (one row per person per day, or one row per person). JSON is for a payroll system that reads it directly. The PDF has your header on every page and can be checked later (Event log → Verify a PDF).</p>
         <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
           <button className="btn" onClick={() => file('summary.csv')}>Summary per person (CSV)</button>
           <button className="btn" onClick={() => file('daily.csv')}>Day by day (CSV)</button>
@@ -469,7 +469,7 @@ function Setup() {
   const ro = !can('attendance.manage');
   return (
     <div className="panel">
-      {!s.data.enabled && <div className="alert warn">Time & attendance is switched off. {can('settings.manage') ? <Link to="/settings?tab=features">Settings → Modules</Link> : 'A hotel administrator switches it on in Settings → Modules.'}</div>}
+      {!s.data.enabled && <div className="alert warn">Time & attendance is switched off. {can('settings.manage') ? <Link to="/settings?tab=features">Settings → Modules</Link> : 'An administrator switches it on in Settings → Modules.'}</div>}
       <ErrorNote error={error} />
       {ok && <div className="alert ok">{ok}</div>}
       <h2>Attendance doors</h2>

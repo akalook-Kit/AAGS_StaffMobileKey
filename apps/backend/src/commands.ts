@@ -14,12 +14,12 @@ import { onDirectorySyncResult } from './directory.ts';
  * key (UNIQUE in the database, so a retry can never create a second command), an expiry, a correlation id,
  * a recorded result, and a lease so a crashed connector's command becomes available again.
  */
-export async function enqueue(c: Db, o: { hotelId: string; type: CommandType; payload: unknown; idempotencyKey: string; correlationId: string; ttlSec?: number }) {
+export async function enqueue(c: Db, o: { hotelId: string; type: CommandType; payload: unknown; idempotencyKey: string; correlationId: string; ttlSec?: number; requestedBy?: string | null }) {
   PAYLOAD_SCHEMAS[o.type].parse(o.payload);
-  const inserted = await one(c, `INSERT INTO commands (hotel_id, type, payload, idempotency_key, correlation_id, expires_at)
-      VALUES ($1,$2,$3,$4,$5, now() + make_interval(secs => $6))
+  const inserted = await one(c, `INSERT INTO commands (hotel_id, type, payload, idempotency_key, correlation_id, expires_at, requested_by)
+      VALUES ($1,$2,$3,$4,$5, now() + make_interval(secs => $6), $7)
       ON CONFLICT (hotel_id, idempotency_key) DO NOTHING RETURNING *`,
-    [o.hotelId, o.type, o.payload, o.idempotencyKey, o.correlationId, o.ttlSec ?? config.commandTtlSec]);
+    [o.hotelId, o.type, o.payload, o.idempotencyKey, o.correlationId, o.ttlSec ?? config.commandTtlSec, o.requestedBy ?? null]);
   return inserted ?? (await one(c, 'SELECT * FROM commands WHERE hotel_id=$1 AND idempotency_key=$2', [o.hotelId, o.idempotencyKey]));
 }
 

@@ -1,5 +1,5 @@
 @echo off
-rem Staff Mobile Key - open the portal on this server. Before the hotel is set up, it opens the first-run setup page
+rem Access Monitoring Tool - open the portal on this server. Before the hotel is set up, it opens the first-run setup page
 rem with the setup code filled in (reading the code needs administrator rights, so Windows may ask).
 setlocal
 cd /d "%~dp0"

@@ -170,15 +170,15 @@ export function MyReports({ onEdit, onNew }: { onEdit: (r: any) => void; onNew: 
     <>
       <ErrorNote error={error} />
       <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>My reports</h2>
+        <h2 style={{ margin: 0 }}>My charts and reports</h2>
         <button className="btn primary" onClick={() => onNew()}>＋ Build a report</button>
       </div>
-      {list.data && !list.data.length && <div className="panel"><p className="muted" style={{ margin: 0 }}>No saved reports yet. Start from one below or build your own; saved reports can be pinned to the Summary page.</p></div>}
+      {list.data && !list.data.length && <div className="panel"><p className="muted" style={{ margin: 0 }}>Nothing saved yet. Start from one below or build your own; pin it (★) to see it on your Overview.</p></div>}
       <div className="grid12">
         {(list.data ?? []).map((r) => (
           <ReportVisual key={r.id} span={6} spec={r.spec} title={r.name} sub={r.mine ? (r.shared ? 'shared' : 'only you') : `shared by ${r.owner}`}
             actions={r.mine && <>
-              <button className="btn small ghost" aria-pressed={r.pinned} title="Pin to the Insights summary" onClick={() => toggle(r, 'pinned')}>{r.pinned ? '★ Pinned' : '☆ Pin'}</button>
+              <button className="btn small ghost" aria-pressed={r.pinned} title="Pin to your Overview and the Insights summary" onClick={() => toggle(r, 'pinned')}>{r.pinned ? '★ Pinned' : '☆ Pin'}</button>
               <button className="btn small ghost" onClick={() => onEdit(r)}>Edit</button>
               <button className="btn small ghost" onClick={() => window.confirm(`Delete "${r.name}"?`) && act(() => api(`${base}/insights/reports/${r.id}`, { method: 'DELETE' }))}>Delete</button></>} />))}
       </div>
@@ -194,7 +194,7 @@ export function MyReports({ onEdit, onNew }: { onEdit: (r: any) => void; onNew: 
   );
 }
 
-/** Pinned reports, shown at the end of the Insights summary. */
+/** Pinned reports, shown at the end of the Insights summary and (2.17) on the Overview. */
 export function PinnedReports() {
   const { base } = useHotel();
   const list = useApi<any[]>(`${base}/insights/reports`);

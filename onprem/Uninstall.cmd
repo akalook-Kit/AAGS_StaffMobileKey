@@ -1,5 +1,5 @@
 @echo off
-rem Staff Mobile Key - remove it from this server. The data (database, settings, copies) is kept.
+rem Access Monitoring Tool - remove it from this server. The data (database, settings, copies) is kept.
 rem To delete the data too:  Uninstall.cmd -RemoveData
 setlocal
 cd /d "%~dp0"

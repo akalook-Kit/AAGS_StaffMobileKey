@@ -85,13 +85,13 @@ export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<Role, string> = {
   PLATFORM_ADMIN: 'Platform Administrator',
-  HOTEL_ADMIN: 'Hotel Administrator',
+  HOTEL_ADMIN: 'Administrator',
   SECURITY_MANAGER: 'Security Manager',
   KEY_ISSUER: 'Key Issuer',
   APPROVER: 'Approver',
   MAINTENANCE_MANAGER: 'Maintenance Manager',
   TECHNICIAN: 'Technician',
-  HOTEL_MANAGEMENT: 'Hotel Management (reports)',
+  HOTEL_MANAGEMENT: 'Management (reports)',
   HR_MANAGER: 'HR Manager (time & attendance)',
   TIMEKEEPER: 'Timekeeper (check-in desk)',
   RESTAURANT: 'Restaurant (breakfast)',

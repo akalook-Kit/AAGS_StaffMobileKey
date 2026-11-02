@@ -8,7 +8,7 @@ import { Builder, MyReports, PinnedReports, ReportVisual, type Spec } from '../c
 import { DataTable, NoData, HBars, Kpi, Legend, Lines, SERIES, StatusBar, VizCard, fmtN, type BarRow } from '../components/charts';
 
 /**
- * Insights: a Power BI–style report canvas for hotel management. One filter row scopes every visual below it
+ * Insights: a Power BI–style report canvas for management. One filter row scopes every visual below it
  * (period, Visionline user group, floor). Pages: Summary, Keycards & people, Locks & batteries, Maintenance,
  * Valid keycards. Every visual has a table view; exports are CSV.
  */
@@ -118,7 +118,7 @@ export function InsightsPage() {
         </div>
       )}
       {drill && <GroupDrill group={drill} onClose={() => setDrill(null)} />}
-      <p className="small muted print-only">Printed {new Date().toLocaleString()} · {hotel.name} · Staff Mobile Key Insights{filtersOn.length ? ` · filtered: ${filtersOn.join(', ')}` : ''}</p>
+      <p className="small muted print-only">Printed {new Date().toLocaleString()} · {hotel.name} · Access Monitoring Tool Insights{filtersOn.length ? ` · filtered: ${filtersOn.join(', ')}` : ''}</p>
     </div>
     </PrintFrame>
   );
@@ -151,7 +151,7 @@ const lockSeries = [{ name: 'Alarms', color: SERIES[0] }, { name: 'Refused entri
 
 function NoSnapshot({ on }: { on: boolean }) {
   if (on) return <NoData text="Visionline has not been read yet" hint='Use "Read Visionline now", or wait for the scheduled read. Still looking.' />;
-  return <div className="viz-empty">{<>People and keycards come from Visionline once the hotel switches it on: <Link to="/settings?tab=reports">Settings → Reports & sync</Link>.</>}</div>;
+  return <div className="viz-empty">{<>People and keycards come from Visionline once it is switched on: <Link to="/settings?tab=reports">Settings → Reports & sync</Link>.</>}</div>;
 }
 function GroupTable({ rows }: { rows: any[] }) {
   return <DataTable head={['User group', 'People', 'Valid cards', 'Mobile keys', 'Other cards', 'People without a card', 'Expiring in 7 days']} numeric={[1, 2, 3, 4, 5, 6]}
@@ -235,7 +235,7 @@ function Locks({ data, dayLabel, exp, ff }: any) {
         table={<DataTable head={['Reason', 'Refusals']} numeric={[1]} rows={data.locks.denialTypes.map((r: any) => [r.type, r.n])} />} />
       {data.modules.battery && <>
         <VizCard span={4} title="Battery state now" sub={`${b.doorsTracked} doors · ${b.states.STALE} with no report for a while`} filtered={ff} chart={<BatteryStates b={b} />} />
-        <VizCard span={8} title="Locks draining batteries fastest" sub={b.medianLifeDays ? `Days from a battery exchange to the first "low" report. Hotel median: ${b.medianLifeDays} days (${b.cyclesMeasured} battery cycles measured).` : 'Needs at least one full battery cycle (exchange, then low) to compare.'}
+        <VizCard span={8} title="Locks draining batteries fastest" sub={b.medianLifeDays ? `Days from a battery exchange to the first "low" report. Site median: ${b.medianLifeDays} days (${b.cyclesMeasured} battery cycles measured).` : 'Needs at least one full battery cycle (exchange, then low) to compare.'}
           filtered={ff} actions={<button className="btn small ghost" onClick={() => exp('battery-life')}>CSV</button>}
           chart={<DataTable head={['Door', 'Group', 'Now', 'Last cycle', 'Average', 'Alarms (90 d)', 'Trend']} numeric={[3, 4, 5]}
             rows={b.draining.map((x: any) => [<Link key="d" to={`/battery/${encodeURIComponent(x.doorId)}`}>{x.name}</Link>, x.group, stateText(x.state),
@@ -243,7 +243,7 @@ function Locks({ data, dayLabel, exp, ff }: any) {
               x.avgLifeDays != null ? `${x.avgLifeDays} d` : '—', x.alarms90, x.voltsPer30d != null ? `${x.voltsPer30d} V / month` : '—'])} />} />
         <VizCard span={6} title="Locks doing well" sub="Longest time since the last exchange, no low report and no alarm in 90 days" filtered={ff}
           chart={<DataTable head={['Door', 'Group', 'Since exchange', 'Reports']} numeric={[2, 3]} rows={b.healthy.map((x: any) => [x.name, x.group, `${x.daysSinceExchange} d`, x.reports])} />} />
-        <VizCard span={6} title="Expected to need batteries soon" sub="Predicted from each lock's own past cycles, or the hotel median" filtered={ff}
+        <VizCard span={6} title="Expected to need batteries soon" sub="Predicted from each lock's own past cycles, or the site median" filtered={ff}
           chart={<DataTable head={['Door', 'Group', 'Expected low', 'Since exchange']} numeric={[3]} rows={b.dueSoon.map((x: any) => [x.name, x.group, fmt.dt(x.predictedLowAt).replace(/,.*$/, ''), `${x.daysSinceExchange} d`])} />} />
       </>}
     </div>

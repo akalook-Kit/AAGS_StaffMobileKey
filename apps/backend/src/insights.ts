@@ -223,7 +223,7 @@ export async function insights(hotelId: string, f: InsightFilters) {
  */
 export async function batteryInsights(hotelId: string, floorDoors: string[] | null, doorNames: Map<string, { name: string; group: string | null }>, staleAfterDays: number) {
   const status = await many(pool, `SELECT door_id, state, reported_at, volts_below FROM battery_status WHERE hotel_id=$1`, [hotelId]);
-  const readings = await many(pool, `SELECT door_id, event_code, state, volts_below, reported_at FROM battery_readings WHERE hotel_id=$1 AND reported_at > now() - interval '730 days' ORDER BY door_id, reported_at`, [hotelId]);
+  const readings = await many(pool, `SELECT door_id, event_code, state, volts_below, reported_at, change_inferred FROM battery_readings WHERE hotel_id=$1 AND reported_at > now() - interval '730 days' ORDER BY door_id, reported_at`, [hotelId]);
   const alerts = await many(pool, `SELECT door_id, count(*)::int AS n FROM battery_alerts WHERE hotel_id=$1 AND opened_at > now() - interval '90 days' GROUP BY 1`, [hotelId]);
   const alerts90 = new Map(alerts.map((a) => [a.door_id as string, a.n as number]));
   const inScope = (id: string) => !floorDoors || floorDoors.includes(id);
@@ -242,15 +242,17 @@ export async function batteryInsights(hotelId: string, floorDoors: string[] | nu
   for (const r of readings) if (inScope(r.door_id)) byDoor.set(r.door_id, [...(byDoor.get(r.door_id) ?? []), r]);
   const lives: number[] = [];
   const doors = [...byDoor.entries()].map(([id, rs]) => {
-    const cycles: { start: Date | null; firstLow: Date | null }[] = [];
-    let cur: { start: Date | null; firstLow: Date | null } = { start: null, firstLow: null };
+    const cycles: { start: Date | null; firstLow: Date | null; inferred?: boolean }[] = [];
+    let cur: { start: Date | null; firstLow: Date | null; inferred?: boolean } = { start: null, firstLow: null };
     let volts: { t: number; v: number }[] = [];
     let lastSlope: number | null = null;
     for (const r of rs) {
       const t = new Date(r.reported_at);
-      if (exchangedCodes.has(r.event_code) && r.state === 'GOOD') {
+      // 2.15 A battery change is the lock's "exchanged" event or an abrupt voltage rise (change_inferred).
+      if ((exchangedCodes.has(r.event_code) && r.state === 'GOOD') || r.change_inferred) {
         if (cur.start || cur.firstLow) cycles.push(cur);
-        cur = { start: t, firstLow: null }; volts = [];
+        cur = { start: t, firstLow: null, inferred: Boolean(r.change_inferred) }; volts = [];
+        if (r.change_inferred && r.volts_below != null) volts.push({ t: t.getTime(), v: Number(r.volts_below) });
         continue;
       }
       if ((r.state === 'LOW' || r.state === 'CRITICAL') && !cur.firstLow) cur.firstLow = t;
@@ -266,7 +268,7 @@ export async function batteryInsights(hotelId: string, floorDoors: string[] | nu
     const last = cycles[cycles.length - 1]!;
     return {
       doorId: id, name: doorNames.get(id)?.name ?? id, group: doorNames.get(id)?.group ?? null,
-      state: (statusBy.get(id)?.state as string) ?? 'NEVER', lastExchange: last.start, lowSince: last.firstLow,
+      state: (statusBy.get(id)?.state as string) ?? 'NEVER', lastExchange: last.start, lastExchangeInferred: last.start ? Boolean(last.inferred) : null, lowSince: last.firstLow,
       lifeDays: done.length ? done[done.length - 1]! : null, avgLifeDays: done.length ? Math.round(done.reduce((x, y) => x + y, 0) / done.length) : null, cycles: done.length,
       alarms90: alerts90.get(id) ?? 0, reports: rs.length, voltsPer30d: lastSlope,
       daysSinceExchange: last.start ? Math.round((Date.now() - last.start.getTime()) / DAY) : null,

@@ -115,7 +115,7 @@ async function readBackup(file: string, on: { table?: (t: string) => Promise<voi
     if (v[0] === 'H') {
       if (header) throw new Error('Two headers.');
       header = v[1];
-      if (header!.format !== FORMAT) throw new Error('This file is not a Staff Mobile Key database copy.');
+      if (header!.format !== FORMAT) throw new Error('This file is not a Access Monitoring Tool database copy.');
       if (header!.formatVersion !== 1) throw new Error(`Copy format ${header!.formatVersion} is not supported by this version.`);
     } else if (v[0] === 'T') {
       if (!header) throw new Error('Table before the header.');

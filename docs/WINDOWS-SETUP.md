@@ -137,6 +137,28 @@ The first run builds the image (5–10 minutes). When it prints **Ready.** the p
 The K Hotel branding (black and rose gold, your logo) is set in **Mobile app settings**. A logo
 uploaded there replaces it in the portal and the app immediately.
 
+### New in 2.16 — connector on another computer, hotel or institution, invitations
+
+| Feature | Where | What to check |
+|---|---|---|
+| Connector on another computer | **Settings → Connector** | Choose *On another computer*, fill in the addresses, follow the commands it writes; the connector list shows *Reporting from <address>*. |
+| Hotel or institution | Setup page; **Settings → Name & details → Type** | As an institution: no Breakfast, Unpaid guests, Departures or Accounts report; "rooms" instead of "guest rooms". |
+| Invitations | **Users → Invite someone** | Open the link in a private window, choose a password, you are signed in. *New link*, *Password link*, *Remove*. |
+| Getting started | **Overview** (administrators) | The checklist ticks itself as steps are done. |
+
+Upgrade: run the new `.msi`; a connector on another computer keeps its access. Connector 0.13.1 (install it on the
+connector computer). Database migration 020 runs by itself.
+
+### New in 2.15 — keycards per room, battery changes, "program the lock"
+
+| Feature | Where | What to check |
+|---|---|---|
+| Keycards per room | **Keycards per room** (menu, under Event log) | Open a guest room with a keycard, then see the card, its holder and *Issued by*; *Print PDF*. |
+| Batteries last changed | **Battery status → a door** | Change the batteries of a lock: *Batteries changed* shows the date, from the lock event or the voltage rise. |
+| Still alarming after new batteries | **Battery status**, panel at the top | A lock that alarms again after new batteries gets a request "Program lock and upload firmware". |
+
+Upgrade: run the new `.msi` (the connector is unchanged, 0.12.0). The database is updated by itself (migration 019).
+
 ### New in 2.14 — staff keycard requests, emergency open, unpaid guests, departures, Accounts report
 
 | Feature | Where | What to check |

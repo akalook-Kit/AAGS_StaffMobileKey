@@ -41,7 +41,7 @@ installer with the C# compiler that is part of Windows: no third-party wrapper.
 | `runtime\node\node.exe` | Node.js 22.23.2, the official Windows build (signed by the OpenJS Foundation) |
 | `runtime\pgsql\` | PostgreSQL 16.14 server: `postgres.exe`, `initdb.exe`, `pg_ctl.exe` and their DLLs (EDB Windows binaries, via the embedded-postgres project), plus the Microsoft Visual C++ runtime DLLs they need (signed by Microsoft), placed next to them instead of installed system-wide |
 | `runtime\VERSIONS.txt` | Versions, sources and the **SHA-256 of every program file**, for the hotel's antivirus or application allow-list |
-| `app\`, `portal\`, `migrations\`, `connector\` | Staff Mobile Key itself |
+| `app\`, `portal\`, `migrations\`, `connector\` | Access Monitoring Tool itself |
 
 Every bundled file is pinned and checked when the package is built (`scripts/windows-runtime.mjs`). Nothing is
 downloaded on the server, and nothing is installed outside `C:\Program Files\StaffMobileKey` and
@@ -84,7 +84,7 @@ What the installer does: copies the runtime and the program, creates the databas
 with Windows DPAPI), registers the four services, makes a certificate (server name, `localhost` and the server's
 IPv4 addresses), writes the gateway settings, opens the firewall for the hotel network, reads the Visionline
 certificate from `https://localhost/api/v1` (see *Certificates*), installs the connector with its token, puts a
-"Staff Mobile Key" shortcut on the desktop, and writes a log to `logs\install-<version>-<time>.log`.
+"Access Monitoring Tool" shortcut on the desktop, and writes a log to `logs\install-<version>-<time>.log`.
 
 `Install.cmd` options (all optional; add them after the name in a command prompt):
 
@@ -145,7 +145,7 @@ Nothing extra is installed and no PMS port is used. See [BREAKFAST.md](BREAKFAST
 ## The public IP is a setting, not part of the program
 
 The allowed public addresses live in `C:\ProgramData\StaffMobileKey\Platform\gateway.config.json` and in the
-Windows Firewall rule *Staff Mobile Key - external*. Change them at any time, without reinstalling:
+Windows Firewall rule *Access Monitoring Tool - external*. Change them at any time, without reinstalling:
 
 ```powershell
 cd "C:\Program Files\StaffMobileKey\Platform"

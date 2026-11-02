@@ -1,4 +1,4 @@
-# Render Blueprint: the Staff Mobile Key platform (API + admin portal in one web service) and its database.
+# Render Blueprint: the Access Monitoring Tool platform (API + admin portal in one web service) and its database.
 # The hotel connector is NOT hosted here: it runs on the Visionline PC and connects out to this service.
 # Guide: docs/DEPLOY-RENDER.md
 #

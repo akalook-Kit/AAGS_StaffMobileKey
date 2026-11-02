@@ -1,7 +1,7 @@
 <#
-  Staff Mobile Key - database tools for the on-premises server. Run as administrator (or right-click ->
+  Access Monitoring Tool - database tools for the on-premises server. Run as administrator (or right-click ->
   Run with PowerShell from an administrator session). Nothing else needs to be installed: they use the
-  Node.js that came with Staff Mobile Key.
+  Node.js that came with Access Monitoring Tool.
 
     .\database-tools.ps1 -Action Size                       size of the database and its largest tables, free disk space
     .\database-tools.ps1 -Action Copy -Destination E:\      a full copy (USB disk, network share ...), checked after writing
@@ -26,9 +26,9 @@ function Fail([string]$t) { Write-Host $t -ForegroundColor Red; exit 1 }
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Fail 'Open PowerShell with "Run as administrator".' }
 $node = Join-Path $RuntimeDir 'node\node.exe'
-if (-not (Test-Path $node)) { $c = Get-Command node -ErrorAction SilentlyContinue; if ($c) { $node = $c.Source } else { Fail "Node.js not found ($node). Is Staff Mobile Key installed?" } }
+if (-not (Test-Path $node)) { $c = Get-Command node -ErrorAction SilentlyContinue; if ($c) { $node = $c.Source } else { Fail "Node.js not found ($node). Is Access Monitoring Tool installed?" } }
 $admin = Join-Path $InstallDir 'app\admin.mjs'
-if (-not (Test-Path $admin)) { Fail "Staff Mobile Key is not installed in $InstallDir." }
+if (-not (Test-Path $admin)) { Fail "Access Monitoring Tool is not installed in $InstallDir." }
 
 # The platform's settings (database address, keys) from the encrypted file: never shown, handed to the tool
 # in its environment only, for the time it runs.

@@ -23,6 +23,9 @@ import { visionlineDataRoutes } from './routes/visionline-data.ts';
 import { licenceRoutes } from './routes/licence.ts';
 import { accessRoutes, highlightRoutes } from './routes/access.ts';
 import { keycardRoutes } from './routes/keycards.ts';
+import { inviteRoutes } from './routes/invites.ts';
+import { noticeRoutes } from './routes/notices.ts';
+import { vlImportRoutes } from './routes/vl-imports.ts';
 import { safetyRoutes } from './routes/safety.ts';
 import { reportBuilderRoutes } from './routes/report-builder.ts';
 import { breakfastRoutes } from './routes/breakfast.ts';
@@ -88,6 +91,9 @@ export async function buildServer() {
   reportBuilderRoutes(app);
   safetyRoutes(app);
   keycardRoutes(app);
+  inviteRoutes(app);
+  noticeRoutes(app);
+  vlImportRoutes(app);
 
   const dist = resolve(config.portalDist);
   if (existsSync(dist)) {

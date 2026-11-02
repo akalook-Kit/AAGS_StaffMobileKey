@@ -15,6 +15,8 @@ import { audit } from '../audit.ts';
 import { permsIn, requireOperator, requirePerm } from '../auth.ts';
 import { ApiError, badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { getConfig, saveConfig } from '../hotel-config.ts';
+import { importedForSetupReport } from './vl-imports.ts';
+import { sharedVisionlineOperator, ROLE_LABELS } from '@smk/shared';
 import { enqueue, newCorrelationId } from '../commands.ts';
 import { channels } from '../monitoring/monitor.ts';
 import { sendEmail } from '../monitoring/channels.ts';
@@ -23,7 +25,7 @@ import { buildAccountsReport, requestGuestCardRead, sendAccountsReport } from '.
 const P = '/api/v1';
 const hid = (req: FastifyRequest) => {
   const id = (req.params as any).hotelId as string;
-  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Hotel');
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Site');
   return id;
 };
 const uuid = z.string().uuid();
@@ -109,6 +111,13 @@ const holderId = (r: any) => r.vl_user_id ?? `kr-${r.number.toLowerCase()}`;
 
 /** Results of encoder / cancel commands sent for a request (called when the connector reports back). */
 export async function onKeycardCommandResult(c: pg.PoolClient, cmd: any, result: { status: string; result?: any; error?: any }) {
+  // 2.17 Who encoded each keycard from the portal (the Visionline Web API does not say who encoded a card).
+  if (cmd.type === 'ENCODE_KEYCARD' && result.status === 'SUCCEEDED' && result.result?.regNo) {
+    await c.query(`INSERT INTO portal_encoded_cards (hotel_id, reg_no, kind, operator_id, operator_name, command_id)
+        VALUES ($1,$2,$3,$4,(SELECT display_name FROM operators WHERE id=$4),$5)
+      ON CONFLICT (hotel_id, reg_no) DO UPDATE SET kind=EXCLUDED.kind, operator_id=EXCLUDED.operator_id, operator_name=EXCLUDED.operator_name, encoded_at=now(), command_id=EXCLUDED.command_id`,
+      [cmd.hotel_id, String(result.result.regNo), cmd.payload?.kind ?? 'staff', cmd.requested_by ?? null, cmd.id]);
+  }
   const ctx = cmd.payload?.context as { requestId?: string; step?: string; lockoutId?: string } | undefined;
   if ((ctx as any)?.departureDay) {
     const ok = result.status === 'SUCCEEDED';
@@ -265,7 +274,9 @@ export function keycardRoutes(app: FastifyInstance) {
     const op = await requirePerm(req, hotelId, 'keycards.manage');
     const r = await load(hotelId, (req.params as any).id);
     const b = z.object({
-      method: z.enum(['encoder', 'visionline_desk']), encoder: z.string().regex(/^[\w .-]{1,40}$/).optional(),
+      method: z.enum(['encoder', 'visionline_desk', 'existing']), encoder: z.string().regex(/^[\w .-]{1,40}$/).optional(),
+      /** 2.17 The person already exists in Visionline (their user id), so no duplicate is created. */
+      vlUserId: z.string().trim().min(1).max(80).optional().nullable(),
       cardLabel: Label.optional().nullable(), userGroup: z.string().min(1).max(60), doorIds: z.array(z.string().max(100)).max(2000).default([]),
       validUntil: z.string().datetime().optional().nullable(), regNo: z.string().regex(/^\d{1,12}$/).optional().nullable(), replaceExisting: z.boolean().default(false),
     }).parse(req.body);
@@ -277,6 +288,23 @@ export function keycardRoutes(app: FastifyInstance) {
     if (label) {
       const used = await one(pool, `SELECT holder_name FROM keycard_register WHERE hotel_id=$1 AND label=$2 AND status='in_use' AND request_id IS DISTINCT FROM $3`, [hotelId, label, r.id]);
       if (used) throw conflict('LABEL_IN_USE', `Card ${label} is already held by ${used.holder_name}. Record its return first, or use another number.`);
+    }
+    // 2.17 An existing Visionline keycard: the request is linked to it, nothing is encoded.
+    if (b.method === 'existing') {
+      if (!b.regNo) throw badRequest('CARD_REQUIRED', 'Choose the existing keycard.');
+      const k = await one(pool, `SELECT k.reg_no, k.card_holder, COALESCE(u.user_group, k.user_group) AS user_group, k.expires_at FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder
+        WHERE k.hotel_id=$1 AND k.reg_no=$2`, [hotelId, b.regNo]);
+      if (!k) throw badRequest('UNKNOWN_CARD', 'This keycard is not in the list read from Visionline.');
+      await pool.query(`UPDATE keycard_requests SET status='ISSUED', card_label=$2, user_group=$3, valid_until=COALESCE($4, valid_until), handled_by=$5, issue_method='visionline_desk', card_reg_no=$6,
+          vl_user_id=COALESCE($7, vl_user_id), issued_count=issued_count+1, updated_at=now(), history = history || $8::jsonb WHERE id=$1`,
+        [r.id, label, k.user_group ?? b.userGroup, k.expires_at, op.id, k.reg_no, k.card_holder, hist(op.displayName, `Linked to the existing Visionline keycard ${k.reg_no}${k.user_group ? ` (${k.user_group})` : ''}`)]);
+      if (label) await upsertRegister(pool, hotelId, label, { department: r.department, staffType: r.staff_type, holder: `${r.given_name} ${r.surname}`, vlUserId: k.card_holder, regNo: k.reg_no, status: 'in_use', requestId: r.id });
+      await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'keycard.issued', targetType: 'keycard_request', targetId: r.id, details: { number: r.number, method: 'existing', label, regNo: k.reg_no } });
+      return { status: 'ISSUED' };
+    }
+    if (b.vlUserId) {
+      if (!(await one(pool, `SELECT 1 FROM vl_users WHERE hotel_id=$1 AND user_id=$2`, [hotelId, b.vlUserId]))) throw badRequest('UNKNOWN_PERSON', 'This person is not in the list read from Visionline.');
+      await pool.query(`UPDATE keycard_requests SET vl_user_id=$2 WHERE id=$1`, [r.id, b.vlUserId]); r.vl_user_id = b.vlUserId;
     }
     await pool.query(`UPDATE keycard_requests SET card_label=$2, user_group=$3, valid_until=$4, handled_by=$5, issue_method=$6, updated_at=now() WHERE id=$1`, [r.id, label, b.userGroup, until, op.id, b.method]);
     if (b.method === 'visionline_desk') {
@@ -296,7 +324,7 @@ export function keycardRoutes(app: FastifyInstance) {
     const payload = { kind: 'staff', encoder: b.encoder, cardHolder: holder, user: { givenName: r.given_name, surname: r.surname, userGroup: b.userGroup },
       doorIds: ug.data?.uniformAccess ? [] : doors, onOffDoorIds: [], expireTime: until, override: b.replaceExisting || r.kind === 'replacement', overwriteValidCard: false,
       context: { requestId: r.id, step: 'issue' } };
-    const cmd = await enqueue(pool, { hotelId, type: 'ENCODE_KEYCARD', payload, idempotencyKey: `kr-issue:${r.id}:${Date.now()}`, correlationId: newCorrelationId(), ttlSec: 180 });
+    const cmd = await enqueue(pool, { hotelId, type: 'ENCODE_KEYCARD', payload, idempotencyKey: `kr-issue:${r.id}:${Date.now()}`, correlationId: newCorrelationId(), ttlSec: 180, requestedBy: op.id });
     await pool.query(`UPDATE keycard_requests SET command_id=$2, history = history || $3::jsonb WHERE id=$1`, [r.id, cmd.id, hist(op.displayName, `Sent to encoder ${b.encoder}: place a blank card on it`)]);
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'keycard.encode_requested', targetType: 'keycard_request', targetId: r.id, details: { number: r.number, encoder: b.encoder, label, userGroup: b.userGroup, until } });
     return { commandId: cmd.id };
@@ -323,7 +351,7 @@ export function keycardRoutes(app: FastifyInstance) {
     if (b.method === 'expire_now') {
       if (!b.encoder) throw badRequest('UNKNOWN_ENCODER', 'Choose the encoder where the returned card lies.');
       cmd = await enqueue(pool, { hotelId, type: 'ENCODE_KEYCARD', payload: { kind: 'expireNow', encoder: b.encoder, cardHolder: holderId(r), doorIds: [(await one(pool, `SELECT external_id FROM resources WHERE hotel_id=$1 AND kind='door' AND active ORDER BY name LIMIT 1`, [hotelId]))?.external_id ?? '1'],
-        onOffDoorIds: [], override: true, overwriteValidCard: true, context: { requestId: r.id, step: 'collect' } }, idempotencyKey: `kr-collect:${r.id}:${Date.now()}`, correlationId: newCorrelationId(), ttlSec: 180 });
+        onOffDoorIds: [], override: true, overwriteValidCard: true, context: { requestId: r.id, step: 'collect' } }, idempotencyKey: `kr-collect:${r.id}:${Date.now()}`, correlationId: newCorrelationId(), ttlSec: 180, requestedBy: op.id });
     } else {
       if (!regNo) throw badRequest('REG_NO_REQUIRED', 'Enter the Visionline card number to cancel (Card lookup shows it).');
       cmd = await enqueue(pool, { hotelId, type: 'CANCEL_KEYCARD', payload: { regNo, context: { requestId: r.id, step: 'collect' } }, idempotencyKey: `kr-cancel:${r.id}:${regNo}`, correlationId: newCorrelationId(), ttlSec: 180 });
@@ -350,6 +378,25 @@ export function keycardRoutes(app: FastifyInstance) {
   });
 
   // ---- Register, reminders, holders with several cards, encoders -------------------------------------------------
+  /** 2.17 Existing Visionline people and keycards, to issue from (no duplicate person, or link an existing card). */
+  app.get(`${base}/visionline-search`, async (req) => {
+    const hotelId = hid(req);
+    await requirePerm(req, hotelId, 'keycards.manage');
+    const q = z.string().trim().max(60).default('').parse((req.query as any).q ?? '');
+    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const people = await many(pool, `SELECT u.user_id, NULLIF(trim(coalesce(u.given_name,'') || ' ' || coalesce(u.surname,'')), '') AS name, u.user_group,
+        (SELECT count(*)::int FROM vl_cards k WHERE k.hotel_id=u.hotel_id AND k.card_holder=u.user_id AND k.active AND NOT (k.cancelled OR k.discarded OR k.overridden OR k.expired) AND (k.expires_at IS NULL OR k.expires_at > now())) AS cards
+      FROM vl_users u WHERE u.hotel_id=$1 AND u.active AND ($2 = '' OR u.user_id ILIKE $3 OR u.given_name ILIKE $3 OR u.surname ILIKE $3 OR (coalesce(u.given_name,'') || ' ' || coalesce(u.surname,'')) ILIKE $3)
+      ORDER BY u.surname NULLS LAST, u.given_name LIMIT 20`, [hotelId, q, like]);
+    const cards = await many(pool, `SELECT k.reg_no, k.card_holder, NULLIF(trim(coalesce(u.given_name,'') || ' ' || coalesce(u.surname,'')), '') AS name, COALESCE(u.user_group, k.user_group) AS user_group,
+        k.expires_at, (k.key_id IS NOT NULL OR k.mobile IS TRUE) AS mobile
+      FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder
+      WHERE k.hotel_id=$1 AND k.active AND NOT (k.cancelled OR k.discarded OR k.overridden OR k.expired) AND (k.expires_at IS NULL OR k.expires_at > now())
+        AND ($2 = '' OR k.reg_no ILIKE $3 OR k.card_holder ILIKE $3 OR u.given_name ILIKE $3 OR u.surname ILIKE $3 OR (coalesce(u.given_name,'') || ' ' || coalesce(u.surname,'')) ILIKE $3)
+      ORDER BY k.first_seen_at DESC LIMIT 20`, [hotelId, q, like]);
+    return { people, cards };
+  });
+
   app.get(`${base}/register`, async (req) => {
     const hotelId = hid(req);
     await requirePerm(req, hotelId, 'keycards.read');
@@ -417,7 +464,7 @@ export function keycardRoutes(app: FastifyInstance) {
     const cardHolder = `special-${b.kind.toLowerCase()}`;
     const cmd = await enqueue(pool, { hotelId, type: 'ENCODE_KEYCARD', payload: { kind: b.kind, encoder: b.encoder, cardHolder, user: { givenName: b.holder, surname: `(${b.kind})`, userGroup: (await one(pool, `SELECT external_id FROM resources WHERE hotel_id=$1 AND kind='usergroup' AND active ORDER BY external_id LIMIT 1`, [hotelId]))?.external_id ?? 'Staff' },
       doorIds: b.doorIds, onOffDoorIds: [], expireTime: b.expireTime ?? new Date(Date.now() + 86_400_000).toISOString(), override: false, overwriteValidCard: true },
-      idempotencyKey: `special:${b.kind}:${Date.now()}`, correlationId: newCorrelationId(), ttlSec: 180 });
+      idempotencyKey: `special:${b.kind}:${Date.now()}`, correlationId: newCorrelationId(), ttlSec: 180, requestedBy: op.id });
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'keycard.special_card_requested', details: { kind: b.kind, encoder: b.encoder, holder: b.holder, doors: b.doorIds.length } });
     return { commandId: cmd.id };
   });
@@ -473,6 +520,22 @@ export function keycardRoutes(app: FastifyInstance) {
     for (const d of doors) { const g = d.data?.doorGroup ?? '(no group)'; groups.set(g, [...(groups.get(g) ?? []), d.name]); }
     const vlUsers = await one(pool, `SELECT count(*)::int AS n FROM vl_users WHERE hotel_id=$1 AND active`, [hotelId]);
     const vlCards = await one(pool, `SELECT count(*)::int AS n FROM vl_cards WHERE hotel_id=$1 AND active AND NOT cancelled`, [hotelId]);
+    // Valid keycards that may override the deadbolt / privacy, per user group (from the cards themselves).
+    const overrideCounts = new Map((await many(pool, `SELECT user_group, count(*)::int AS n FROM vl_cards WHERE hotel_id=$1 AND active AND NOT cancelled AND deadbolt_override GROUP BY 1`, [hotelId])).map((r) => [r.user_group, r.n]));
+    // 2.17 Who has access to what: per user group (doors, door groups, people, keycards) and per person.
+    const VALIDK = `k.active AND NOT (k.cancelled OR k.discarded OR k.overridden OR k.expired) AND (k.expires_at IS NULL OR k.expires_at > now())`;
+    const perGroup = await many(pool, `SELECT COALESCE(u.user_group, k.user_group) AS g, count(DISTINCT k.card_holder)::int AS people, count(*)::int AS cards,
+        count(*) FILTER (WHERE k.deadbolt_override)::int AS override, count(*) FILTER (WHERE k.key_id IS NOT NULL OR k.mobile IS TRUE)::int AS mobile
+      FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder WHERE k.hotel_id=$1 AND ${VALIDK} GROUP BY 1`, [hotelId]);
+    const people = await many(pool, `SELECT k.card_holder, NULLIF(trim(coalesce(u.given_name,'') || ' ' || coalesce(u.surname,'')), '') AS name, COALESCE(u.user_group, k.user_group) AS g,
+        count(*)::int AS cards, max(k.expires_at) AS until, bool_or(k.deadbolt_override) AS override, bool_or(k.key_id IS NOT NULL OR k.mobile IS TRUE) AS mobile,
+        (SELECT array_agg(DISTINCT x) FROM vl_cards k2, unnest(k2.doors) x WHERE k2.hotel_id=$1 AND k2.card_holder=k.card_holder AND ${VALIDK.replace(/k\./g, 'k2.')}) AS doors,
+        (SELECT array_agg(DISTINCT x) FROM vl_cards k2, unnest(k2.door_groups) x WHERE k2.hotel_id=$1 AND k2.card_holder=k.card_holder AND ${VALIDK.replace(/k\./g, 'k2.')}) AS door_groups,
+        (SELECT o.display_name FROM operator_vl_links l JOIN operators o ON o.id=l.operator_id WHERE l.hotel_id=$1 AND l.vl_user_id=k.card_holder LIMIT 1) AS portal_user
+      FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder WHERE k.hotel_id=$1 AND ${VALIDK} AND k.card_holder IS NOT NULL
+      GROUP BY k.card_holder, u.given_name, u.surname, u.user_group, k.user_group ORDER BY 3 NULLS LAST, 2 NULLS LAST LIMIT 2000`, [hotelId]);
+    const imported = await importedForSetupReport(hotelId);
+    const vlOperator = conn?.health?.propertyUsername ?? null;
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'report.setup_viewed' });
     return {
       printedAt: new Date().toISOString(), printedBy: op.displayName,
@@ -482,6 +545,9 @@ export function keycardRoutes(app: FastifyInstance) {
         connector: conn ? { name: conn.name, lastSeen: conn.last_seen_at, version: conn.health?.connectorVersion ?? null, visionlineApi: conn.health?.visionlineApiVersion ?? null } : null,
         licence: lic?.payload ? { id: lic.payload.id, expires: lic.payload.expires ?? null, modules: lic.payload.modules } : null },
       userGroups: res.filter((r) => r.kind === 'usergroup').map((g) => ({ name: g.name, uniformAccess: Boolean(g.data?.uniformAccess), timeSchedule: g.data?.timeSchedule ?? null,
+        // 2.16.1 Override rights [Web API §5.29.2]; null = not read yet (connector older than 0.13.1) or not reported.
+        overrideDeadbolt: g.data?.ignoreDeadbolt ?? null, overridePrivacy: g.data?.ignorePrivacy ?? null,
+        cardsWithOverride: overrideCounts.get(g.name) ?? 0,
         doors: (g.data?.doorOperations ?? []).flatMap((o: any) => [...(o.doors ?? []), ...(o.doorGroups ?? []).map((x: string) => `[${x}]`)]) })),
       doorGroups: [...groups.entries()].map(([g, ds]) => ({ name: g, doors: ds })),
       locks: doors.map((d) => ({ name: d.name, group: d.data?.doorGroup ?? null, category: d.data?.doorCategory ?? null, online: d.data?.online ?? null })),
@@ -489,7 +555,16 @@ export function keycardRoutes(app: FastifyInstance) {
       keycardTypes: [['Staff keycard', 'Encoded at an encoder or the Visionline desk; one per person (override cancels older cards)'], ['Daily staff keycard', `Valid ${pol?.keycards?.dailyHours ?? 14} hours`],
         ['Emergency card', 'All doors, also with the deadbolt on; always valid until cancelled'], ['Stand-open card', 'Keeps chosen doors open'], ['Clearance card', 'Clears guest access from a lock'],
         ['One-time card', 'Opens chosen doors once'], ['Blocking card (unpaid guest)', 'Guest card for one room, override, expires after a minute'], ['Staff mobile key', 'On the staff app; issued through Visionline']],
-      access: ops.map((o) => ({ name: o.display_name, email: o.email, roles: o.roles, mfa: o.mfa_enabled, lastSignIn: o.last_sign_in_at })),
+      access: ops.map((o) => ({ name: o.display_name, email: o.email, roles: (o.roles as string[]).map((r) => (ROLE_LABELS as Record<string, string>)[r] ?? r), mfa: o.mfa_enabled, lastSignIn: o.last_sign_in_at })),
+      accessByGroup: res.filter((r) => r.kind === 'usergroup').map((g) => {
+        const ops2 = (g.data?.doorOperations ?? []) as any[];
+        const st = perGroup.find((x) => x.g === g.name);
+        return { name: g.name, uniformAccess: Boolean(g.data?.uniformAccess), doors: [...new Set(ops2.flatMap((o) => o.doors ?? []))], doorGroups: [...new Set(ops2.flatMap((o) => o.doorGroups ?? []))],
+          overrideDeadbolt: g.data?.ignoreDeadbolt ?? null, people: st?.people ?? 0, cards: st?.cards ?? 0, cardsWithOverride: st?.override ?? 0, mobileKeys: st?.mobile ?? 0, timeSchedule: g.data?.timeSchedule ?? null };
+      }),
+      accessByPerson: people.map((p) => ({ id: p.card_holder, name: p.name, group: p.g, cards: p.cards, until: p.until, override: Boolean(p.override), mobile: Boolean(p.mobile),
+        doors: (p.doors ?? []).slice(0, 400), doorGroups: p.door_groups ?? [], portalUser: p.portal_user ?? null })),
+      visionline: { operatorUsed: vlOperator, operatorShared: sharedVisionlineOperator(vlOperator), ...imported },
       parameters: [
         ['Key policy', `Longest key ${pol?.maxValidityHours ?? '-'} h; broad access from ${pol?.broadDoorThreshold ?? '-'} doors needs approval: ${pol?.requireApprovalForBroad === false ? 'no' : 'yes'}; wrong-door limit ${pol?.wrongDoorLimit ?? '-'}`],
         ['Keycard requests', `Encoding from the portal: ${pol?.keycards?.encodeEnabled ? 'on' : 'off'}; encoders: ${(pol?.keycards?.encoders ?? []).join(', ') || '-'}; HR e-mail: ${pol?.keycards?.hrEmail ? 'set' : 'not set'}`],
@@ -506,7 +581,7 @@ export function keycardRoutes(app: FastifyInstance) {
   app.get(`${P}/hotels/:hotelId/today`, async (req) => {
     const hotelId = hid(req);
     const op = await requireOperator(req);
-    if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this hotel.');
+    if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this site.');
     const pm = permsIn(op, hotelId);
     const items: { id: string; tone: 'bad' | 'warn' | 'info'; title: string; detail: string; to: string; n: number }[] = [];
     const em = pm.has('muster.read') ? await one(pool, `SELECT kind, status FROM emergencies WHERE hotel_id=$1 AND status IN ('REQUESTED','ACTIVE') LIMIT 1`, [hotelId]) : null;
@@ -600,7 +675,7 @@ export function keycardRoutes(app: FastifyInstance) {
       const pol = await kcPolicy(hotelId);
       if (!pol.encodeEnabled || !b.encoder) throw badRequest('ENCODER_REQUIRED', `Room ${l.room} has an offline lock: choose the encoder to make the 1-minute blocking card (Settings -> Keycards must allow encoding).`);
       cmd = await enqueue(pool, { hotelId, type: 'ENCODE_KEYCARD', payload: { kind: 'guestBlock', encoder: b.encoder, cardHolder: `blocked-${l.room}`, doorIds: [l.room], onOffDoorIds: [], override: true, overwriteValidCard: true, context: { lockoutId: id } },
-        idempotencyKey: `lockout:${id}`, correlationId: newCorrelationId(), ttlSec: 180 });
+        idempotencyKey: `lockout:${id}`, correlationId: newCorrelationId(), ttlSec: 180, requestedBy: op.id });
     }
     await pool.query(`UPDATE guest_lockouts SET status='APPROVED', approved_by=$3, method=$4, command_id=$5, door_online=$6, note=$7, updated_at=now(), history = history || $8::jsonb WHERE id=$1 AND hotel_id=$2`,
       [id, hotelId, op.id, online ? 'checkout_online' : 'card_offline', cmd.id, online, b.note ?? null, hist(op.displayName, online ? 'Approved: checkout command sent to the online lock' : `Approved: blocking card sent to encoder ${b.encoder}`)]);

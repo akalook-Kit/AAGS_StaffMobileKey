@@ -94,7 +94,7 @@ export function messageFor(hotel: string, a: any, phase: 'opened' | 'resolved' |
   const when = new Date(phase === 'resolved' ? a.resolved_at ?? Date.now() : a.opened_at ?? Date.now()).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
   const text = [head, phase === 'resolved' ? 'The problem is over.' : a.detail ?? '', `${hotel} - ${when}`].filter(Boolean).join('\n');
   const sms = `${hotel}: ${head}${a.detail && phase !== 'resolved' ? ` - ${a.detail}` : ''}`;
-  return { subject, text: `${text}\n\nStaff Mobile Key monitoring. Open the portal: Monitoring.`, sms };
+  return { subject, text: `${text}\n\nAccess Monitoring Tool monitoring. Open the portal: Monitoring.`, sms };
 }
 
 async function announce(hotelId: string, alert: any, phase: 'opened' | 'resolved' | 'event' | 'test', onlyContact?: string) {
@@ -121,7 +121,7 @@ async function announce(hotelId: string, alert: any, phase: 'opened' | 'resolved
 
 /** "Send a test" from Settings: to one contact, or to everyone in the system category. */
 export async function sendTest(hotelId: string, contactId: string | null) {
-  const fake = { id: null, kind: 'test', severity: 'info', title: 'Test message', detail: 'Alerts from Staff Mobile Key reach you this way.', opened_at: new Date().toISOString() };
+  const fake = { id: null, kind: 'test', severity: 'info', title: 'Test message', detail: 'Alerts from Access Monitoring Tool reach you this way.', opened_at: new Date().toISOString() };
   if (contactId) return announce(hotelId, fake, 'test', contactId);
   return announce(hotelId, fake, 'test');
 }

@@ -60,7 +60,7 @@ export function connectorRoutes(app: FastifyInstance) {
   app.post('/connector/v1/heartbeat', async (req) => {
     const c = await connectorAuth(req);
     const health = ConnectorHealth.parse(req.body);
-    await pool.query('UPDATE connectors SET last_seen_at=now(), health=$2 WHERE id=$1', [c.id, health]);
+    await pool.query('UPDATE connectors SET last_seen_at=now(), health=$2, last_address=$3 WHERE id=$1', [c.id, health, req.ip ?? null]);
     return { serverTime: new Date().toISOString(), watch: await watchSettings(c.hotel_id) };
   });
 

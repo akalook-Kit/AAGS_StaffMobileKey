@@ -26,7 +26,7 @@ export async function requestDirectorySync(hotelId: string, operatorId: string |
     ORDER BY last_seen_at DESC NULLS LAST LIMIT 1`, [hotelId, partial ? 'directory-sync-users' : 'directory-sync']);
   if (!conn) throw new ApiError(409, 'CONNECTOR_CAPABILITY', partial ? 'Recording cards as they are made needs connector 0.9.0 or newer.'
     : 'Reading people and keycards needs connector 0.6.0 or newer, installed for the hotel\'s own Visionline (not with -NoWatch).');
-  if (!isOnline(conn.last_seen_at)) throw new ApiError(409, 'CONNECTOR_OFFLINE', 'The hotel connector is offline.');
+  if (!isOnline(conn.last_seen_at)) throw new ApiError(409, 'CONNECTOR_OFFLINE', 'The connector is offline.');
   if (!conn.health?.credentialsConfigured) throw new ApiError(409, 'NOT_CONFIGURED', 'The connector has no Visionline account yet (Settings → Visionline).');
   const running = await one(pool, `SELECT id FROM directory_syncs WHERE hotel_id=$1 AND status='RUNNING' AND started_at > now() - make_interval(secs => $2)`, [hotelId, SYNC_TTL_SEC]);
   if (running) return { syncId: running.id as string, alreadyRunning: true };
@@ -67,15 +67,15 @@ export async function applyDirectoryChunk(hotelId: string, ch: DirectoryChunk) {
     }
     for (const k of ch.cards) {
       await c.query(`INSERT INTO vl_cards (hotel_id, reg_no, card_holder, format, starts_at, expires_at, cancelled, discarded, overridden, expired, not_issued, issued_count,
-          door_count, doors, door_groups, time_schedule, key_id, seen_sync, active, last_seen_at, operations, deadbolt_override)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,(SELECT id FROM key_requests WHERE hotel_id=$1 AND card_reg_no=$2 ORDER BY created_at DESC LIMIT 1),$17,true,now(),$18,$19)
+          door_count, doors, door_groups, time_schedule, key_id, seen_sync, active, last_seen_at, operations, deadbolt_override, mobile)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,(SELECT id FROM key_requests WHERE hotel_id=$1 AND card_reg_no=$2 ORDER BY created_at DESC LIMIT 1),$17,true,now(),$18,$19,$20)
         ON CONFLICT (hotel_id, reg_no) DO UPDATE SET card_holder=EXCLUDED.card_holder, format=EXCLUDED.format, starts_at=EXCLUDED.starts_at, expires_at=EXCLUDED.expires_at,
           cancelled=EXCLUDED.cancelled, discarded=EXCLUDED.discarded, overridden=EXCLUDED.overridden, expired=EXCLUDED.expired, not_issued=EXCLUDED.not_issued,
           issued_count=EXCLUDED.issued_count, door_count=EXCLUDED.door_count, doors=EXCLUDED.doors, door_groups=EXCLUDED.door_groups, time_schedule=EXCLUDED.time_schedule,
           key_id=COALESCE(EXCLUDED.key_id, vl_cards.key_id), seen_sync=EXCLUDED.seen_sync, active=true, last_seen_at=now(), source='sync',
-          operations=EXCLUDED.operations, deadbolt_override=EXCLUDED.deadbolt_override`,
+          operations=EXCLUDED.operations, deadbolt_override=EXCLUDED.deadbolt_override, mobile=COALESCE(EXCLUDED.mobile, vl_cards.mobile)`,
         [hotelId, k.regNo, k.cardHolder, k.format, toUtc(k.startTime, tz), toUtc(k.expireTime, tz), k.cancelled, k.discarded, k.overridden, k.expired, k.notIssued, k.issuedCount,
-          k.doors.length, k.doors, k.doorGroups, k.timeSchedule, ch.syncId, k.operations ?? [], k.deadboltOverride ?? null]);
+          k.doors.length, k.doors, k.doorGroups, k.timeSchedule, ch.syncId, k.operations ?? [], k.deadboltOverride ?? null, k.mobile ?? null]);
     }
     if (ch.alarms.length) {
       const resolve = await doorResolver(c, hotelId);

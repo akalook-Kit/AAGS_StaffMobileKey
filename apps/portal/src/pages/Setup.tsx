@@ -25,14 +25,14 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
   }, []);
   const [code, setCode] = useState(() => new URLSearchParams(location.hash.slice(1)).get('code') ?? '');
   const tz0 = info.serverTimeZone && zones.includes(info.serverTimeZone) ? info.serverTimeZone : 'Africa/Nairobi';
-  const [h, setH] = useState({ name: '', code: '', timeZone: tz0, country: TZ_COUNTRY[tz0] ?? '', systemId: '', systemNumber: '', supportEmail: '', supportPhone: '' });
+  const [h, setH] = useState({ kind: 'hotel' as 'hotel' | 'institution', name: '', code: '', timeZone: tz0, country: TZ_COUNTRY[tz0] ?? '', systemId: '', systemNumber: '', supportEmail: '', supportPhone: '' });
   const [codeTouched, setCodeTouched] = useState(false);
   const [a, setA] = useState({ name: '', email: '', password: '', again: '' });
   const [cs, setCs] = useState({ user: '', password: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [done, setDone] = useState<{ hotel: { name: string }; admin: { email: string } } | null>(null);
-  useEffect(() => { document.title = 'Set up Staff Mobile Key'; }, []);
+  useEffect(() => { document.title = 'Set up Access Monitoring Tool'; }, []);
   // The code is only needed in the address once; keep it out of the browser history afterwards.
   useEffect(() => { if (location.hash) history.replaceState(null, '', location.pathname); }, []);
 
@@ -47,7 +47,7 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
       const r = await api('/api/v1/setup', {
         body: {
           code,
-          hotel: info.hotel ? undefined : { name: h.name, code: hotelCode, timeZone: h.timeZone, country: h.country, systemId: h.systemId ? Number(h.systemId) : 0, systemNumber: h.systemNumber || undefined, supportEmail: h.supportEmail, supportPhone: h.supportPhone || undefined },
+          hotel: info.hotel ? undefined : { kind: h.kind, name: h.name, code: hotelCode, timeZone: h.timeZone, country: h.country, systemId: h.systemId ? Number(h.systemId) : 0, systemNumber: h.systemNumber || undefined, supportEmail: h.supportEmail, supportPhone: h.supportPhone || undefined },
           admin: { name: a.name, email: a.email, password: a.password },
           ...(cs.user || cs.password ? { credentialServices: cs } : {}),
         },
@@ -66,7 +66,7 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
         <ol className="setup-next">
           <li><strong>Connector health</strong>: the connector on this server shows Online.</li>
           <li><strong>Settings → Visionline</strong>: enter the Visionline account (it is encrypted for the connector), then run discovery.</li>
-          <li><strong>Branding</strong>: the hotel's logo and colours. <strong>Settings → Hotel details</strong>: address and report footer.</li>
+          <li><strong>Branding</strong>: your logo and colours. <strong>Settings → Name &amp; details</strong>: address and report footer.</li>
           <li><strong>Account</strong>: turn on two-step sign-in.</li>
         </ol>
         <button className="btn primary" onClick={() => { location.replace('/'); }}>Go to sign in</button>
@@ -77,9 +77,9 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
   return (
     <div className="setup">
       <form className="setup-card" onSubmit={submit}>
-        <p className="setup-kicker">Staff Mobile Key {info.version} · first-run setup</p>
+        <p className="setup-kicker">Access Monitoring Tool {info.version} · first-run setup</p>
         <h1>Set up this installation</h1>
-        <p className="muted">Enter the hotel's details and create the first administrator. Everything here can be changed later in the portal, except the hotel code.</p>
+        <p className="muted">Enter your organisation's details and create the first administrator. Everything here can be changed later in the portal, except the short code.</p>
         <ErrorNote error={error} />
 
         <h2 className="section-title">Setup code</h2>
@@ -90,10 +90,16 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
         </div>
 
         {info.hotel ? (
-          <><h2 className="section-title">Hotel</h2><p>{info.hotel.name} <span className="muted small">(already set up; change its details later in Settings → Hotel details)</span></p></>
+          <><h2 className="section-title">Organisation</h2><p>{info.hotel.name} <span className="muted small">(already set up; change its details later in Settings → Name &amp; details)</span></p></>
         ) : <>
-        <h2 className="section-title">Hotel</h2>
-        <div className="field"><label htmlFor="hn">Hotel name</label><input id="hn" value={h.name} onChange={(e) => setH({ ...h, name: e.target.value })} required minLength={2} maxLength={80} placeholder="Lakeview Resort Kigali" /><span className="hint">As shown in the portal, the staff app and on every report.</span></div>
+        <h2 className="section-title">Organisation</h2>
+        <div className="field"><label>Type</label>
+          <div className="seg" role="group" aria-label="Type">
+            <button type="button" aria-pressed={h.kind === 'hotel'} onClick={() => setH({ ...h, kind: 'hotel' })}>Hotel</button>
+            <button type="button" aria-pressed={h.kind === 'institution'} onClick={() => setH({ ...h, kind: 'institution' })}>Institution</button>
+          </div>
+          <span className="hint">{h.kind === 'hotel' ? 'Guest features (breakfast, unpaid guests, departures, Accounts report) are available.' : 'Offices, a hospital, a school… Guest features are left out. You can change this later.'}</span></div>
+        <div className="field"><label htmlFor="hn">Name</label><input id="hn" value={h.name} onChange={(e) => setH({ ...h, name: e.target.value })} required minLength={2} maxLength={80} placeholder="Lakeview Resort Kigali" /><span className="hint">As shown in the portal, the staff app and on every report.</span></div>
         <div className="field-row">
           <div className="field"><label htmlFor="tz">Time zone</label>
             <select id="tz" value={h.timeZone} onChange={(e) => setH({ ...h, timeZone: e.target.value, country: h.country || TZ_COUNTRY[e.target.value] || '' })} required>
@@ -112,12 +118,12 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
           <div className="field"><label htmlFor="sno">System number on reports</label><input id="sno" value={h.systemNumber} onChange={(e) => setH({ ...h, systemNumber: e.target.value })} maxLength={40} placeholder="Same as System ID" /></div>
         </div>
         <div className="field-row">
-          <div className="field"><label htmlFor="se">Support e-mail for staff</label><input id="se" type="email" value={h.supportEmail} onChange={(e) => setH({ ...h, supportEmail: e.target.value })} placeholder="frontdesk@yourhotel.com" /></div>
+          <div className="field"><label htmlFor="se">Support e-mail for staff</label><input id="se" type="email" value={h.supportEmail} onChange={(e) => setH({ ...h, supportEmail: e.target.value })} placeholder="support@example.com" /></div>
           <div className="field"><label htmlFor="sp">Support phone for staff</label><input id="sp" value={h.supportPhone} onChange={(e) => setH({ ...h, supportPhone: e.target.value })} placeholder="+254 700 000 000" /></div>
         </div>
         <details className="setup-more">
-          <summary>Hotel code: <code>{hotelCode || '…'}</code></summary>
-          <div className="field" style={{ marginTop: 10 }}><label htmlFor="hc">Hotel code</label><input id="hc" value={hotelCode} onChange={(e) => { setCodeTouched(true); setH({ ...h, code: e.target.value.toLowerCase() }); }} pattern="[a-z0-9][a-z0-9\-]{1,39}" /><span className="hint">Used in links and by the staff app. Lower-case letters, digits and dashes. Cannot be changed later.</span></div>
+          <summary>Short code: <code>{hotelCode || '…'}</code></summary>
+          <div className="field" style={{ marginTop: 10 }}><label htmlFor="hc">Short code</label><input id="hc" value={hotelCode} onChange={(e) => { setCodeTouched(true); setH({ ...h, code: e.target.value.toLowerCase() }); }} pattern="[a-z0-9][a-z0-9\-]{1,39}" /><span className="hint">Used in links and by the staff app. Lower-case letters, digits and dashes. Cannot be changed later.</span></div>
         </details>
         </>}
 
@@ -137,7 +143,7 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
           <p className="muted small">This server keeps this account in its own settings. Add it later with the server tools.</p>
         ) : (
           <>
-            <p className="muted small" style={{ marginTop: 0 }}>The account ASSA ABLOY gave the hotel for mobile keys. Stored encrypted on this server; it can never be read back in the portal. You can also add it later in Settings → Credential Services.</p>
+            <p className="muted small" style={{ marginTop: 0 }}>The account ASSA ABLOY gave you for mobile keys. Stored encrypted on this server; it can never be read back in the portal. You can also add it later in Settings → Credential Services.</p>
             <div className="field-row">
               <div className="field"><label htmlFor="cu">User</label><input id="cu" value={cs.user} onChange={(e) => setCs({ ...cs, user: e.target.value })} autoComplete="off" spellCheck={false} /></div>
               <div className="field"><label htmlFor="cp">Password</label><input id="cp" type="password" value={cs.password} onChange={(e) => setCs({ ...cs, password: e.target.value })} autoComplete="new-password" /></div>
@@ -146,7 +152,7 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
         )}
 
         <div className="row end" style={{ marginTop: 8 }}>
-          <button className="btn primary" disabled={busy || Boolean(pwProblem)} style={{ padding: '10px 18px' }}>{busy ? 'Setting up…' : 'Set up the hotel'}</button>
+          <button className="btn primary" disabled={busy || Boolean(pwProblem)} style={{ padding: '10px 18px' }}>{busy ? 'Setting up…' : 'Set up'}</button>
         </div>
       </form>
     </div>

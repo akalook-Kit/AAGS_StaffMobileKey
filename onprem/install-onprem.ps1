@@ -1,8 +1,8 @@
 <#
-  Staff Mobile Key - ON-PREMISES installation on the Visionline (Vingcard) server of ANY hotel.
+  Access Monitoring Tool - ON-PREMISES installation on the Visionline (Vingcard) server of ANY hotel.
   Easiest: double-click Install.cmd (it asks for administrator rights and runs this script).
 
-  Everything it needs is inside this package: its own Node.js and PostgreSQL, used only by Staff Mobile Key.
+  Everything it needs is inside this package: its own Node.js and PostgreSQL, used only by Access Monitoring Tool.
   Nothing is installed system-wide, nothing is downloaded, and no questions are asked. At the end the portal
   opens on the first-run setup page, where the hotel's details and the first administrator are entered.
 
@@ -28,7 +28,8 @@
     -VisionlineUrl   Visionline Web API. Default https://localhost/api/v1 (Visionline on this server).
     -CaFile          Visionline's certificate (or its CA), if it cannot be read from this server automatically.
     -ReadOnly -NoWatch  ONLY for testing against a Visionline that is not the hotel's own.
-    -SkipConnector   Do not install the connector.
+    -SkipConnector   Do not install the connector (it runs on another computer: see set-connector-access.ps1).
+    -ConnectorFrom   Address of that connector computer, e.g. 192.168.1.50 (also kept on upgrades).
     -NoBrowser       Do not open the portal at the end.
   Older installations that used a separately installed PostgreSQL keep using it; nothing to do.
 #>
@@ -41,6 +42,8 @@ param(
   [switch]$RemoveExternal,
   [string]$CertPfx = '',
   [switch]$SkipConnector,
+  # 2.16 Address of a connector on another computer of the hotel network (see set-connector-access.ps1).
+  [string]$ConnectorFrom = '',
   [string]$VisionlineUrl = '',
   [string]$CaFile = '',
   [switch]$ReadOnly,
@@ -136,7 +139,7 @@ New-Item -ItemType Directory -Force -Path $DataDir, (Join-Path $DataDir 'logs') 
 & icacls $DataDir /grant '*S-1-5-20:(RX)' | Out-Null
 $log = Join-Path $DataDir "logs\install-$version-$(Get-Date -Format yyyyMMdd-HHmmss).log"
 try { Start-Transcript -Path $log -Force | Out-Null } catch { $log = $null }
-Write-Host "Staff Mobile Key on-premises $version" -ForegroundColor Green
+Write-Host "Access Monitoring Tool on-premises $version" -ForegroundColor Green
 
 $pkgNode = Join-Path $here 'runtime\node\node.exe'
 $pkgPg = Join-Path $here 'runtime\pgsql\bin'
@@ -158,7 +161,7 @@ $secrets = Read-Protected $secretsFile
 $bundledDb = (-not $upgrade) -or ($secrets['SMK_DB'] -eq 'bundled')
 Write-Host "  $(if ($upgrade) { 'Upgrading the existing installation' } else { 'New installation' })"
 Write-Host "  Program:  $InstallDir"
-Write-Host "  Runtime:  $RuntimeDir (Node.js and PostgreSQL used only by Staff Mobile Key)"
+Write-Host "  Runtime:  $RuntimeDir (Node.js and PostgreSQL used only by Access Monitoring Tool)"
 Write-Host "  Data:     $DataDir"
 
 # Hotel: only for scripted installations (normally entered in the portal), or remembered from an older version.
@@ -237,7 +240,7 @@ if ($upgrade) {
 foreach ($svc in 'StaffMobileKeyGateway', 'StaffMobileKeyPlatform', 'StaffMobileKeyConnector') { Stop-Svc $svc }
 if ($bundledDb) { Stop-Svc 'StaffMobileKeyDatabase' }
 
-# ---- Runtime (Node.js and PostgreSQL, private to Staff Mobile Key) ----------------------------------------------
+# ---- Runtime (Node.js and PostgreSQL, private to Access Monitoring Tool) ----------------------------------------------
 Write-Step 'Runtime'
 New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
 foreach ($d in 'node', 'pgsql') {
@@ -260,6 +263,9 @@ if (-not $secrets['SMK_SECRET_KEY']) { $secrets['SMK_SECRET_KEY'] = New-RandomTe
 $connCfgDir = Join-Path $env:ProgramData 'StaffMobileKey\Connector'
 $connJson = Join-Path $connCfgDir 'connector.config.json'
 $installConnector = (-not $SkipConnector) -and (Test-Path (Join-Path $here 'connector\install.ps1'))
+# 2.16 A connector that was switched off here (it runs on another computer) stays off through upgrades.
+$localConnSvc = Get-Service StaffMobileKeyConnector -ErrorAction SilentlyContinue
+if ($installConnector -and $localConnSvc -and $localConnSvc.StartType -eq 'Disabled') { $installConnector = $false; $SkipConnector = $true }
 # A connector reporting to this server (any local port, including the old 4000) keeps its token; it is only re-pointed.
 $pointsHere = (Test-Path $connJson) -and ((Get-Content $connJson -Raw | ConvertFrom-Json).platformUrl -match '^http://(127\.0\.0\.1|localhost):\d+/?$')
 $newConnectorToken = $null
@@ -301,7 +307,7 @@ if ($bundledDb) {
     } finally { $ErrorActionPreference = $prevEap; Remove-Item $pwFile -Force -ErrorAction SilentlyContinue }
     if ($code -ne 0 -or -not (Test-Path (Join-Path $pgData 'PG_VERSION'))) { Fail 'Creating the database failed (see above).' }
     Add-Content -Path (Join-Path $pgData 'postgresql.conf') -Encoding ASCII -Value @(
-      '', '# Staff Mobile Key', "listen_addresses = '127.0.0.1'", "port = $port", 'max_connections = 50', 'shared_buffers = 256MB',
+      '', '# Access Monitoring Tool', "listen_addresses = '127.0.0.1'", "port = $port", 'max_connections = 50', 'shared_buffers = 256MB',
       'logging_collector = on', "log_directory = 'log'", "log_filename = 'postgresql-%a.log'", 'log_truncate_on_rotation = on', 'log_rotation_age = 1d', 'log_rotation_size = 0',
       "log_line_prefix = '%m [%p] '", "timezone = 'UTC'"
     )
@@ -316,7 +322,7 @@ if ($bundledDb) {
   if (-not (Get-Service StaffMobileKeyDatabase -ErrorAction SilentlyContinue)) {
     & (Join-Path $PgBin 'pg_ctl.exe') register -N StaffMobileKeyDatabase -U 'NT AUTHORITY\NetworkService' -D $pgData -S auto -w | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail 'Registering the database service failed.' }
-    & sc.exe description StaffMobileKeyDatabase 'Staff Mobile Key database (PostgreSQL 16, 127.0.0.1 only).' | Out-Null
+    & sc.exe description StaffMobileKeyDatabase 'Access Monitoring Tool database (PostgreSQL 16, 127.0.0.1 only).' | Out-Null
   } else {
     # Same service, new program path (runtime folder may have moved).
     $bin = "`"$(Join-Path $PgBin 'pg_ctl.exe')`" runservice -N `"StaffMobileKeyDatabase`" -D `"$pgData`" -w"
@@ -352,7 +358,7 @@ foreach ($d in 'app', 'migrations', 'portal', 'brand', 'service') {
   Copy-Item (Join-Path $here $d) $target -Recurse
 }
 Copy-Item (Join-Path $here 'VERSION') $InstallDir -Force
-foreach ($f in 'database-tools.ps1', 'set-platform-secrets.ps1', 'set-external-access.ps1', 'rollback-onprem.ps1', 'uninstall-onprem.ps1', 'Uninstall.cmd', 'README.txt') { Copy-Item (Join-Path $here $f) $InstallDir -Force }
+foreach ($f in 'database-tools.ps1', 'set-platform-secrets.ps1', 'set-external-access.ps1', 'set-connector-access.ps1', 'rollback-onprem.ps1', 'uninstall-onprem.ps1', 'Uninstall.cmd', 'README.txt') { Copy-Item (Join-Path $here $f) $InstallDir -Force }
 $exe = Join-Path $InstallDir 'StaffMobileKeyHost.exe'
 & $csc /nologo /target:exe /optimize+ "/out:$exe" /reference:System.ServiceProcess.dll /reference:System.Security.dll (Join-Path $InstallDir 'service\NodeService.cs')
 if ($LASTEXITCODE -ne 0) { Fail 'Building the service host failed (see the compiler messages above).' }
@@ -381,7 +387,7 @@ if (-not $hotelGiven) {
     else {
       $setupCode = New-SetupCode
       $secrets['SMK_SETUP_CODE_SHA256'] = Get-Sha256Hex ($setupCode -replace '-', '')
-      Write-Utf8NoBom $codeFile "$setupCode`r`nOne-time code for the first-run setup page of Staff Mobile Key. Not needed once the hotel is set up.`r`n"
+      Write-Utf8NoBom $codeFile "$setupCode`r`nOne-time code for the first-run setup page of Access Monitoring Tool. Not needed once the hotel is set up.`r`n"
       & icacls $codeFile /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
     }
   } else { Remove-Item $codeFile -Force -ErrorAction SilentlyContinue }
@@ -419,7 +425,7 @@ if ($CertPfx) {
   foreach ($ip in $ips) { if ("IPAddress=$ip" -notin $names) { $names += "IPAddress=$ip" } }
   $names += 'IPAddress=127.0.0.1'
   $san = "2.5.29.17={text}$($names -join '&')"
-  $cert = New-SelfSignedCertificate -Subject "CN=$ServerName" -TextExtension @($san) -CertStoreLocation 'Cert:\LocalMachine\My' -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(3) -FriendlyName 'Staff Mobile Key gateway'
+  $cert = New-SelfSignedCertificate -Subject "CN=$ServerName" -TextExtension @($san) -CertStoreLocation 'Cert:\LocalMachine\My' -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(3) -FriendlyName 'Access Monitoring Tool gateway'
   Export-PfxCertificate -Cert $cert -FilePath $pfx -Password (ConvertTo-SecureString $pass -AsPlainText -Force) | Out-Null
   $gwSecrets['GATEWAY_PFX_PASSPHRASE'] = $pass; $pass = $null
   Write-Host "  Self-signed certificate for $ServerName$(if ($ips) { " and $($ips -join ', ')" }) (3 years). Browsers warn until a real one is installed (-CertPfx)." -ForegroundColor Yellow
@@ -430,6 +436,11 @@ $fingerprint = ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create(
 Write-Protected (Join-Path $DataDir 'gateway.secrets') $gwSecrets
 
 $listeners = @([ordered]@{ name = 'lan'; host = '0.0.0.0'; port = $LanPort; tls = [ordered]@{ pfx = $pfx; passphraseEnv = 'GATEWAY_PFX_PASSPHRASE' }; allow = @('private'); requireSecretPath = $false })
+# 2.16 A connector on another computer keeps its access through upgrades.
+$connFrom = @()
+if ($ConnectorFrom) { $connFrom = @($ConnectorFrom.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+elseif ($oldGw) { $oldLan = @($oldGw.listeners | Where-Object { $_.name -eq 'lan' })[0]; if ($oldLan -and $oldLan.connectorFrom) { $connFrom = @($oldLan.connectorFrom) } }
+if ($connFrom.Count) { $listeners[0]['connectorFrom'] = $connFrom }
 $allowList = @()
 if ($ExternalPort -gt 0) {
   $allowList = @($AllowExternal.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -442,10 +453,10 @@ Write-Utf8NoBom (Join-Path $DataDir 'gateway.env') "GATEWAY_CONFIG=$gwCfgFile"
 
 # ---- Windows Firewall -------------------------------------------------------------------------------------------
 Write-Step 'Windows Firewall'
-Get-NetFirewallRule -Group 'Staff Mobile Key' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-New-NetFirewallRule -DisplayName "Staff Mobile Key - hotel network ($LanPort)" -Group 'Staff Mobile Key' -Direction Inbound -Protocol TCP -LocalPort $LanPort -RemoteAddress LocalSubnet -Action Allow | Out-Null
+Get-NetFirewallRule -Group 'Staff Mobile Key','Access Monitoring Tool' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+New-NetFirewallRule -DisplayName "Access Monitoring Tool - hotel network ($LanPort)" -Group 'Access Monitoring Tool' -Direction Inbound -Protocol TCP -LocalPort $LanPort -RemoteAddress LocalSubnet -Action Allow | Out-Null
 if ($ExternalPort -gt 0) {
-  New-NetFirewallRule -DisplayName "Staff Mobile Key - external ($ExternalPort)" -Group 'Staff Mobile Key' -Direction Inbound -Protocol TCP -LocalPort $ExternalPort -RemoteAddress $allowList -Action Allow | Out-Null
+  New-NetFirewallRule -DisplayName "Access Monitoring Tool - external ($ExternalPort)" -Group 'Access Monitoring Tool' -Direction Inbound -Protocol TCP -LocalPort $ExternalPort -RemoteAddress $allowList -Action Allow | Out-Null
 }
 Write-Host "  Inbound TCP $LanPort from the local subnet$(if ($ExternalPort -gt 0) { "; TCP $ExternalPort from $($allowList -join ', ') only" }). The platform ($PlatformPort) and the database stay closed."
 
@@ -455,7 +466,7 @@ function Install-NodeService([string]$name, [string]$display, [string]$script, [
   $bin = "`"$exe`" --name $name --node `"$NodePath`" --script `"$script`" --env `"$envFile`" --secrets `"$secretsFile`" --logs `"$(Join-Path $DataDir 'logs')`" --logname $logName"
   $existing = Get-CimInstance Win32_Service -Filter "Name='$name'"
   if (-not $existing) {
-    New-Service -Name $name -BinaryPathName $bin -DisplayName $display -StartupType Automatic -Description 'Staff Mobile Key (on-premises). Logs: C:\ProgramData\StaffMobileKey\Platform\logs.' -DependsOn $dependsOn | Out-Null
+    New-Service -Name $name -BinaryPathName $bin -DisplayName $display -StartupType Automatic -Description 'Access Monitoring Tool (on-premises). Logs: C:\ProgramData\StaffMobileKey\Platform\logs.' -DependsOn $dependsOn | Out-Null
   } else {
     $r = $existing | Invoke-CimMethod -MethodName Change -Arguments @{ PathName = $bin }
     if ($r.ReturnValue -ne 0) { Fail "Updating the service $name failed (code $($r.ReturnValue))." }
@@ -469,8 +480,8 @@ function Install-NodeService([string]$name, [string]$display, [string]$script, [
 }
 $deps = @()
 if ($bundledDb) { $deps += 'StaffMobileKeyDatabase' } else { $pgService = Get-Service | Where-Object { $_.Name -like 'postgresql*' } | Select-Object -First 1; if ($pgService) { $deps += $pgService.Name } }
-Install-NodeService 'StaffMobileKeyPlatform' 'Staff Mobile Key Platform' (Join-Path $InstallDir 'app\platform.mjs') (Join-Path $DataDir 'platform.env') $secretsFile 'platform' $deps
-Install-NodeService 'StaffMobileKeyGateway' 'Staff Mobile Key Gateway' (Join-Path $InstallDir 'app\gateway.mjs') (Join-Path $DataDir 'gateway.env') (Join-Path $DataDir 'gateway.secrets') 'gateway' @('StaffMobileKeyPlatform')
+Install-NodeService 'StaffMobileKeyPlatform' 'Access Monitoring Tool Platform' (Join-Path $InstallDir 'app\platform.mjs') (Join-Path $DataDir 'platform.env') $secretsFile 'platform' $deps
+Install-NodeService 'StaffMobileKeyGateway' 'Access Monitoring Tool Gateway' (Join-Path $InstallDir 'app\gateway.mjs') (Join-Path $DataDir 'gateway.env') (Join-Path $DataDir 'gateway.secrets') 'gateway' @('StaffMobileKeyPlatform')
 Start-Service StaffMobileKeyPlatform
 $ok = $false
 for ($i = 0; $i -lt 60 -and -not $ok; $i++) { Start-Sleep -Seconds 2; try { $ok = (Invoke-RestMethod -Uri "$platformUrl/healthz" -TimeoutSec 3).ok } catch { } }
@@ -478,7 +489,7 @@ if (-not $ok) { Fail "The platform did not start. See $(Join-Path $DataDir 'logs
 Start-Service StaffMobileKeyGateway
 Write-Host '  Platform and gateway running (LOCAL SERVICE, start with Windows, restart on failure).'
 # The daily copy is made by the platform itself now; the scheduled task of older versions is not needed.
-Unregister-ScheduledTask -TaskName 'Staff Mobile Key backup' -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName 'Access Monitoring Tool backup' -Confirm:$false -ErrorAction SilentlyContinue
 
 # ---- Connector ---------------------------------------------------------------------------------------------------
 $connectorNote = $null
@@ -525,7 +536,7 @@ if ($installConnector) {
   try { & (Join-Path $here 'connector\install.ps1') @cargs }
   finally { Remove-Item Env:\SMK_CONNECTOR_TOKEN, Env:\SMK_CONNECTOR_ADMIN_PASSWORD -ErrorAction SilentlyContinue }
   if ($LASTEXITCODE -ne 0) { $connectorNote = 'The connector installation reported a problem (see above). The platform runs; install the connector again with this package later.' }
-} elseif (Get-Service StaffMobileKeyConnector -ErrorAction SilentlyContinue) {
+} elseif ((Get-Service StaffMobileKeyConnector -ErrorAction SilentlyContinue) -and (Get-Service StaffMobileKeyConnector).StartType -ne 'Disabled') {
   try { Start-Service StaffMobileKeyConnector } catch { $connectorNote = 'The connector did not start again; see C:\ProgramData\StaffMobileKey\Connector\logs.' }
 }
 
@@ -534,13 +545,13 @@ if ($installConnector) {
 try { Write-Utf8NoBom (Join-Path $DataDir 'portal-url.txt') "$platformUrl`r`n" } catch { }
 $portal = "https://$($ServerName):$LanPort/"
 try {
-  $lnk = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Staff Mobile Key.url'
+  $lnk = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Access Monitoring Tool.url'
   Write-Utf8NoBom $lnk "[InternetShortcut]`r`nURL=$portal`r`n"
 } catch { }
 
 # ---- Done ----------------------------------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "Staff Mobile Key $version is installed and running." -ForegroundColor Green
+Write-Host "Access Monitoring Tool $version is installed and running." -ForegroundColor Green
 Write-Host "  Portal (hotel network): $portal"
 if ($ExternalPort -gt 0) {
   Write-Host "  From outside:  https://<hotel public IP>:<forwarded port>$secretPath/   only from $($allowList -join ', ')" -ForegroundColor Yellow

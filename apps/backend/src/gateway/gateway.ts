@@ -1,5 +1,5 @@
 /**
- * Staff Mobile Key gateway: the only part of an on-premises installation that listens on the network.
+ * Access Monitoring Tool gateway: the only part of an on-premises installation that listens on the network.
  * The platform itself listens on 127.0.0.1 only; the gateway forwards to it.
  *
  * Two kinds of entrance, each its own listener:
@@ -11,7 +11,9 @@
  *         path hands out; anything else gets an empty 404, and repeated misses ban the address for a while;
  *      3. then the normal portal sign-in (with two-step sign-in).
  * The connector API and Credential Services callbacks are never reachable from outside (on-premises installs
- * run Credential Services in polling mode). Everything else is forwarded unchanged to the platform.
+ * run Credential Services in polling mode). 2.16: when the connector runs on another computer of the hotel
+ * network, the "lan" listener lets that computer's address (and only it, `connectorFrom`) reach the connector
+ * API; the connector still signs in with its own token. Everything else is forwarded unchanged to the platform.
  *
  * Node.js built-ins only. Config: GATEWAY_CONFIG (JSON file, see gateway.config.template.json).
  */
@@ -34,6 +36,9 @@ export interface ListenerConfig {
   requireSecretPath: boolean;
   /** Allow the staff app API (/mobile/...). Default true. */
   mobileApi?: boolean;
+  /** 2.16 Addresses (or ranges) of a connector on another computer, allowed to use the connector API on this
+   *  listener. Never on a listener that needs the secret path (the outside entrance). Default: none. */
+  connectorFrom?: string[];
 }
 export interface GatewayConfig {
   upstream: string;            // http://127.0.0.1:4000
@@ -125,6 +130,11 @@ export function checkGatewayConfig(cfg: GatewayConfig) {
     ports.add(l.port);
     if (!Array.isArray(l.allow) || !l.allow.length) throw new Error(`${l.name}: the allow-list is empty.`);
     compileAllow(l.allow);
+    if (l.connectorFrom?.length) {
+      if (l.requireSecretPath) throw new Error(`${l.name}: a connector cannot use the outside entrance (connectorFrom on a listener with the secret path).`);
+      if (l.connectorFrom.includes('private') || l.connectorFrom.some((r) => /\/(0|[1-9])$/.test(r))) throw new Error(`${l.name}: connectorFrom must list the connector computer's own address (or a small range), not "private".`);
+      compileAllow(l.connectorFrom);
+    }
   }
   return true;
 }
@@ -152,6 +162,7 @@ export function startGateway(cfg: GatewayConfig, env: NodeJS.ProcessEnv = proces
   const servers: (http.Server | https.Server)[] = [];
   for (const l of cfg.listeners) {
     const allowed = compileAllow(l.allow);
+    const connectorOk = l.connectorFrom?.length && !l.requireSecretPath ? compileAllow(l.connectorFrom) : () => false;
     const secure = Boolean(l.tls);
     const handler = (req: http.IncomingMessage, res: http.ServerResponse) => {
       const t0 = Date.now();
@@ -172,8 +183,10 @@ export function startGateway(cfg: GatewayConfig, env: NodeJS.ProcessEnv = proces
         } else if (!passValid(key, req.headers.cookie)) { miss(ip); return deny(); }
       }
       const tpath = target.split('?')[0]!;
-      // Never from outside: the connector runs on this machine; Credential Services is polled, not called back.
-      if (/^\/(connector|integrations)\//.test(tpath)) return deny();
+      // Never from outside: the connector runs on this machine (or on a listed computer of the hotel network);
+      // Credential Services is polled, not called back.
+      if (/^\/connector\//.test(tpath) && !connectorOk(ip)) return deny();
+      if (/^\/integrations\//.test(tpath)) return deny();
       if (l.mobileApi === false && tpath.startsWith('/mobile/')) return deny();
       // Opening the secret path itself: hand out the pass and go to the portal.
       if (setPass && (tpath === '/' || tpath === '') && req.method === 'GET') {
@@ -213,7 +226,7 @@ export function startGateway(cfg: GatewayConfig, env: NodeJS.ProcessEnv = proces
     server.requestTimeout = 0; // staff app and connector use long polls
     server.keepAliveTimeout = 30_000;
     server.on('clientError', (_e, sock) => sock.destroy());
-    server.listen(l.port, l.host, () => log(`listening ${l.name} ${secure ? 'https' : 'http'}://${l.host}:${l.port} allow=${l.allow.join(',')}${l.requireSecretPath ? ' secret-path=yes' : ''}`));
+    server.listen(l.port, l.host, () => log(`listening ${l.name} ${secure ? 'https' : 'http'}://${l.host}:${l.port} allow=${l.allow.join(',')}${l.requireSecretPath ? ' secret-path=yes' : ''}${l.connectorFrom?.length && !l.requireSecretPath ? ` connector-from=${l.connectorFrom.join(',')}` : ''}`));
     servers.push(server);
   }
   return { close: () => Promise.all(servers.map((s) => new Promise((r) => s.close(() => r(null))))), servers };

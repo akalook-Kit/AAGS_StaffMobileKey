@@ -1,4 +1,6 @@
-# Staff Mobile Key — user manual (2.14)
+# Access Monitoring Tool — user manual (2.17)
+
+New here? Start with **QUICK-START.md** (5 steps, adding people, everyday tasks).
 
 The portal works next to ASSA ABLOY Visionline. Visionline stays the system that encodes keycards and talks to the
 locks; the portal reads from it (people, keycards, lock events), adds what Visionline does not do (reports, live
@@ -56,6 +58,59 @@ online reader or when the lock is read.
 Every lock event received from Visionline (entrances, refused entries, alarms, battery), every mobile-key event and
 system events, with filters (period, type, door, person, known/unknown card). **Print** makes a PDF with a
 fingerprint (SHA-256) that can be checked later under *Verify a PDF*: any change to the file shows.
+
+### 5a. New in 2.17
+
+- **Name**: the product is now the *Access Monitoring Tool*. Staff mobile keys are an optional module, switched off
+  by default (Settings → Modules).
+- **Sign-in page** shows the notice board's public posts and good-practice reminders. **Notice board** (Overview):
+  administrators post news, tips or important messages, with a picture, pinned or until a date; "also on the sign-in
+  page" posts are seen before signing in (nothing confidential).
+- **My charts**: anyone who can read some data builds charts (bars, columns, lines or a table) from door events,
+  keycards, mobile keys, alarms, maintenance or breakfast, saves them, shares them and pins them to the Overview.
+- **Mobile keys made in Visionline** are recognised: Visionline shows a phone's "card serial" as FFFFFFFF. They show
+  as *Mobile key* in Visionline cards & people and in the reports.
+- **Issued by**: every keycard encoded from this portal records the portal user. Cards made at the Visionline desk
+  show *Visionline desk* unless a card list with the operator is imported (System setup report → Visionline
+  reports): then *Visionline: <operator>*. When the Visionline user of the connector is a shared one (PMS /
+  interface user), the portal warns: give people named Visionline operators.
+- **Issuing a staff keycard**: choose the person already in Visionline (no duplicate), or *Existing keycard* to link
+  a card the person already holds, with its user group.
+- **Users and card holders**: operators sign in to the portal; card holders have keycards in Visionline; someone can
+  be both. Users → *Link a card holder* shows their keycards; Visionline people show *Portal user*.
+- **Encoder**: Card lookup always shows the encoder to read from (remembered on that computer), from Settings or
+  read from Visionline.
+- **System setup report**: Visionline system settings and operators (imported reports), the Visionline user the
+  portal uses, access by user group and by person (filter by name, door or user group).
+
+### 5b. Who can open a door, master keycards (2.16.1)
+
+**Visionline cards & people → Keycards** has a simple filter: *Opens: <door>* lists every keycard (and its holder and
+user group) that opens that door — for example the cashier door — counting the card's own doors, its door groups and a
+uniform-access user group. Quick buttons: **Who has a master keycard** (opens every room), **Who can override the
+deadbolt**, and *Who can open …* for doors such as the cashier, safe, stores or offices. Combine with a user group.
+
+### 5c. Keycards per room (2.15)
+
+**Keycards per room** (in the menu, under Event log) lists, for each guest room (or every door), the keycards that opened it or were
+refused in a period: card number, type (mobile key, staff card, guest or other card), holder, **who issued it**,
+entries, refused entries, first and last use. **Print PDF** makes the same fingerprinted PDF as the Event log.
+
+*Issued by* shows the portal user for mobile keys and for keycards handled on the Keycards page (encoded at an
+encoder from the portal or recorded there). Keycards made at the Visionline desk show **Visionline desk**: the
+Visionline Web API does not tell which desk operator encoded a card; Visionline's own card log does. For a guest
+card, the guest's name is shown when the day's in-house list (Breakfast import) has a stay in that room.
+
+**Offline locks and offline systems.** A lock event reaches the platform when Visionline has it:
+- *Online locks* report at once.
+- *Offline (standalone) locks* keep their events in the lock's audit trail; they reach Visionline when the trail is
+  read with the service tool (portable programming unit) or LockLink and uploaded. The platform files every event at
+  the time the **lock** recorded it, so an upload done days later fills the right place in the history and in this
+  report. Check once on site that Visionline reports uploaded audit trails to the Web API (read a lock's trail, upload
+  it, then look for its entries here); if it does not, the Visionline desk report is the source for those locks.
+- *If the platform or the connector is down*, Visionline keeps the changes in the connector's callback queue and the
+  connector reads them back when it returns; nothing is lost while the queue holds them. Confirm the queue retention
+  of your Visionline version for long outages.
 
 ## 6. Insights and your own reports
 
@@ -186,14 +241,41 @@ from the portal at an encoder or made at the Visionline desk and recorded here.
 - **Breakfast**: the day's in-house list (import the PMS report), restaurant check-off by room, the day sheet.
   The same list feeds Live occupancy.
 - **Battery status**: lock battery levels and alarms from Visionline; low batteries become maintenance requests.
+  - **Batteries last changed** (2.15) is shown per lock: from the lock's *Battery exchanged* event, or — because that
+    event is rare in the logs — from an abrupt rise in the lock's voltage readings (for example *below 3.6 V* followed
+    by *below 4.6 V*; the jump is set in *Settings → Battery*, default 0.8 V), or from a maintenance request resolved
+    as "battery replaced".
+  - **Batteries changed, lock still alarming** (2.15): if a lock reports a battery alarm within 14 days of a battery
+    change, the platform opens a high-priority maintenance request *"Program lock and upload firmware"* instead of
+    another battery request. Program the lock and upload its firmware with the service tool, then check the alarm
+    clears. Replacing batteries in good time, before they are critically low, avoids this.
 - **Maintenance**: requests from the portal, the staff app and battery alarms, assigned to technicians.
 
-## 12. Administration (hotel administrators only)
+## 12. Administration (administrators only)
 
-- **Operators**: portal accounts, roles, modules per person (presets *Visionline only* / *Show everything*), and
-  *Reset two-step* when someone lost their phone (your password is asked). Roles: Hotel Administrator, Security Manager, Key Issuer,
-  Approver, Maintenance Manager, Technician, Hotel Management (reports), HR Manager, Timekeeper, Restaurant, Safety /
-  fire warden, Auditor, Read only.
+- **Users** (2.16, was *Operators*): **Invite someone** — name, work e-mail and what they do (Administrator, Front
+  office, Security manager, Department manager, Management, Maintenance manager, HR, Safety, Auditor; or *Choose roles
+  instead*). The person gets a one-time link (72 hours, also by e-mail when e-mail is set up), chooses their own
+  password and is signed in. **New link** for an expired invitation, **Password link** for a forgotten password (your
+  password is asked first), **Remove** to take away access. *Add with a password* still works. Also: modules per
+  person (presets *Visionline only* / *Show everything*) and *Reset two-step* when someone lost their phone. Roles:
+  Administrator, Security Manager, Key Issuer, Approver, Maintenance Manager, Technician, Management (reports), HR
+  Manager, Timekeeper, Restaurant, Safety / fire warden, Department manager, Auditor, Read only.
+- **Hotel or institution** (2.16): *Settings → Name & details → Type*. An institution does not see the guest
+  features (Breakfast, Unpaid guests, Departures, the Accounts report) and the portal says "rooms", not "guest rooms".
+- **Connector on another computer** (2.16): *Settings → Connector*. Choose *On another computer*, enter the
+  connector computer's address, this server's address as that computer reaches it, and the Visionline Web API
+  address. The page writes the commands: `set-connector-access.ps1 -Allow <address>` on this server (only that
+  address may use the connector entrance; it saves the server certificate `gateway.cer`), then on the connector
+  computer `visionline-probe.ps1 … -SaveCert` and `install.ps1 -PlatformUrl … -PlatformCaFile .\gateway.cer
+  -VisionlineUrl … -CaFile …` with a token made on the same page. The connector list shows where each connector
+  reports from. Both certificates are checked; nothing opens to the internet.
+- **Getting started** (2.16): on the Overview, administrators see the first steps until they are done.
+- **Menu** (2.16.1): click a group title (Safety, People & keys, Building, Administration) to fold it away; the
+  choice is remembered on that computer. The menu scrolls when it is longer than the screen.
+- **System setup report** (2.16.1): the user groups table shows *Override deadbolt* and *Override privacy*
+  (Visionline user group settings) and how many valid keycards of each group override the deadbolt. Run resource
+  discovery once with connector 0.13.1 to fill it.
 - **Settings**: use the search box at the top to find a setting. Every save is a new version you can restore.
   - *Safety & emergency*: on-site windows, visitor groups, floors, emergency key template and duration.
   - *ID card layout*: orientation, title, fields, back text, printer margin.
@@ -232,7 +314,7 @@ The portal is a well-behaved Visionline client:
 
 | You see | Do this |
 |---|---|
-| "Connector offline" | On the Visionline server: Windows *Services* → *Staff Mobile Key Connector* → Start. |
+| "Connector offline" | On the Visionline server: Windows *Services* → *Access Monitoring Tool Connector* → Start. |
 | Card lookup shows nothing | *Settings → Reports & sync*: is reading people and keycards on? Wait for the next sync or press Sync now. |
 | Live occupancy has no guests | Import today's in-house report (Breakfast → Import). |
 | "Two-step sign-in is required" | *Your account → Two-step sign-in*, scan the code, enter it, sign in again. |

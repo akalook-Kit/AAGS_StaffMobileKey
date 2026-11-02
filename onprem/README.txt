@@ -1,8 +1,8 @@
-STAFF MOBILE KEY - ON-PREMISES PLATFORM (Vingcard / Visionline server, any hotel)
+STAFF MOBILE KEY - ON-PREMISES PLATFORM (Vingcard / Visionline, any hotel or institution)
 =================================================================================
 
 Everything runs on the Visionline server. Nothing is hosted in the cloud, and nothing has to be installed
-beforehand: this package carries its own Node.js and PostgreSQL, used only by Staff Mobile Key.
+beforehand: this package carries its own Node.js and PostgreSQL, used only by Access Monitoring Tool.
 
   Visionline (same server) <-- connector --> platform (127.0.0.1:47300) <-- gateway --> browsers / staff phones
                                                  |                          | 8443  hotel network only
@@ -13,6 +13,28 @@ WHAT THE SERVER NEEDS
   - Windows Server 2016 or newer (or Windows 10/11 Pro), 64-bit, an administrator account
   - .NET Framework 4.8 (part of Windows)
   - 2 GB free disk space (more as the database grows; Monitoring warns below 50 GB)
+
+NEW IN 2.17 (ACCESS MONITORING TOOL)
+  One .msi installs the portal, the connector, or both: a small window asks at the start (Everything / Portal only /
+  Connector only, and the addresses). No console windows appear; tick "Show the installation steps" (or run
+  msiexec /i AccessMonitoringTool-Server-2.17.0.msi SMK_SHOW=1) to follow the log. Logs: C:\ProgramData\StaffMobileKey\
+  setup-logs. Upgrades keep the answers; SMK_ASK=1 asks again. Staff mobile keys are off by default (Settings ->
+  Modules). Notice board and a livelier sign-in page, My charts, Visionline reports imported into the System setup
+  report (System settings, operators, card list), issued-by for every card made from the portal, mobile keys made in
+  Visionline recognised (serial FFFFFFFF), issuing from an existing keycard, users linked to their keycards, encoder
+  choice on Card lookup (Connector 0.14.0). Install folders and service names stay "StaffMobileKey" so upgrades keep working.
+
+NEW IN 2.16
+  Hotel or institution (chosen on the setup page; Settings -> Name & details -> Type); fewer "hotel" words in the
+  portal. Users -> Invite someone: a one-time link with which the person chooses their own password (72 hours),
+  New link / Password link / Remove. "Getting started" checklist on the Overview. The connector can run on ANOTHER
+  computer of the network: Settings -> Connector writes the commands; on this server run
+      & "C:\Program Files\StaffMobileKey\Platform\set-connector-access.ps1" -Allow <connector computer IP>
+  (lets only that address use the connector entrance on port 8443 and saves gateway.cer for it; -StopLocalConnector
+  switches off a connector installed here). Install without the built-in connector:
+      msiexec /i StaffMobileKey-Server-2.16.1.msi SMK_OPTIONS="-SkipConnector"
+  Also from 2.15: keycards per room (who issued them), battery last changed, "program the lock and upload firmware".
+  Connector 0.13.1. Quick start: QUICK-START in Help and manual.
 
 NEW IN 2.14
   Staff keycard requests (also from a QR code page, no sign-in), issued in Visionline from an encoder or recorded
@@ -32,7 +54,7 @@ NEW IN 2.13
 
 INSTALL WITH THE .MSI (2.12)
   Double-click StaffMobileKey-Server-<version>.msi on the Visionline server (administrator). It installs exactly
-  what Install.cmd installs, then opens the portal (Start menu: "Staff Mobile Key"). Silent:
+  what Install.cmd installs, then opens the portal (Start menu: "Access Monitoring Tool"). Silent:
     msiexec /i StaffMobileKey-Server-<version>.msi /qn /l*v smk-install.log  [SMK_OPTIONS="-LanPort 9443"]
   Upgrade: run the newer .msi. Uninstall (Windows Apps) keeps the hotel's data.
 
@@ -72,7 +94,7 @@ WHAT IS INSTALLED
   Data:      C:\ProgramData\StaffMobileKey\     (database, settings, encrypted secrets, logs, database copies)
   Services:  StaffMobileKeyDatabase (NETWORK SERVICE), StaffMobileKeyPlatform, StaffMobileKeyGateway,
              StaffMobileKeyConnector (LOCAL SERVICE). All start with Windows and restart on failure.
-  Desktop:   "Staff Mobile Key" shortcut to the portal.
+  Desktop:   "Access Monitoring Tool" shortcut to the portal.
   Runtime\VERSIONS.txt lists the bundled Node.js / PostgreSQL versions and the SHA-256 of every program
   file, for the hotel's antivirus or application allow-list.
 

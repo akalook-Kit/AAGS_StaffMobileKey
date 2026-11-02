@@ -13,7 +13,7 @@ import { ApiError, badRequest, conflict, notFound } from '../lib/errors.ts';
 const P = '/api/v1';
 const hid = (req: FastifyRequest) => {
   const id = (req.params as any).hotelId as string;
-  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Hotel');
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Site');
   return id;
 };
 async function activeConnector(hotelId: string) {
@@ -56,7 +56,7 @@ export function portalAdminRoutes(app: FastifyInstance) {
   app.get(`${P}/hotels/:hotelId/me/visionline-credentials`, async (req) => {
     const hotelId = hid(req);
     const op = await requireOperator(req);
-    if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw notFound('Hotel');
+    if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw notFound('Site');
     const r = await one(pool, 'SELECT username, status, status_detail, verified_at, updated_at, key_id FROM operator_vl_credentials WHERE operator_id=$1 AND hotel_id=$2', [op.id, hotelId]);
     const vl = await getConfig(pool, hotelId, 'visionline');
     return { credential: r ? { username: r.username, status: r.status, statusDetail: r.status_detail, verifiedAt: r.verified_at, updatedAt: r.updated_at } : null, required: Boolean(vl?.requirePersonalCredentials) };
@@ -64,7 +64,7 @@ export function portalAdminRoutes(app: FastifyInstance) {
   app.put(`${P}/hotels/:hotelId/me/visionline-credentials`, async (req) => {
     const hotelId = hid(req);
     const op = await requireOperator(req);
-    if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw notFound('Hotel');
+    if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw notFound('Site');
     const b = z.object({ username: z.string().min(1).max(100), sealed: SealedSecret }).parse(req.body);
     await requireCurrentKey(hotelId, b.sealed);
     const corr = newCorrelationId();
@@ -83,7 +83,7 @@ export function portalAdminRoutes(app: FastifyInstance) {
     const hotelId = hid(req);
     const op = await requireOperator(req);
     // 2.13 (security review): only members of this hotel; another hotel's operator could write into its audit trail.
-    if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw notFound('Hotel');
+    if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw notFound('Site');
     await pool.query('DELETE FROM operator_vl_credentials WHERE operator_id=$1 AND hotel_id=$2', [op.id, hotelId]);
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'operator.visionline_credentials_removed', targetType: 'operator', targetId: op.id });
     return { ok: true };

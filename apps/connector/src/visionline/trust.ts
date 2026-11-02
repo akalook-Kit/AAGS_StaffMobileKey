@@ -14,7 +14,8 @@ const norm = (fp: string) => fp.replace(/:/g, '').toLowerCase();
  *    same SHA-256 fingerprint. The host name check is replaced by this exact match, because the certificate
  *    is usually issued to "Visionline WebService", which is not a resolvable host name.
  */
-export function visionlineTrust(caPem: Buffer | undefined, opts: { servername?: string; pinSha256?: string }) {
+export function visionlineTrust(caPem: Buffer | undefined, opts: { servername?: string; pinSha256?: string; label?: string }) {
+  const who = opts.label ?? 'Visionline';
   const blocks = caPem ? (caPem.toString('utf8').match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g) ?? []) : [];
   const certs = blocks.map((b) => new X509Certificate(b));
   const exact = certs.length === 1 && certs[0]!.ca === false ? certs[0]! : null;
@@ -33,12 +34,12 @@ export function visionlineTrust(caPem: Buffer | undefined, opts: { servername?: 
       ...(exact ? { allowPartialTrustChain: true } : {}),
       checkServerIdentity: (host: string, cert: tls.PeerCertificate): Error | undefined => {
         if (exact) {
-          if (norm(cert.fingerprint256) !== norm(exact.fingerprint256)) return new Error('Visionline presented a different certificate than the trusted one (fingerprint mismatch)');
+          if (norm(cert.fingerprint256) !== norm(exact.fingerprint256)) return new Error(`${who} presented a different certificate than the trusted one (fingerprint mismatch)`);
         } else {
           const err = tls.checkServerIdentity(opts.servername ?? host, cert);
           if (err) return err;
         }
-        if (pin && norm(cert.fingerprint256) !== pin) return new Error('Visionline certificate fingerprint does not match the pinned value');
+        if (pin && norm(cert.fingerprint256) !== pin) return new Error(`${who} certificate fingerprint does not match the pinned value`);
         return undefined;
       },
     },

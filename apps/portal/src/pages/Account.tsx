@@ -45,7 +45,7 @@ function UserSettings() {
       <ErrorNote error={error} />
       {ok && <div className="alert ok">{ok}</div>}
       <div className="field"><label htmlFor="nm">Name</label><input id="nm" value={name} onChange={(e) => setName(e.target.value)} /></div>
-      <div className="field"><label htmlFor="em">Email</label><input id="em" value={me.email} disabled /><span className="hint">Your sign-in. Ask a hotel administrator to change it.</span></div>
+      <div className="field"><label htmlFor="em">Email</label><input id="em" value={me.email} disabled /><span className="hint">Your sign-in. Ask an administrator to change it.</span></div>
       <button className="btn" onClick={saveName} disabled={name.trim().length < 2 || name === me.displayName}>Save name</button>
       <h3 style={{ marginTop: 24 }}>Change password</h3>
       <div className="field-row">
@@ -80,7 +80,7 @@ function PersonalVisionline() {
   return (
     <div className="panel" style={{ maxWidth: 720 }}>
       <div className="alert warn">
-        {st.data?.required ? 'This hotel requires personal Visionline credentials before you can issue keys.' : 'Optional. With personal Visionline credentials, keys you issue are recorded in Visionline under your own operator name instead of the property operator.'}
+        {st.data?.required ? 'Your administrator requires personal Visionline credentials before you can issue keys.' : 'Optional. With personal Visionline credentials, keys you issue are recorded in Visionline under your own operator name instead of the property operator.'}
       </div>
       <ErrorNote error={error} />
       {c && (
@@ -93,7 +93,7 @@ function PersonalVisionline() {
       )}
       <div className="field"><label htmlFor="vu">Visionline username</label><input id="vu" autoComplete="off" value={username} placeholder={c?.username ?? ''} onChange={(e) => setUsername(e.target.value)} /></div>
       <div className="field"><label htmlFor="vp">Visionline password</label><input id="vp" type="password" autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your personal Visionline password" />
-        <span className="hint">Encrypted in this browser for the hotel connector. It is never stored readable on the platform and never shown again.</span></div>
+        <span className="hint">Encrypted in this browser for the connector. It is never stored readable on the platform and never shown again.</span></div>
       <div className="row">
         <button className="btn primary" onClick={save} disabled={busy || !password || !(username || c?.username)}>{busy ? 'Checking with Visionline…' : 'Save and verify'}</button>
         {c && <button className="btn danger" onClick={remove}>Remove</button>}
@@ -146,7 +146,7 @@ function MenuAndLook() {
     <div className="cols">
       <section className="panel">
         <h2>My menu</h2>
-        <p className="muted">Untick the pages you do not use. Nothing is switched off for the hotel; this only tidies your own menu.</p>
+        <p className="muted">Untick the pages you do not use. Nothing is switched off for anyone else; this only tidies your own menu.</p>
         <div className="row" style={{ gap: 8, margin: '8px 0 12px' }}>
           <button className="btn small" onClick={() => setHidden(menuPages.filter((p) => !visionlineOnly.includes(p.to)).map((p) => p.to))}>Visionline essentials only</button>
           <button className="btn small" onClick={() => setHidden([])}>Show everything</button>

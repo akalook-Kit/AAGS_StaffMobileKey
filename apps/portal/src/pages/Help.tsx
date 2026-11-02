@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import manual from '../../../../docs/USER-MANUAL.md?raw';
+import quick from '../../../../docs/QUICK-START.md?raw';
 import { PageHead } from '../ui';
 
 /** Inline markdown: **bold**, *italic*, `code`. Text only: nothing in the manual is turned into HTML. */
@@ -40,7 +41,9 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(
 
 /** 2.13 The user manual, in the portal and printable (Print → Save as PDF). */
 export function HelpPage() {
-  const bs = useMemo(() => blocks(manual), []);
+  // 2.16 The short quick start first; the full manual one click away.
+  const [which, setWhich] = useState<'quick' | 'manual'>(() => (new URLSearchParams(location.search).get('doc') === 'manual' ? 'manual' : 'quick'));
+  const bs = useMemo(() => blocks(which === 'quick' ? quick : manual), [which]);
   const [q, setQ] = useState('');
   const toc = bs.filter((b) => b.kind === 'h2').map((b) => b.lines[0]!);
   // Search: keep the sections whose text matches.
@@ -52,7 +55,8 @@ export function HelpPage() {
   }, [bs, q]);
   return (
     <>
-      <PageHead title="Help and manual" intro="How each part of the portal works. Print it (Save as PDF) for the team.">
+      <PageHead title="Help and manual" intro="Start with the quick start; the full manual explains every page. Print either (Save as PDF) for the team.">
+        <div className="seg" role="group" aria-label="Document"><button aria-pressed={which === 'quick'} onClick={() => setWhich('quick')}>Quick start</button><button aria-pressed={which === 'manual'} onClick={() => setWhich('manual')}>Full manual</button></div>
         <input className="search" placeholder="Search the manual" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search the manual" />
         <button className="btn" onClick={() => window.print()}>Print / PDF</button>
       </PageHead>

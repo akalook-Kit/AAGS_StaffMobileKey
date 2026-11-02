@@ -12,7 +12,7 @@ const logo = existsSync(logoFile) ? `data:image/png;base64,${readFileSync(logoFi
 const timezone = process.env.HOTEL_TIMEZONE || 'Africa/Douala';
 
 const branding = {
-  appName: 'K Hotel Staff Key', portalTitle: 'K Hotel · Staff Access',
+  appName: 'K Hotel Staff Key', portalTitle: 'K Hotel · Access Monitoring',
   primaryColor: '#050505', secondaryColor: '#DCAE99', backgroundColor: '#F7F2EF', textOnPrimary: '#DCAE99',
   fontFamily: 'system', logo,
   wording: { keysTitle: 'Mobile Keys', accessAreas: 'Access Areas', validUntil: 'Valid Until', lockStatus: 'Lock Status', support: 'Support', tapInstruction: 'Hold your phone near the lock' },
@@ -36,7 +36,7 @@ export const KHB = {
     policy: {},
     property: { displayName: 'K Hotel Bana', supportEmail: 'frontdesk@khotelbana.example', supportPhone: '+000 000 000 000', country: 'CM', timezone, homepage: 'https://www.khoteldouala.com/', address: null },
     branding,
-    features: { staffMobileKeys: true },
+    features: { staffMobileKeys: false }, // 2.17 mobile keys are off until switched on (Settings -> Modules)
     visionline,
     credential_services: { baseUrl: csBaseUrl, systemId: 3460, tenantUserRef: 'CS_TENANT_USER', tenantPasswordRef: 'CS_TENANT_PASSWORD' },
     app_policy: { privacyText: 'K Hotel Bana uses your work account to deliver door keys to this phone. No location is collected.', supportEscalation: 'Call the duty manager if a door will not open.', partnerLinks: [], allowedLinkHosts: [] },

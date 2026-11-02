@@ -69,7 +69,7 @@ time and the person (when the card belongs to a known person).
 server and on the Visionline PC, the connector, the last automatic backup, and a 30-day trend (sampled hourly).
 
 Database tools on the on-premises server (PowerShell as administrator, in `C:\Program Files\StaffMobileKey\Platform`).
-Since 2.9 they use the Node.js that comes with Staff Mobile Key; no PostgreSQL client tools are needed:
+Since 2.9 they use the Node.js that comes with Access Monitoring Tool; no PostgreSQL client tools are needed:
 
 ```powershell
 .\database-tools.ps1 -Action Size                          # size and largest tables, free space on C:

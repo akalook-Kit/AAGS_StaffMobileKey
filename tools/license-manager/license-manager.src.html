@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Staff Mobile Key · License Manager</title>
+<title>Access Monitoring Tool · License Manager</title>
 <style>
   :root { --bg:#f7f2ef; --surface:#fff; --ink:#1c1715; --ink-2:#5e524d; --ink-3:#8a7d77; --line:#e4d8d2; --line-2:#f0e8e3; --brand:#050505; --brass:#dcae99;
     --ok:#17694a; --ok-bg:#dff0e7; --warn:#8a5a00; --warn-bg:#fbedcc; --bad:#a3271c; --bad-bg:#f9e0dc; --r:8px; }
@@ -48,7 +48,7 @@
 </head>
 <body>
 <header class="top">
-  <div><h1>Staff Mobile Key · License Manager</h1><span>Runs on your PC only. Nothing is sent anywhere.</span></div>
+  <div><h1>Access Monitoring Tool · License Manager</h1><span>Runs on your PC only. Nothing is sent anywhere.</span></div>
   <div class="key-state"><i class="dot" id="keyDot"></i><span id="keyState">No signing key loaded</span></div>
 </header>
 <main>
@@ -300,7 +300,7 @@ async function readInto(f, id) { if (f) $(id).value = (await f.text()).trim(); }
 function check() {
   const raw = $('checkIn').value.replace(/\s+/g, ''); const parts = raw.split('.');
   try {
-    if (parts.length !== 3 || parts[0] !== 'SMK1') throw new Error('Not a Staff Mobile Key licence.');
+    if (parts.length !== 3 || parts[0] !== 'SMK1') throw new Error('Not an Access Monitoring Tool licence.');
     const p = JSON.parse(dec.decode(ub64u(parts[1])));
     let sig = '';
     if (PK) sig = nacl.sign.detached.verify(enc.encode(parts[0] + '.' + parts[1]), ub64u(parts[2]), PK) ? '<span class="pill ok">Signed with your loaded key</span>' : '<span class="pill bad">Not signed with your loaded key</span>';

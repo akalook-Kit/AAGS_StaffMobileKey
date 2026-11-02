@@ -7,6 +7,10 @@ import { VL } from '@smk/shared/node';
 /** Non-secret connector settings. Secrets go to the SecretStore, never into this file (spec §6). */
 const Schema = z.object({
   platformUrl: z.string().url(),
+  /** 2.16 Connector on another computer: the platform's certificate (the server's gateway.cer, exported by
+   *  set-connector-access.ps1). Exactly this certificate is trusted; verification is never switched off. */
+  platformCaFile: z.string().optional(),
+  platformPinSha256: z.string().optional(),
   dataDir: z.string().default('./data'),
   localAdmin: z.object({ host: z.string().default('127.0.0.1'), port: z.number().int().default(8090) }).default({ host: '127.0.0.1', port: 8090 }),
   visionline: z.object({
@@ -35,10 +39,13 @@ export function loadConfig(): ConnectorConfig {
   const fromFile = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) : {};
   // Empty strings in the file mean "not set".
   for (const k of ['caFile', 'pinSha256', 'servername']) if (fromFile.visionline?.[k] === '') delete fromFile.visionline[k];
+  for (const k of ['platformCaFile', 'platformPinSha256']) if (fromFile[k] === '') delete fromFile[k];
   const e = process.env;
   const merged = {
     ...fromFile,
     ...(e.PLATFORM_URL ? { platformUrl: e.PLATFORM_URL } : {}),
+    ...(e.PLATFORM_CA_FILE ? { platformCaFile: e.PLATFORM_CA_FILE } : {}),
+    ...(e.PLATFORM_PIN_SHA256 ? { platformPinSha256: e.PLATFORM_PIN_SHA256 } : {}),
     ...(e.CONNECTOR_DATA_DIR ? { dataDir: e.CONNECTOR_DATA_DIR } : {}),
     localAdmin: { ...fromFile.localAdmin, ...(e.LOCAL_ADMIN_HOST ? { host: e.LOCAL_ADMIN_HOST } : {}), ...(e.LOCAL_ADMIN_PORT ? { port: Number(e.LOCAL_ADMIN_PORT) } : {}) },
     visionline: {

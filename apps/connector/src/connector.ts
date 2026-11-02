@@ -1,4 +1,8 @@
 import { statfs } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
+import { visionlineTrust } from './visionline/trust.ts';
 import { hostname } from 'node:os';
 import { createHash } from 'node:crypto';
 import { CONTRACT_VERSION, PAYLOAD_SCHEMAS, type CommandEnvelope, type CommandResult, type ConnectorHealth, type SealedCredentialPlain, type SealedSecret } from '@smk/shared';
@@ -14,7 +18,7 @@ import { readDirectory } from './visionline/directory.ts';
 /** Commands that change Visionline; refused in read-only mode. */
 const WRITES = new Set(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'CREATE_USER_GROUP', 'ENCODE_KEYCARD', 'CANCEL_KEYCARD', 'DOOR_COMMANDS']);
 
-export const CONNECTOR_VERSION = '0.12.0';
+export const CONNECTOR_VERSION = '0.14.0';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -65,17 +69,45 @@ export class Connector {
   private async platform<T>(path: string, body: unknown, timeoutMs = 30_000): Promise<T> {
     const token = this.secrets.get('platformToken');
     if (!token) throw new Error('Platform token not configured');
-    const r = await fetch(this.cfg.platformUrl.replace(/\/$/, '') + path, {
-      method: 'POST', body: JSON.stringify(body ?? {}), signal: AbortSignal.timeout(timeoutMs),
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-installation-uuid': this.installationUuid, 'user-agent': `smk-connector/${CONNECTOR_VERSION}` },
+    const r = await this.platformHttp(path, JSON.stringify(body ?? {}), timeoutMs, {
+      'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-installation-uuid': this.installationUuid, 'user-agent': `smk-connector/${CONNECTOR_VERSION}`,
     });
-    const text = await r.text();
+    const text = r.text;
     const json = text ? JSON.parse(text) : {};
     if (!r.ok) throw Object.assign(new Error(json?.error?.message ?? `Platform HTTP ${r.status}`), { status: r.status });
     this.platformReachable = true;
     this.lastPlatformContact = new Date().toISOString();
     if (this.lastError?.startsWith('Platform')) this.lastError = null;
     return json as T;
+  }
+
+  /**
+   * 2.16 The platform may be on another computer (the connector is not always on the platform's server): over
+   * https with the server's own certificate (platformCaFile, trusted exactly) or a system-trusted one. On the
+   * same server it is plain http on 127.0.0.1, as before.
+   */
+  private platformAgent: https.Agent | null | undefined;
+  private platformHttp(path: string, body: string, timeoutMs: number, headers: Record<string, string>): Promise<{ ok: boolean; status: number; text: string }> {
+    const u = new URL(this.cfg.platformUrl.replace(/\/$/, '') + path);
+    if (this.platformAgent === undefined) {
+      if (u.protocol === 'https:') {
+        const t = visionlineTrust(this.cfg.platformCaFile ? readFileSync(this.cfg.platformCaFile) : undefined, { pinSha256: this.cfg.platformPinSha256, label: 'The platform' });
+        this.platformAgent = new https.Agent({ keepAlive: true, minVersion: 'TLSv1.2', ...t.tlsOptions } as https.AgentOptions);
+      } else this.platformAgent = null;
+    }
+    const mod = u.protocol === 'https:' ? https : http;
+    return new Promise((resolve, reject) => {
+      const req = mod.request({ protocol: u.protocol, hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80), path: u.pathname + u.search, method: 'POST',
+        headers: { ...headers, 'content-length': String(Buffer.byteLength(body)) }, agent: this.platformAgent ?? undefined, timeout: timeoutMs }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => resolve({ ok: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300, status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') }));
+        res.on('error', reject);
+      });
+      req.on('timeout', () => req.destroy(new Error(`Platform did not answer within ${Math.round(timeoutMs / 1000)} s`)));
+      req.on('error', (e: NodeJS.ErrnoException) => reject(new Error(`Platform unreachable at ${u.origin}: ${e.message}${/certificate|self.signed|CERT_|fingerprint/i.test(e.message + (e.code ?? '')) ? ' (trust the server\'s certificate: install.ps1 -PlatformCaFile gateway.cer, made by set-connector-access.ps1 on the server)' : ''}`)));
+      req.end(body);
+    });
   }
 
   health(): ConnectorHealth {

@@ -1,21 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Staff Mobile Key server installer (.msi). Built by scripts/build-msi.mjs with wixl (msitools); the files come from
+<!-- Access Monitoring Tool server installer (.msi). Built by scripts/build-msi.mjs with wixl (msitools); the files come from
      the on-premises package. The .msi copies the package to Program Files\StaffMobileKey\Setup and runs the same
      installer as Install.cmd (install-onprem.ps1) as SYSTEM. Upgrades: install the newer .msi over the old one. -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="*" Name="Staff Mobile Key Server" Language="1033" Version="$(var.Version)" Manufacturer="$(var.Manufacturer)"
+  <Product Id="*" Name="Access Monitoring Tool Server" Language="1033" Version="$(var.Version)" Manufacturer="$(var.Manufacturer)"
            UpgradeCode="6B0E3B2C-8F4A-4C61-9B2E-3D7A51C0E912">
-    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Description="Staff Mobile Key Server $(var.Version)"
-             Comments="Visionline staff mobile keys, reports and monitoring, installed on the hotel's Visionline server." />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Staff Mobile Key Server is already installed." />
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Description="Access Monitoring Tool Server $(var.Version)"
+             Comments="Doors, keycards and locks from ASSA ABLOY Visionline: reports and monitoring. Portal, connector, or both." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Access Monitoring Tool Server is already installed." />
     <Media Id="1" Cabinet="smk.cab" EmbedCab="yes" />
-    <Condition Message="Staff Mobile Key Server needs a 64-bit Windows.">VersionNT64</Condition>
+    <Condition Message="Access Monitoring Tool Server needs a 64-bit Windows.">VersionNT64</Condition>
     <Condition Message="Run the installation as an administrator.">Privileged</Condition>
 
     <Property Id="ARPHELPLINK" Value="$(var.HelpLink)" />
     <Property Id="ARPNOMODIFY" Value="1" />
     <!-- Options for install-onprem.ps1, e.g.  msiexec /i StaffMobileKey.msi SMK_OPTIONS="-LanPort 9443" -->
     <Property Id="SMK_OPTIONS" Secure="yes" Value=" " />
+    <!-- 2.17 SMK_SHOW=1 shows the installation steps in a window (for IT support); by default nothing pops up. -->
+    <Property Id="SMK_SHOW" Secure="yes" Value="0" />
+    <!-- 2.17 SMK_ASK=1 asks the setup questions again on an upgrade. -->
+    <Property Id="SMK_ASK" Secure="yes" Value="0" />
+    <!-- The setup questions (a small window), run before anything is installed; answers go to ProgramData. -->
+    <Binary Id="AskSetupExe" SourceFile="$(var.ToolsDir)/ask-setup.exe" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">
@@ -28,35 +34,42 @@
 
     <DirectoryRef Id="ProgramMenuFolder">
       <Component Id="StartMenu" Guid="4C5D2E19-0B7B-4F8E-8E54-61C7A9D20B31" Win64="yes">
-        <Shortcut Id="OpenPortal" Name="Staff Mobile Key" Description="Open the Staff Mobile Key portal on this server"
+        <Shortcut Id="OpenPortal" Name="Access Monitoring Tool" Description="Open the Access Monitoring Tool portal on this server"
                   Target="[INSTALLDIR]Open-StaffMobileKey.cmd" WorkingDirectory="INSTALLDIR" />
         <RegistryValue Root="HKLM" Key="Software\StaffMobileKey\Server" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 
-    <Feature Id="Server" Title="Staff Mobile Key Server" Level="1">
+    <Feature Id="Server" Title="Access Monitoring Tool Server" Level="1">
       <ComponentGroupRef Id="PackageFiles" />
       <ComponentRef Id="StartMenu" />
     </Feature>
 
-    <!-- Install / upgrade: the package's own installer, as SYSTEM, after the files are in place. -->
-    <CustomAction Id="SetPowerShell" Property="SMK_PS" Value="[System64Folder]WindowsPowerShell\v1.0\powershell.exe" />
-    <CustomAction Id="RunServerInstaller" Property="SMK_PS" Execute="deferred" Impersonate="no" Return="check"
-                  ExeCommand="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLDIR]install-onprem.ps1&quot; -NoBrowser [SMK_OPTIONS]" />
+    <!-- Install / upgrade, as SYSTEM after the files are in place: install-auto.ps1 reads the answers and installs the
+         portal, the connector or both. run-hidden.exe keeps the PowerShell window away unless SMK_SHOW=1. -->
+    <CustomAction Id="SetRunHidden" Property="SMK_RUN" Value="[INSTALLDIR]run-hidden.exe" />
+    <CustomAction Id="RunServerInstaller" Property="SMK_RUN" Execute="deferred" Impersonate="no" Return="check"
+                  ExeCommand="[SMK_SHOW] &quot;[INSTALLDIR]install-auto.ps1&quot; [SMK_OPTIONS]" />
     <!-- Uninstall (not on upgrade): services and programs go, the hotel's data is kept. -->
-    <CustomAction Id="RunServerUninstaller" Property="SMK_PS" Execute="deferred" Impersonate="no" Return="ignore"
-                  ExeCommand="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLDIR]uninstall-onprem.ps1&quot;" />
+    <CustomAction Id="RunServerUninstaller" Property="SMK_RUN" Execute="deferred" Impersonate="no" Return="ignore"
+                  ExeCommand="[SMK_SHOW] &quot;[INSTALLDIR]uninstall-onprem.ps1&quot;" />
     <!-- At the end of an interactive installation: open the portal (first-run setup page on a new server). -->
-    <CustomAction Id="SetCmd" Property="SMK_CMD" Value="[System64Folder]cmd.exe" />
-    <CustomAction Id="OpenPortalNow" Property="SMK_CMD" Execute="immediate" Impersonate="yes" Return="asyncNoWait"
-                  ExeCommand="/c &quot;&quot;[INSTALLDIR]Open-StaffMobileKey.cmd&quot;&quot;" />
+    <CustomAction Id="OpenPortalNow" Property="SMK_RUN" Execute="immediate" Impersonate="yes" Return="asyncNoWait"
+                  ExeCommand="--nowait &quot;[INSTALLDIR]Open-StaffMobileKey.cmd&quot;" />
+    <!-- The AskSetup custom action itself (type 2: the program in the Binary table above, waited for, its exit code
+         checked) is added by build-msi.mjs with msibuild: wixl cannot write a BinaryKey + ExeCommand action. -->
 
+    <InstallUISequence>
+      <Custom Action="AskSetup" Sequence="1295">NOT Installed AND (NOT WIX_UPGRADE_DETECTED OR SMK_ASK = "1")</Custom>
+    </InstallUISequence>
+
+    <!-- 2.16.1 Fixed sequence numbers: wixl placed "Before=InstallFinalize" before InstallInitialize once (error 2762).
+         build-msi.mjs checks the deferred actions sit between InstallInitialize (1500) and InstallFinalize (6600). -->
     <InstallExecuteSequence>
-      <Custom Action="SetPowerShell" After="CostFinalize">1</Custom>
-      <Custom Action="SetCmd" After="SetPowerShell">1</Custom>
-      <Custom Action="RunServerUninstaller" Before="RemoveFiles">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
-      <Custom Action="RunServerInstaller" Before="InstallFinalize">NOT REMOVE</Custom>
-      <Custom Action="OpenPortalNow" After="InstallFinalize">NOT REMOVE AND UILevel &gt;= 3</Custom>
+      <Custom Action="SetRunHidden" Sequence="1001">1</Custom>
+      <Custom Action="RunServerUninstaller" Sequence="3400">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="RunServerInstaller" Sequence="6500">NOT REMOVE</Custom>
+      <Custom Action="OpenPortalNow" Sequence="6700">NOT REMOVE AND UILevel &gt;= 3</Custom>
     </InstallExecuteSequence>
   </Product>
 </Wix>

@@ -48,7 +48,7 @@ const SPKI_ED25519 = Buffer.from('302a300506032b6570032100', 'hex');
 export function parseLicence(raw: string): LicencePayload {
   const key = raw.replace(/\s+/g, '').replace(/^-+BEGIN[^-]+-+|-+END[^-]+-+$/g, '');
   const parts = key.split('.');
-  if (parts.length !== 3 || parts[0] !== 'SMK1') throw badRequest('LICENCE_INVALID', 'This is not a Staff Mobile Key licence. Paste the whole key, starting with SMK1.');
+  if (parts.length !== 3 || parts[0] !== 'SMK1') throw badRequest('LICENCE_INVALID', 'This is not a Access Monitoring Tool licence. Paste the whole key, starting with SMK1.');
   const data = Buffer.from(`${parts[0]}.${parts[1]}`);
   const sig = b64u(parts[2]!);
   const ok = sig.length === 64 && trustedKeys().some((k) => {
@@ -95,15 +95,15 @@ export async function assertModuleLicensed(db: Db, hotelId: string, feature: str
   if (!licensingEnforced() || !(feature in LICENSED_MODULES)) return;
   const s = await licenceStatus(db, hotelId);
   if (s.state === 'expired' || s.state === 'mismatch') throw new ApiError(402, 'LICENCE_REQUIRED', 'The licence has ended. Enter a new licence key in Settings → Licence.');
-  if (!s.modules.includes(feature)) throw new ApiError(402, 'LICENCE_REQUIRED', `${LICENSED_MODULES[feature as LicensedModule]} is not in this hotel's licence. Ask your supplier to add it.`);
+  if (!s.modules.includes(feature)) throw new ApiError(402, 'LICENCE_REQUIRED', `${LICENSED_MODULES[feature as LicensedModule]} is not in your licence. Ask your supplier to add it.`);
 }
 
 /** Changes are refused once the licence (or trial) and its grace period are over. Reads, sign-in, revocation and the licence page stay open. */
-const ALWAYS_ALLOWED = [/^\/api\/v1\/hotels\/[^/]+\/(emergency|emergency\/[^/]+\/(confirm|end|roll|keys)|usage\/ping)$/, /^\/api\/v1\/public\/keycard-requests\//, /^\/api\/v1\/hotels\/[^/]+\/licence$/, /^\/api\/v1\/hotels\/[^/]+\/keys\/[^/]+\/revoke$/, /^\/api\/v1\/hotels\/[^/]+\/me\//];
+const ALWAYS_ALLOWED = [/^\/api\/v1\/hotels\/[^/]+\/(emergency|emergency\/[^/]+\/(confirm|end|roll|keys)|usage\/ping)$/, /^\/api\/v1\/public\/keycard-requests\//, /^\/api\/v1\/public\/invites\//, /^\/api\/v1\/hotels\/[^/]+\/licence$/, /^\/api\/v1\/hotels\/[^/]+\/keys\/[^/]+\/revoke$/, /^\/api\/v1\/hotels\/[^/]+\/me\//];
 export async function licenceGate(method: string, url: string, hotelId: string) {
   if (!licensingEnforced() || method === 'GET' || method === 'HEAD' || ALWAYS_ALLOWED.some((r) => r.test(url.split('?')[0]!))) return;
   const s = await licenceStatus(pool, hotelId);
   if (s.state === 'expired' || s.state === 'mismatch')
-    throw new ApiError(402, 'LICENCE_REQUIRED', s.state === 'mismatch' ? 'This licence was issued for another ASSA ABLOY System ID. Enter the licence for this hotel in Settings → Licence.'
+    throw new ApiError(402, 'LICENCE_REQUIRED', s.state === 'mismatch' ? 'This licence was issued for another ASSA ABLOY System ID. Enter the licence for this system in Settings → Licence.'
       : 'The licence has ended, so changes are paused (keys can still be revoked). Enter a new licence key in Settings → Licence.');
 }

@@ -6,7 +6,7 @@ import { ErrorNote, useApi } from '../ui';
 
 const STATE: Record<string, { label: string; tone: string }> = {
   licensed: { label: 'Licensed', tone: 'ok' }, trial: { label: 'Trial', tone: 'warn' }, grace: { label: 'Ending — grace period', tone: 'warn' },
-  expired: { label: 'Ended', tone: 'bad' }, mismatch: { label: 'Licence for another hotel', tone: 'bad' },
+  expired: { label: 'Ended', tone: 'bad' }, mismatch: { label: 'Licence for another site', tone: 'bad' },
 };
 const d = (v?: string | null) => (v ? new Date(v.length === 10 ? `${v}T12:00:00Z` : v).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
@@ -41,7 +41,7 @@ export function LicencePanel() {
         <dl className="kv" style={{ margin: "12px 0 16px" }}>
           {x.licence ? <>
             <dt>Licensed to</dt><dd>{x.licence.customer}</dd>
-            <dt>Hotel</dt><dd>{x.licence.hotel}</dd>
+            <dt>Licensed to</dt><dd>{x.licence.hotel}</dd>
             <dt>Licence number</dt><dd><code>{x.licence.id}</code></dd>
             <dt>Valid until</dt><dd>{x.licence.expires ? `${d(x.licence.expires)} (${x.daysLeft >= 0 ? `${x.daysLeft} days left` : 'ended'})` : 'No end date'}</dd>
             {x.licence.support && <><dt>Support and updates until</dt><dd>{d(x.licence.support)}</dd></>}
@@ -62,7 +62,7 @@ export function LicencePanel() {
       </div>
       <div className="panel">
         <h2>Enter a licence key</h2>
-        <p className="muted small">Your supplier sends the key as text (starting with <code>SMK1.</code>) or as a <code>.smklic</code> file. Send them the hotel name, the ASSA ABLOY System ID and the installation ID shown here.</p>
+        <p className="muted small">Your supplier sends the key as text (starting with <code>SMK1.</code>) or as a <code>.smklic</code> file. Send them the organisation name, the ASSA ABLOY System ID and the installation ID shown here.</p>
         {can('settings.manage') ? <>
           <label className="field"><span>Licence key</span>
             <textarea rows={6} value={key} onChange={(e) => setKey(e.target.value)} placeholder="SMK1.…" spellCheck={false} style={{ fontFamily: 'var(--mono, monospace)', fontSize: 12 }} />
@@ -71,7 +71,7 @@ export function LicencePanel() {
             <label className="btn">Choose file… <input type="file" accept=".smklic,.txt" hidden onChange={(e) => readFile(e.target.files?.[0])} /></label>
             <button className="btn primary" disabled={busy || key.length < 20} onClick={save}>{busy ? 'Checking…' : 'Install licence'}</button>
           </div>
-        </> : <p className="muted">Only hotel administrators can enter a licence.</p>}
+        </> : <p className="muted">Only administrators can enter a licence.</p>}
         {msg && <div className="alert ok" style={{ marginTop: 12 }}>{msg}</div>}
         <div style={{ marginTop: 12 }}><ErrorNote error={error} /></div>
       </div>
@@ -96,7 +96,7 @@ function LicenceModal({ x, reload }: { x: any; reload: () => void }) {
   return (
     <div className="modal-scrim" role="dialog" aria-modal="true" aria-labelledby="lic-title">
       <div className="modal">
-        <h2 id="lic-title">{x.state === 'mismatch' ? 'This licence belongs to another hotel' : x.licence ? 'The licence has ended' : 'The trial has ended'}</h2>
+        <h2 id="lic-title">{x.state === 'mismatch' ? 'This licence belongs to another site' : x.licence ? 'The licence has ended' : 'The trial has ended'}</h2>
         <p>Changes are paused until a licence key is entered. Keys can still be revoked, reports read and people signed in; doors in Visionline are not affected.</p>
         {admin ? <>
           <label className="field"><span>Licence key from your supplier</span>
@@ -108,7 +108,7 @@ function LicenceModal({ x, reload }: { x: any; reload: () => void }) {
             <button className="btn" onClick={close}>Later</button>
             <button className="btn primary" disabled={busy || key.length < 20} onClick={save}>{busy ? 'Checking…' : 'Install licence'}</button>
           </div>
-        </> : <div className="row end"><span className="muted small" style={{ marginRight: 'auto' }}>Ask a hotel administrator to enter the new licence.</span><button className="btn primary" onClick={close}>OK</button></div>}
+        </> : <div className="row end"><span className="muted small" style={{ marginRight: 'auto' }}>Ask an administrator to enter the new licence.</span><button className="btn primary" onClick={close}>OK</button></div>}
       </div>
     </div>
   );
@@ -128,7 +128,7 @@ export function LicenceBanner() {
 }
 function band(x: any, hotel: any) {
   const text = x.state === 'expired' ? 'The licence has ended: changes are paused (keys can still be revoked).'
-    : x.state === 'mismatch' ? 'This licence belongs to another hotel.'
+    : x.state === 'mismatch' ? 'This licence belongs to another site.'
       : x.state === 'grace' ? `The ${x.licence ? 'licence' : 'trial'} has ended; changes will pause in a few days.`
         : `The ${x.licence ? 'licence' : 'trial'} ends in ${x.daysLeft} day${x.daysLeft === 1 ? '' : 's'}.`;
   return (

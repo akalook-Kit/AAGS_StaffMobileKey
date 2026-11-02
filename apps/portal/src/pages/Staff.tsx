@@ -108,14 +108,14 @@ function StaffForm({ person, onClose, onSaved }: { person?: any; onClose: () => 
         <div className="field"><label htmlFor="vu">Visionline user ID</label><input id="vu" value={f.visionlineUser} onChange={set('visionlineUser')} disabled={Boolean(person)} placeholder="Created automatically if empty" /><span className="hint">The card holder in Visionline. Created on first key if missing.</span></div>
         <div className="field"><label htmlFor="ug">User group</label>
           <select id="ug" value={f.visionlineUserGroup} onChange={set('visionlineUserGroup')}>
-            <option value="">Hotel default{vl.data?.data?.defaultUserGroup ? ` (${vl.data.data.defaultUserGroup})` : ''}</option>
+            <option value="">Default{vl.data?.data?.defaultUserGroup ? ` (${vl.data.data.defaultUserGroup})` : ''}</option>
             {f.visionlineUserGroup && !groupNames.includes(f.visionlineUserGroup) && <option value={f.visionlineUserGroup}>{f.visionlineUserGroup}</option>}
             {groupNames.map((g) => <option key={g} value={g}>{g}{found.has(g) ? '' : ' (not in Visionline yet)'}</option>)}
           </select><span className="hint">Groups are managed in Settings → Visionline.</span></div>
       </div>
       <h3 style={{ marginTop: 6 }}>Staff app sign-in</h3>
       <div className="field"><label htmlFor="ap">{person ? 'Set a new temporary password' : 'Temporary password'}</label><input id="ap" type="password" autoComplete="new-password" value={f.appPassword} onChange={set('appPassword')} placeholder="At least 8 characters" />
-        <span className="hint">Development sign-in. In production staff sign in with the hotel's identity provider.</span></div>
+        <span className="hint">Development sign-in. In production staff sign in with the organisation's identity provider.</span></div>
       {person && (
         <div className="panel" style={{ marginTop: 10 }}>
           <h3>Phone and access</h3>

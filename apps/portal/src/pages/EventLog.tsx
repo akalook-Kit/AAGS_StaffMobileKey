@@ -114,7 +114,7 @@ export function EventLogPage() {
 
   return (
     <>
-      <PageHead title="Event log" intro={<>Door entrances, refused entries, lock alarms, batteries, keys and system errors. Times are hotel time ({tz}). The log can only be printed as a PDF made by the platform; every PDF can be checked later with <b>Verify a PDF</b>.</>}>
+      <PageHead title="Event log" intro={<>Door entrances, refused entries, lock alarms, batteries, keys and system errors. Times are local time ({tz}). The log can only be printed as a PDF made by the platform; every PDF can be checked later with <b>Verify a PDF</b>.</>}>
         <button className="btn primary" onClick={printPdf} disabled={busy || !data}>{busy ? 'Making the PDF…' : 'Print PDF'}</button>
       </PageHead>
       <ErrorNote error={error ?? r.error} />

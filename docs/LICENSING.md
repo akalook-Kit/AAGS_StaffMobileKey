@@ -95,7 +95,7 @@ When a licence (or the trial) has ended, administrators get a window on every pa
   platform, gateway and connector services, firewall rules, certificate). Upgrades: install the newer `.msi`;
   hotel data, settings and licence are kept. Uninstall (Windows *Apps*): removes services and programs, **keeps**
   the hotel's data in `C:\ProgramData\StaffMobileKey` (delete it with `Uninstall.cmd -RemoveData` if really wanted).
-- Start menu: **Staff Mobile Key** opens the portal on that server (the first-run setup page with its code, before
+- Start menu: **Access Monitoring Tool** opens the portal on that server (the first-run setup page with its code, before
   setup; Windows asks for administrator rights to read the code).
 - Silent installation for IT departments:
 

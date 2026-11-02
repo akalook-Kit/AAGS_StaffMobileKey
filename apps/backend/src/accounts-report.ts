@@ -35,7 +35,7 @@ export async function buildAccountsReport(hotelId: string) {
     'ROOMS WITH MORE THAN ONE ACTIVE GUEST KEYCARD', ...(read?.rooms ? (multi.length ? multi.map((m) => `  ${String(m.room).padEnd(6)} ${m.n} valid guest keycards${rooms.has(m.room) ? '' : '  (room NOT on the in-house list)'}`) : ['  none']) : ['  Guest keycards not read from Visionline in the last 24 hours.']),
     ...(read?.rooms ? [`  (read from Visionline ${new Date(read.at).toISOString().slice(0, 16).replace('T', ' ')} UTC, ${read.rooms} rooms)`] : []), '',
     'UNPAID-GUEST LOCK-OUTS (last 24 h)', ...(lockouts.length ? lockouts.map((l) => `  ${l.room}  ${l.guest_name ?? ''}  ${l.amount ?? ''}  ${l.status}${l.method ? ` (${l.method === 'checkout_online' ? 'online checkout' : 'offline card'})` : ''}`) : ['  none']), '',
-    'Tally the occupied rooms with the PMS (Opera) night audit. Sent by the staff access portal.',
+    'Tally the occupied rooms with the PMS (Opera) night audit. Sent by the Access Monitoring Tool.',
   ].join('\n');
   return { subject: `Accounts daily report ${today}: ${rooms.size} occupied rooms`, text, rooms: rooms.size, guests, arrived: arrived.length, multipleCards: multi.map((m) => ({ room: m.room, n: m.n })) };
 }
@@ -55,6 +55,7 @@ export async function maybeSendAccountsReport() {
     const r = row.r;
     if (!r?.enabled || !Array.isArray(r.emails) || !r.emails.length) continue;
     const prop = await getConfig(pool, row.hotel_id, 'property');
+    if (prop?.kind === 'institution') continue; // 2.16 guest report: hotels only
     const tz = prop?.timezone ?? 'UTC';
     const now = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
     const day = fmtDay(new Date(), tz);

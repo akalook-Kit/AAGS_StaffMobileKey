@@ -55,7 +55,7 @@ the usual 8090 on your PC.
 
 | Where | What you should see |
 |---|---|
-| `services.msc` | *Staff Mobile Key Connector*, Running, Automatic (Delayed Start), Log On As *Local Service* |
+| `services.msc` | *Access Monitoring Tool Connector*, Running, Automatic (Delayed Start), Log On As *Local Service* |
 | `http://127.0.0.1:14091/` (user `admin`) | Platform connection: connected |
 | Portal → Connector health | *My PC (Windows service)* Online, version 0.5.0 |
 | Portal → Settings → Visionline → Change property credentials | Enter `sym` / `sym-dev-password` → **Test and save**: Visionline accepts it. The password was encrypted for your new connector. |

@@ -7,6 +7,7 @@ import { permsIn, requireOperator, requirePerm } from '../auth.ts';
 import { CATEGORIES, CATEGORY_LABELS, queryEvents, type Category, type EventClass } from '../event-log.ts';
 import { buildReportPdf, hotelHeader, type Tone } from '../pdf.ts';
 import { getConfig } from '../hotel-config.ts';
+import { roomCardUsage } from '../room-usage.ts';
 
 /**
  * Event log (2.6). The list is shown on screen and leaves the platform only as a server-made PDF (no spreadsheet
@@ -15,7 +16,7 @@ import { getConfig } from '../hotel-config.ts';
 const P = '/api/v1';
 const hid = (req: FastifyRequest) => {
   const id = (req.params as any).hotelId as string;
-  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Hotel');
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Site');
   return id;
 };
 const MAX_DAYS = 366;
@@ -37,7 +38,7 @@ const SEVERITY_LABEL = { error: 'Error', warning: 'Warning', info: '' } as const
 /** Read events or reports: either permission lets someone verify a printed PDF. */
 async function requireAny(req: FastifyRequest, hotelId: string, perms: ('events.read' | 'reports.read')[]) {
   const op = await requireOperator(req);
-  if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this hotel.');
+  if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this site.');
   const have = permsIn(op, hotelId);
   if (!perms.some((p) => have.has(p))) throw forbidden(`Missing permission: ${perms.join(' or ')}`);
   return op;
@@ -87,6 +88,47 @@ export function eventRoutes(app: FastifyInstance) {
       details: { report: `events-${f.cls}`, rows: r.events.length, pages: out.pages, sha256: out.sha256 } });
     const stamp = new Date().toISOString().slice(0, 10);
     reply.header('content-type', 'application/pdf').header('content-disposition', `attachment; filename="event-log-${f.cls}-${stamp}.pdf"`)
+      .header('cache-control', 'private, no-store').header('x-report-id', out.reportId).header('x-report-sha256', out.sha256);
+    return reply.send(out.bytes);
+  });
+
+  /** 2.15 Keycards used per room, and who issued them (on screen and as a PDF, like the event log). */
+  const RoomFilter = z.object({
+    from: z.coerce.date(), to: z.coerce.date(), door: z.string().max(120).optional().transform((v) => v || null),
+    scope: z.enum(['rooms', 'all']).default('rooms'),
+  }).refine((f) => f.to > f.from, 'The end must be after the start').refine((f) => f.to.getTime() - f.from.getTime() <= 93 * 86400_000, 'At most 93 days at a time');
+  app.get(`${P}/hotels/:hotelId/reports/room-keycards`, async (req) => {
+    const hotelId = hid(req);
+    await requirePerm(req, hotelId, 'events.read');
+    const f = RoomFilter.parse(req.query);
+    return roomCardUsage(hotelId, f);
+  });
+  app.post(`${P}/hotels/:hotelId/reports/room-keycards/pdf`, async (req, reply) => {
+    const hotelId = hid(req);
+    const op = await requirePerm(req, hotelId, 'events.read');
+    const f = RoomFilter.parse(req.body ?? {});
+    const r = await roomCardUsage(hotelId, f);
+    const { timezone } = await hotelHeader(hotelId);
+    const dt = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const d = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, dateStyle: 'medium', timeStyle: 'short' });
+    const rows: string[][] = []; const tones: Tone[] = [];
+    for (const room of r.rooms) for (const c of room.cards) {
+      rows.push([room.door, c.card, c.kind, [c.holder, c.group].filter(Boolean).join(' · '), c.issuedBy, String(c.entries), String(c.refused), dt.format(new Date(c.first)), dt.format(new Date(c.last))]);
+      tones.push(c.refused > 0 && c.entries === 0 ? 'error' : c.validThen === false ? 'warning' : null);
+    }
+    const out = await buildReportPdf({
+      hotelId, report: 'room-keycards', title: 'Keycards used per room', operatorId: op.id, operatorName: op.displayName,
+      selection: [`Period: ${d.format(f.from)} to ${d.format(f.to)} (${timezone})`, f.door ? `Door: ${r.rooms[0]?.door ?? f.door}` : f.scope === 'rooms' ? 'Guest rooms' : 'All doors',
+        'Issued by: the portal user for mobile keys and keycards handled in the portal; "Visionline desk" otherwise (Visionline\'s card log names the desk operator).'],
+      summary: [['Rooms', String(r.totals.rooms)], ['Keycards', String(r.totals.cards)], ['Entries', String(r.totals.entries)], ['Refused', String(r.totals.refused)]],
+      note: r.truncated ? 'The period has more than 20 000 door events; only the newest are counted. Choose a shorter period or one door.' : null,
+      columns: [{ label: 'Room / door', width: 9 }, { label: 'Card', width: 9 }, { label: 'Type', width: 10 }, { label: 'Holder', width: 19 }, { label: 'Issued by', width: 20 },
+        { label: 'Entries', width: 6, align: 'right' }, { label: 'Refused', width: 6, align: 'right' }, { label: 'First', width: 10 }, { label: 'Last', width: 10 }],
+      rows, tones, filters: { ...f, from: f.from.toISOString(), to: f.to.toISOString() },
+    });
+    await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'report.printed', targetType: 'report', targetId: out.reportId,
+      details: { report: 'room-keycards', rows: rows.length, pages: out.pages, sha256: out.sha256 } });
+    reply.header('content-type', 'application/pdf').header('content-disposition', `attachment; filename="keycards-per-room-${new Date().toISOString().slice(0, 10)}.pdf"`)
       .header('cache-control', 'private, no-store').header('x-report-id', out.reportId).header('x-report-sha256', out.sha256);
     return reply.send(out.bytes);
   });

@@ -1,5 +1,5 @@
 <#
-  Signs the Staff Mobile Key .msi with your code-signing certificate, so Windows shows your company as the publisher
+  Signs the Access Monitoring Tool .msi with your code-signing certificate, so Windows shows your company as the publisher
   (unsigned installers show "Unknown publisher" and SmartScreen warnings). Needs the Windows SDK's signtool.exe.
 
     .\sign-msi.ps1 -Msi .\StaffMobileKey-Server-2.12.0.msi -Pfx C:\certs\codesign.pfx
@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
 if (-not $signtool) { throw 'signtool.exe not found. Install the Windows SDK ("Signing Tools for Desktop Apps").' }
-$sa = @('sign', '/fd', 'SHA256', '/tr', $TimestampUrl, '/td', 'SHA256', '/d', 'Staff Mobile Key Server')
+$sa = @('sign', '/fd', 'SHA256', '/tr', $TimestampUrl, '/td', 'SHA256', '/d', 'Access Monitoring Tool Server')
 if ($Pfx) { $pw = Read-Host 'Certificate password' -AsSecureString; $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($pw)); $sa += @('/f', $Pfx, '/p', $plain) }
 elseif ($Thumbprint) { $sa += @('/sha1', $Thumbprint) }
 else { $sa += '/a' }

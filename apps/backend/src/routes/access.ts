@@ -13,7 +13,7 @@ import { notFound } from '../lib/errors.ts';
 const P = '/api/v1';
 const hid = (req: FastifyRequest) => {
   const id = (req.params as any).hotelId as string;
-  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Hotel');
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Site');
   return id;
 };
 const name = (u: any) => [u?.given_name, u?.surname].filter(Boolean).join(' ') || null;

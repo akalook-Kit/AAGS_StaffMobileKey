@@ -72,25 +72,79 @@ export async function applyBatteryEvent(c: pg.PoolClient, hotelId: string, ctx: 
   if (at.getTime() > Date.now() + 5 * 60_000) at = new Date(); // a lock clock far ahead: do not trust it
   const { state, volts } = classify(ev.eventCode, ctx.policy.battery.voltage);
   const reg = ev.registrationNumber != null && String(ev.registrationNumber) !== '0' ? String(ev.registrationNumber) : null;
-  await c.query(`INSERT INTO battery_readings (hotel_id, door_id, event_code, state, volts_below, reported_at, visionline_event_id, reporting_registration_number)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [hotelId, doorId, ev.eventCode, state, volts, at, visionlineEventId, reg]);
+
+  // 2.15 Was this a battery change? "Battery exchanged", or a "below X volts" reading that jumped up at once.
+  const exchanged = (B.exchanged as readonly number[]).includes(ev.eventCode);
+  let change: { source: 'event' | 'inferred'; detail: string } | null = exchanged ? { source: 'event', detail: `${batteryEventName(ev.eventCode)} (event ${ev.eventCode})` } : null;
+  if (!change && volts != null) {
+    const prev = await one(c, `SELECT volts_below FROM battery_readings WHERE hotel_id=$1 AND door_id=$2 AND volts_below IS NOT NULL AND reported_at < $3 ORDER BY reported_at DESC, id DESC LIMIT 1`, [hotelId, doorId, at]);
+    const before = prev ? Number(prev.volts_below) : null;
+    // Same battery range only (a 4.5 V reading after a 6.5 V one is a different battery pack, not a change).
+    if (before != null && (before >= 6) === (volts >= 6) && volts - before >= ctx.policy.battery.changeJumpVolts - 1e-9)
+      change = { source: 'inferred', detail: `Battery level rose from ${before.toFixed(1)} V to ${volts.toFixed(1)} V` };
+  }
+  await c.query(`INSERT INTO battery_readings (hotel_id, door_id, event_code, state, volts_below, reported_at, visionline_event_id, reporting_registration_number, change_inferred)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [hotelId, doorId, ev.eventCode, state, volts, at, visionlineEventId, reg, change?.source === 'inferred']);
 
   const cur = await one(c, 'SELECT * FROM battery_status WHERE hotel_id=$1 AND door_id=$2 FOR UPDATE', [hotelId, doorId]);
-  if (cur && new Date(cur.reported_at) > at) return { doorId, state, applied: false }; // older than what we know: history only
-  // A voltage reading without thresholds does not clear an alarm.
-  const newState: BatteryState = state === 'REPORTED' && cur && ['LOW', 'CRITICAL', 'GOOD'].includes(cur.state) ? cur.state : state;
+  if (cur && new Date(cur.reported_at) > at) { // older than what we know: history only (but a late-reported change still counts)
+    if (change) await noteChange(c, hotelId, doorId, at, change.source, change.detail);
+    return { doorId, state, applied: false };
+  }
+  // A voltage reading without thresholds does not clear an alarm, unless it shows that the batteries were changed.
+  const newState: BatteryState = state === 'REPORTED' && change ? 'GOOD'
+    : state === 'REPORTED' && cur && ['LOW', 'CRITICAL', 'GOOD'].includes(cur.state) ? cur.state : state;
   await c.query(`INSERT INTO battery_status (hotel_id, door_id, state, last_event_code, volts_below, reported_at, received_at) VALUES ($1,$2,$3,$4,$5,$6,now())
     ON CONFLICT (hotel_id, door_id) DO UPDATE SET state=EXCLUDED.state, last_event_code=EXCLUDED.last_event_code,
       volts_below=COALESCE(EXCLUDED.volts_below, battery_status.volts_below), reported_at=EXCLUDED.reported_at, received_at=now()`,
     [hotelId, doorId, newState, ev.eventCode, volts, at]);
+  if (change) await noteChange(c, hotelId, doorId, at, change.source, change.detail);
 
-  if (newState === 'LOW' || newState === 'CRITICAL') await raiseAlert(c, hotelId, ctx, doorId, doorName, door?.group ?? null, newState, ev.eventCode);
-  else if (newState === 'GOOD') await clearAlert(c, hotelId, doorId, doorName, (B.exchanged as readonly number[]).includes(ev.eventCode)
-    ? `${batteryEventName(ev.eventCode)} (event ${ev.eventCode})` : `Battery reading above the hotel's threshold (${batteryEventName(ev.eventCode)})`, SYSTEM);
+  if (newState === 'LOW' || newState === 'CRITICAL') {
+    // 2.15 Still alarming after the batteries were changed: the lock needs programming and a firmware upload,
+    // not another battery (so no "Replace lock battery" request is opened).
+    const days = ctx.policy.battery.stillAlarmingDays;
+    const since = cur?.last_change_at ? new Date(cur.last_change_at) : null;
+    const still = days > 0 && since != null && at.getTime() > since.getTime() + 2 * 60_000 && at.getTime() - since.getTime() <= days * 86_400_000;
+    const alert = await raiseAlert(c, hotelId, ctx, doorId, doorName, door?.group ?? null, newState, ev.eventCode, still);
+    if (still) await raiseReprogram(c, hotelId, doorId, doorName, door?.group ?? null, cur, ev.eventCode, at, alert);
+  } else if (newState === 'GOOD') await clearAlert(c, hotelId, doorId, doorName, change ? change.detail
+    : `Battery reading above the hotel's threshold (${batteryEventName(ev.eventCode)})`, SYSTEM);
   return { doorId, state: newState, applied: true };
 }
 
-async function raiseAlert(c: pg.PoolClient, hotelId: string, ctx: BatteryContext, doorId: string, doorName: string, group: string | null, severity: 'LOW' | 'CRITICAL', code: number) {
+/** Remember the newest battery change of a door (and forget the "program the lock" request of an older change). */
+async function noteChange(c: pg.PoolClient, hotelId: string, doorId: string, at: Date, source: 'event' | 'inferred' | 'maintenance', detail: string) {
+  const r = await c.query(`UPDATE battery_status SET last_change_at=$3, last_change_source=$4, last_change_detail=$5, reprogram_ticket_id=NULL, reprogram_at=NULL
+    WHERE hotel_id=$1 AND door_id=$2 AND (last_change_at IS NULL OR last_change_at < $3)`, [hotelId, doorId, at, source, detail]);
+  if (r.rowCount) await audit(c, { hotelId, actorType: source === 'maintenance' ? 'system' : 'connector', action: 'battery.changed', targetType: 'door', targetId: doorId,
+    details: { at: at.toISOString(), source, detail } });
+}
+
+export const REPROGRAM_ADVICE = 'The batteries were changed but the lock still reports a battery alarm. Program the lock and upload its firmware with the '
+  + 'service tool (portable programming unit / LockLink), then check that the alarm has cleared. Changing batteries in good time, before '
+  + 'they are critically low, avoids this.';
+
+async function raiseReprogram(c: pg.PoolClient, hotelId: string, doorId: string, doorName: string, group: string | null, cur: any, code: number, at: Date, alert: any) {
+  if (cur.reprogram_ticket_id) {
+    const t = await one(c, 'SELECT id, status FROM maintenance_tickets WHERE id=$1', [cur.reprogram_ticket_id]);
+    if (t && OPEN_STATUSES.includes(t.status)) return; // already asked
+  }
+  const changed = new Date(cur.last_change_at).toISOString().slice(0, 16).replace('T', ' ');
+  const known = await one(c, `SELECT 1 FROM resources WHERE hotel_id=$1 AND kind='door' AND external_id=$2`, [hotelId, doorId]);
+  const t = await createTicket(c, hotelId, {
+    title: `Program lock and upload firmware: ${doorName}`,
+    description: `${REPROGRAM_ADVICE}\n\nBatteries changed: ${changed} UTC (${cur.last_change_detail ?? cur.last_change_source}). Alarm afterwards: ${batteryEventName(code)} (event ${code}).`,
+    category: 'lock', priority: 'high', doorId: known ? doorId : null, location: group ? `${doorName} · ${group}` : doorName, source: 'battery',
+    batteryAlertId: alert && !alert.ticket_id ? alert.id : null,
+  }, SYSTEM);
+  if (alert && !alert.ticket_id) await c.query('UPDATE battery_alerts SET ticket_id=$2 WHERE id=$1', [alert.id, t.id]);
+  await c.query('UPDATE battery_status SET reprogram_ticket_id=$3, reprogram_at=$4 WHERE hotel_id=$1 AND door_id=$2', [hotelId, doorId, t.id, at]);
+  await audit(c, { hotelId, actorType: 'connector', action: 'battery.reprogram_requested', targetType: 'door', targetId: doorId, details: { ticket: t.number, eventCode: code, changedAt: cur.last_change_at } });
+  await notifyMaintenanceTeam(c, hotelId, 'Program the lock and upload firmware', `${doorName}${group ? ` · ${group}` : ''}: batteries were changed but the lock still alarms.`);
+}
+
+async function raiseAlert(c: pg.PoolClient, hotelId: string, ctx: BatteryContext, doorId: string, doorName: string, group: string | null, severity: 'LOW' | 'CRITICAL', code: number, noReplaceTicket = false): Promise<any> {
   const open = await one(c, `SELECT * FROM battery_alerts WHERE hotel_id=$1 AND door_id=$2 AND status IN ('OPEN','ACKNOWLEDGED') FOR UPDATE`, [hotelId, doorId]);
   const label = severity === 'CRITICAL' ? 'critically low' : 'low';
   let alert = open;
@@ -98,7 +152,7 @@ async function raiseAlert(c: pg.PoolClient, hotelId: string, ctx: BatteryContext
     const escalate = open.severity === 'LOW' && severity === 'CRITICAL';
     alert = await one(c, `UPDATE battery_alerts SET occurrences=occurrences+1, last_seen_at=now(), severity=$2, status=CASE WHEN $3 THEN 'OPEN' ELSE status END WHERE id=$1 RETURNING *`,
       [open.id, escalate ? 'CRITICAL' : open.severity, escalate]);
-    if (!escalate) return; // duplicate: counted, nobody is told again
+    if (!escalate) return alert; // duplicate: counted, nobody is told again
     await audit(c, { hotelId, actorType: 'connector', action: 'battery.alert_escalated', targetType: 'door', targetId: doorId, details: { alertId: open.id, eventCode: code, event: batteryEventName(code) } });
     if (open.ticket_id) {
       await activity(c, hotelId, open.ticket_id, SYSTEM, 'battery', `The lock now reports the battery as critically low (${batteryEventName(code)}).`, { eventCode: code });
@@ -110,14 +164,16 @@ async function raiseAlert(c: pg.PoolClient, hotelId: string, ctx: BatteryContext
   }
   await notifyMaintenanceTeam(c, hotelId, `Lock battery ${label}`, `${doorName}${group ? ` · ${group}` : ''}: ${batteryEventName(code)}.`);
   const auto = ctx.policy.battery.autoTicket;
-  if (!alert.ticket_id && (auto === 'any' || (auto === 'critical' && severity === 'CRITICAL'))) {
+  if (!noReplaceTicket && !alert.ticket_id && (auto === 'any' || (auto === 'critical' && severity === 'CRITICAL'))) {
     const t = await createTicket(c, hotelId, {
       title: `Replace lock battery: ${doorName}`, description: `The lock reported "${batteryEventName(code)}" (Visionline event ${code}).`,
       category: 'battery', priority: severity === 'CRITICAL' ? 'high' : 'normal', doorId: (await one(c, `SELECT 1 FROM resources WHERE hotel_id=$1 AND kind='door' AND external_id=$2`, [hotelId, doorId])) ? doorId : null,
       location: group ? `${doorName} · ${group}` : doorName, source: 'battery', batteryAlertId: alert.id,
     }, SYSTEM);
     await c.query('UPDATE battery_alerts SET ticket_id=$2 WHERE id=$1', [alert.id, t.id]);
+    alert.ticket_id = t.id;
   }
+  return alert;
 }
 
 /** The battery is fine again: close the alert, and resolve its maintenance request if nobody has yet. */
@@ -147,6 +203,7 @@ export async function resolveAlertFromTicket(c: pg.PoolClient, hotelId: string, 
     await c.query(`INSERT INTO battery_readings (hotel_id, door_id, event_code, state, reported_at) VALUES ($1,$2,0,'GOOD',now())`, [hotelId, alert.door_id]);
     await c.query(`INSERT INTO battery_status (hotel_id, door_id, state, last_event_code, reported_at) VALUES ($1,$2,'GOOD',0,now())
       ON CONFLICT (hotel_id, door_id) DO UPDATE SET state='GOOD', last_event_code=0, volts_below=NULL, reported_at=now(), received_at=now()`, [hotelId, alert.door_id]);
+    await noteChange(c, hotelId, alert.door_id, new Date(), 'maintenance', reason);
   }
 }
 

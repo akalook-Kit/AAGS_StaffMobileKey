@@ -200,12 +200,14 @@ export function registerCredentialServices(app: FastifyInstance, st: SimState, o
   app.post('/sim/guest-cards', async (req, reply) => {
     const b = (req.body ?? {}) as { room?: string; n?: number; hours?: number };
     if (!b.room || !st.doors.some((d) => d.id === b.room)) return reply.code(400).send({ code: 'Unknown room' });
+    const regNos: string[] = [];
     for (let i = 0; i < (b.n ?? 1); i++) {
+      regNos.push(String(st.nextCardId));
       const c: any = { cardId: String(st.nextCardId++), credentialID: st.nextCredentialId++, cardHolder: `guest-${b.room}`, issuedBy: 'PMS', endpointId: '', doors: [b.room], startTime: Date.now() - 60_000,
         expireTime: Date.now() + (b.hours ?? 24) * 3_600_000, status: 'ISSUED', cancelled: false, checkedOut: new Set(), createdAt: Date.now(), accountName: '', label: 'guest', usedAt: new Set(), plastic: true, guest: true };
       st.cards.set(c.credentialID, c);
     }
-    return { room: b.room, added: b.n ?? 1 };
+    return { room: b.room, added: b.n ?? 1, regNos };
   });
   app.post('/sim/desk/cards', async (req, reply) => {
     const b = (req.body ?? {}) as { userId?: string; givenName?: string; surname?: string; userGroup?: string; days?: number; doors?: string[] };
@@ -231,7 +233,7 @@ export function registerCredentialServices(app: FastifyInstance, st: SimState, o
   app.post('/sim/doors/:id/battery', async (req, reply) => {
     const door = st.doors.find((d) => d.id === (req.params as any).id);
     if (!door) return reply.code(404).send({ code: 'UnknownDoor' });
-    const b = (req.body ?? {}) as { kind?: 'low' | 'critical' | 'exchanged' | 'volts'; volts?: number; code?: number };
+    const b = (req.body ?? {}) as { kind?: 'low' | 'critical' | 'exchanged' | 'volts'; volts?: number; code?: number; minutesAgo?: number };
     let code = b.code ?? (b.kind === 'low' ? 304 : b.kind === 'critical' ? 305 : b.kind === 'exchanged' ? 528 : 0);
     if (b.kind === 'volts') {
       const v = Number(b.volts);
@@ -244,7 +246,9 @@ export function registerCredentialServices(app: FastifyInstance, st: SimState, o
       st.alarms.push({ id: String(5000 + st.alarms.length), alarmType: '1', alarmText: b.kind === 'low' ? 'Battery level low' : 'Battery level critically low', at: t, door: door.id, cardHolder: null, completed: false, updatedAt: t });
     }
     door.battery = b.kind === 'low' ? 'LOW' : b.kind === 'critical' ? 'CRITICAL' : b.kind === 'exchanged' ? 'GOOD' : door.battery;
-    vlPublish(st, 'events', { doorID: door.doorID, registrationNumber: 0, eventCode: code, eventTime: toVisionlineLocal(new Date(), opts.timeZone ?? 'Africa/Douala'), repeatFlags: 0 });
+    // minutesAgo: an event recorded earlier by an offline lock and uploaded to Visionline now.
+    const when = new Date(Date.now() - Math.max(0, Number(b.minutesAgo ?? 0)) * 60_000);
+    vlPublish(st, 'events', { doorID: door.doorID, registrationNumber: 0, eventCode: code, eventTime: toVisionlineLocal(when, opts.timeZone ?? 'Africa/Douala'), repeatFlags: 0 });
     opts.log(`LOCK ${door.doorName}: battery event ${code}`);
     return { door: door.id, eventCode: code };
   });
@@ -254,7 +258,10 @@ export function registerCredentialServices(app: FastifyInstance, st: SimState, o
     if (!door) return reply.code(404).send({ code: 'UnknownDoor' });
     const code = Number((req.body as any)?.code);
     if (!Number.isInteger(code) || code <= 0) return reply.code(400).send({ code: 'BadCode' });
-    vlPublish(st, 'events', { doorID: door.doorID, registrationNumber: 0, eventCode: code, eventTime: toVisionlineLocal(new Date(), opts.timeZone ?? 'Africa/Douala'), repeatFlags: 0 });
+    // 2.15 optional card and time (a keycard used at the door; minutesAgo = uploaded later from an offline lock)
+    const reg = Number((req.body as any)?.registrationNumber ?? 0) || 0;
+    const when = new Date(Date.now() - Math.max(0, Number((req.body as any)?.minutesAgo ?? 0)) * 60_000);
+    vlPublish(st, 'events', { doorID: door.doorID, registrationNumber: reg, eventCode: code, eventTime: toVisionlineLocal(when, opts.timeZone ?? 'Africa/Douala'), repeatFlags: 0 });
     opts.log(`LOCK ${door.doorName}: event ${code}`);
     return { door: door.id, eventCode: code };
   });

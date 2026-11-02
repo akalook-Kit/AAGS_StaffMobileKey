@@ -89,7 +89,7 @@ export function buildWindowsRuntime(out) {
 
   const programs = walk(out).filter((f) => /\.(exe|dll)$/i.test(f)).sort();
   writeFileSync(join(out, 'VERSIONS.txt'), [
-    'Staff Mobile Key - Windows runtime (used only by Staff Mobile Key; nothing is installed system-wide)',
+    'Access Monitoring Tool - Windows runtime (used only by Access Monitoring Tool; nothing is installed system-wide)',
     '',
     `Node.js ${RUNTIME.node.version} (official Windows build, Authenticode-signed by the OpenJS Foundation). MIT licence. https://nodejs.org`,
     `PostgreSQL ${RUNTIME.postgres.version} server (EnterpriseDB Windows binaries via ${RUNTIME.postgres.spec}). PostgreSQL Licence. https://www.postgresql.org`,

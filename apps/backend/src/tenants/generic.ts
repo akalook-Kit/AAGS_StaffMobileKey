@@ -36,7 +36,7 @@ export function genericProfile(env: NodeJS.ProcessEnv = process.env): HotelProfi
   const uuid = env.HOTEL_MA_UUID ? Number(env.HOTEL_MA_UUID) : null;
   const short = name.length <= 20 ? name : name.split(/\s+/).slice(0, 2).join(' ').slice(0, 20);
   const branding = {
-    appName: `${short} Staff Key`.slice(0, 30), portalTitle: `${name} · Staff Access`.slice(0, 60),
+    appName: `${short} Staff Key`.slice(0, 30), portalTitle: `${name} · Access Monitoring`.slice(0, 60),
     primaryColor: '#1F2933', secondaryColor: '#C9A86A', backgroundColor: '#F7F5F0', textOnPrimary: '#FFFFFF', fontFamily: 'system', logo: null,
     logoSize: { portal: 'medium', app: 'medium', reports: 'medium' },
   };
@@ -45,11 +45,12 @@ export function genericProfile(env: NodeJS.ProcessEnv = process.env): HotelProfi
     config: {
       policy: {},
       property: {
-        displayName: name, supportEmail: env.HOTEL_SUPPORT_EMAIL?.trim() || `frontdesk@${slug}.invalid`, supportPhone: env.HOTEL_SUPPORT_PHONE?.trim() || '+000 000 000',
+        kind: env.HOTEL_KIND === 'institution' ? 'institution' : 'hotel',
+        displayName: name, supportEmail: env.HOTEL_SUPPORT_EMAIL?.trim() || `support@${slug}.invalid`, supportPhone: env.HOTEL_SUPPORT_PHONE?.trim() || '+000 000 000',
         country, timezone, homepage: null, address: null, systemNumber: env.HOTEL_SYSTEM_NUMBER?.trim() || (systemId ? String(systemId) : null),
       },
       branding,
-      features: { staffMobileKeys: true },
+      features: { staffMobileKeys: false }, // 2.17 mobile keys are off until switched on (Settings -> Modules)
       visionline: {
         defaultUserGroup: 'Housekeeping', userGroups: ['Housekeeping', 'Maintenance', 'Security', 'Management', 'Front Office'],
         accountName: env.HOTEL_VL_ACCOUNT?.trim() || null, keyLabel: null, mobileAccessUuid: Number.isInteger(uuid) ? uuid : null,

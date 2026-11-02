@@ -296,7 +296,7 @@ export function registerVisionline(app: FastifyInstance, st: SimState, opts: {
     if (!c) return fail(reply, 40411, 'The specified card does not exist.');
     const t = now();
     return { id: c.cardId, cardHolder: c.cardHolder, format: c.plastic ? 'rfid48' : 'TLCode', cancelled: c.cancelled, discarded: false, overridden: c.vlStatus === 2,
-      expired: c.expireTime <= t, notIssued: false, numberOfIssuedCards: c.plastic ? 1 : 0, serialNumbers: c.plastic ? ['04A1B2C3D4'] : [],
+      expired: c.expireTime <= t, notIssued: false, numberOfIssuedCards: 1, serialNumbers: c.plastic ? ['04A1B2C3D4'] : ['FFFFFFFF'],
       timeSchedule: c.timeSchedule ?? null, created: toVisionlineLocal(new Date(c.createdAt), opts.timeZone) + String(new Date(c.createdAt).getUTCSeconds()).padStart(2, '0') + String(c.createdAt % 1000).padStart(3, '0'),
       startTime: toVisionlineLocal(new Date(c.startTime), opts.timeZone), expireTime: toVisionlineLocal(new Date(c.expireTime), opts.timeZone),
       doorOperations: [{ operation: 'normal', doors: c.doors, doorGroups: [] }],

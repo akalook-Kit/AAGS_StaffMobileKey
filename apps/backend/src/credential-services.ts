@@ -52,7 +52,7 @@ export class CredentialServicesClient {
 
 export async function csForHotel(hotelId: string) {
   const c = await getConfig(pool, hotelId, 'credential_services');
-  if (!c) throw new ApiError(503, 'CS_NOT_CONFIGURED', 'Credential Services is not configured for this hotel.');
+  if (!c) throw new ApiError(503, 'CS_NOT_CONFIGURED', 'Credential Services is not configured here.');
   const user = getSecret(c.tenantUserRef, hotelId);
   const pw = getSecret(c.tenantPasswordRef, hotelId);
   if (!user || !pw) throw new ApiError(503, 'CS_SECRET_MISSING', 'Credential Services account is not set yet: Settings -> Credential Services (user and password).');

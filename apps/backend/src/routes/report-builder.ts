@@ -2,12 +2,23 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { pool, many, one } from '../db.ts';
 import { audit } from '../audit.ts';
-import { permsIn, requirePerm } from '../auth.ts';
+import { permsIn, requireOperator } from '../auth.ts';
+import { forbidden } from '../lib/errors.ts';
+
+/** 2.17 Everyone who may read at least one data set can build charts from it (each data set keeps its own permission). */
+const DATA_PERMS = ['reports.read', 'events.read', 'maintenance.read', 'key.read', 'breakfast.read'] as const;
+async function requirePerm(req: import('fastify').FastifyRequest, hotelId: string, _perm: 'reports.read') {
+  const op = await requireOperator(req);
+  if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this site.');
+  const have = permsIn(op, hotelId);
+  if (!DATA_PERMS.some((p) => have.has(p))) throw forbidden('Your role cannot read any data for charts.');
+  return op;
+}
 import { datasetCatalog, runReport, type ReportSpec } from '../report-builder.ts';
 import { ApiError, notFound } from '../lib/errors.ts';
 
 const P = '/api/v1';
-const hid = (req: FastifyRequest) => { const id = (req.params as any).hotelId as string; if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Hotel'); return id; };
+const hid = (req: FastifyRequest) => { const id = (req.params as any).hotelId as string; if (!/^[0-9a-f-]{36}$/.test(id)) throw notFound('Site'); return id; };
 const Spec = z.object({
   dataset: z.string().max(40), groupBy: z.string().max(40), splitBy: z.string().max(40).nullable().optional(), measure: z.string().max(40),
   days: z.number().int().min(1).max(731).default(30), limit: z.number().int().min(1).max(400).default(15),

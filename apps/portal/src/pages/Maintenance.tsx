@@ -107,7 +107,7 @@ function NewRequest({ people, onClose, onCreated }: { people: any[]; onClose: ()
         <div className="field-row">
           <div className="field"><label htmlFor="c">Type</label><select id="c" value={f.category} onChange={set('category')}>{Object.entries(CATEGORY_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
           <div className="field"><label htmlFor="p">Priority</label><select id="p" value={f.priority} onChange={set('priority')}>{Object.entries(PRIORITY_LABEL).filter(([v]) => manager || v !== 'urgent').map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-            <span className="hint">Sets the due time from the hotel's policy.</span></div>
+            <span className="hint">Sets the due time from the policy.</span></div>
         </div>
         <div className="field-row">
           <div className="field"><label htmlFor="door">Door (Visionline)</label>

@@ -735,3 +735,63 @@ table.grid td .row.end, table.grid td .row { flex-wrap: nowrap; } table.grid td:
 .todo.bad .todo-n { color: var(--bad); }
 .quick { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .quick .chip { text-decoration: none; }
+
+/* 2.16 Settings → Connector: copyable commands and numbered steps */
+.cmd-box { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0 4px; }
+.cmd-box code { flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; white-space: pre-wrap; word-break: break-all; }
+ol.steps { padding-left: 20px; margin: 0 0 12px; }
+ol.steps > li { margin-bottom: 14px; }
+
+/* 2.16.1 Menu: groups fold away, the list scrolls with a visible hint, items a little tighter so more fit. */
+.rail button.group { display: flex; justify-content: space-between; align-items: center; width: 100%; background: none; border: 0; color: inherit; font: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; opacity: .6; padding: 14px 10px 4px; cursor: pointer; text-align: left; }
+.rail button.group:hover { opacity: .9; }
+.rail button.group span { font-size: 10px; letter-spacing: 0; }
+.rail .navgroup { display: flex; flex-direction: column; gap: 2px; }
+.rail .navgroup[hidden] { display: none; }
+.rail nav a { padding: 7px 10px; line-height: 1.25; }
+.rail nav { background: linear-gradient(var(--brand) 30%, transparent) center top, linear-gradient(transparent, var(--brand) 70%) center bottom,
+  radial-gradient(farthest-side at 50% 0, rgba(255,255,255,.18), transparent) center top, radial-gradient(farthest-side at 50% 100%, rgba(255,255,255,.18), transparent) center bottom;
+  background-repeat: no-repeat; background-size: 100% 28px, 100% 28px, 100% 10px, 100% 10px; background-attachment: local, local, scroll, scroll; }
+/* Count pills and dots sit on the text's middle line. */
+.rail nav .count { line-height: 18px; min-width: 18px; text-align: center; display: inline-block; }
+
+/* 2.17 Notice board, dynamic sign-in page, movement between pages */
+.notices-panel h2 { margin: 0; }
+.notices { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+.notice { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; display: flex; flex-direction: column; animation: rise .35s ease backwards; }
+.notice-important { border-color: var(--bad); }
+.notice-img { width: 100%; max-height: 180px; object-fit: cover; }
+.notice-body { padding: 12px 14px; }
+.notice-body h3 { margin: 4px 0 6px; font-size: 16px; }
+.notice-body p { margin: 0; white-space: pre-wrap; color: var(--ink-2); font-size: 14px; }
+.notice-meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--ink-3); }
+.notice-kind { display: inline-block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 2px 8px; border-radius: 10px; background: var(--surface-2); color: var(--ink-2); }
+.notice-kind.k-important { background: var(--bad); color: #fff; }
+.notice-kind.k-tip { background: var(--brass); color: #1c1715; }
+.notice-kind.k-event { background: var(--ok); color: #fff; }
+.login .side { gap: 28px; }
+.login-feed { display: flex; flex-direction: column; gap: 18px; }
+.login-slide { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 12px; padding: 16px 18px; min-height: 120px; display: flex; flex-direction: column; gap: 6px; animation: rise .5s ease backwards; }
+.login-slide img { width: 100%; max-height: 160px; object-fit: cover; border-radius: 8px; }
+.login-slide strong { font-size: 18px; color: #f3e7e1; }
+.login-slide p { margin: 0; opacity: .85; }
+.login-dots { display: flex; gap: 6px; }
+.login-dots button { width: 8px; height: 8px; border-radius: 50%; border: 0; background: rgba(255,255,255,.3); padding: 0; cursor: pointer; }
+.login-dots button[aria-pressed="true"] { background: var(--brass); width: 20px; border-radius: 4px; }
+.login-inside { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.login-inside li { display: flex; flex-direction: column; padding-left: 12px; border-left: 2px solid var(--brass); }
+.login-inside li span { opacity: .75; font-size: 13px; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+.page-enter { animation: rise .28s ease backwards; } /* backwards: no transform stays after the animation (fixed drawers inside keep the window as reference) */
+.panel, .figures > div, .vizcard { animation: fadein .3s ease backwards; }
+@media (prefers-reduced-motion: reduce) { .page-enter, .notice, .login-slide, .panel, .figures > div, .vizcard { animation: none; } }
+.vlpick { border: 1px dashed var(--line); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; }
+.vlpick-box { margin-top: 8px; }
+.vlpick-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow: auto; border: 1px solid var(--line-2); border-radius: var(--radius); }
+.vlpick-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line-2); padding: 8px 10px; cursor: pointer; color: inherit; font: inherit; }
+.vlpick-list button:hover { background: var(--surface-2); }
+.vlpick-list span { font-size: 12px; color: var(--ink-3); }
+.chip.on { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+.ssr-warn { border-left: 3px solid var(--bad); padding: 6px 10px; background: rgba(200,40,40,.06); }
+.ssr-cols { columns: 2; font-size: 12px; }

@@ -1,5 +1,5 @@
 <#
-  Staff Mobile Key - remove the on-premises services (platform, gateway, connector, database), the firewall
+  Access Monitoring Tool - remove the on-premises services (platform, gateway, connector, database), the firewall
   rules, the desktop shortcut and the program files. Run as administrator (or Uninstall.cmd).
 
   The DATA is KEPT unless you add -RemoveData: C:\ProgramData\StaffMobileKey (the database, settings,
@@ -16,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Write-Host 'Run Uninstall.cmd, or open PowerShell with "Run as administrator".' -ForegroundColor Red; exit 1 }
 if ($RemoveData) {
-  $ok = Read-Host "Delete ALL Staff Mobile Key data in $DataRoot (database, settings, logs and database copies)? Type YES"
+  $ok = Read-Host "Delete ALL Access Monitoring Tool data in $DataRoot (database, settings, logs and database copies)? Type YES"
   if ($ok -ne 'YES') { Write-Host 'Nothing removed.'; exit 1 }
 }
 foreach ($svc in 'StaffMobileKeyGateway', 'StaffMobileKeyPlatform', 'StaffMobileKeyConnector', 'StaffMobileKeyDatabase') {
@@ -27,10 +27,10 @@ foreach ($svc in 'StaffMobileKeyGateway', 'StaffMobileKeyPlatform', 'StaffMobile
     Write-Host "Removed service $svc"
   }
 }
-Get-NetFirewallRule -Group 'Staff Mobile Key' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-Unregister-ScheduledTask -TaskName 'Staff Mobile Key backup' -Confirm:$false -ErrorAction SilentlyContinue
-Remove-Item (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Staff Mobile Key.url') -Force -ErrorAction SilentlyContinue
-Get-ChildItem Cert:\LocalMachine\My -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -eq 'Staff Mobile Key gateway' } | Remove-Item -ErrorAction SilentlyContinue
+Get-NetFirewallRule -Group 'Staff Mobile Key','Access Monitoring Tool' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+Unregister-ScheduledTask -TaskName 'Access Monitoring Tool backup' -Confirm:$false -ErrorAction SilentlyContinue
+Remove-Item (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Access Monitoring Tool.url') -Force -ErrorAction SilentlyContinue
+Get-ChildItem Cert:\LocalMachine\My -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -eq 'Access Monitoring Tool gateway' } | Remove-Item -ErrorAction SilentlyContinue
 # This script may run from the installed folder: copy-out first, then remove the program files.
 Set-Location $env:TEMP
 foreach ($d in $InstallDir, "$InstallDir.previous", "$InstallDir.failed", (Join-Path $env:ProgramFiles 'StaffMobileKey\Connector'), $RuntimeDir) {

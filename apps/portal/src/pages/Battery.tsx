@@ -10,7 +10,13 @@ interface BDoor {
   lastEvent: { code: number; name: string } | null; voltsBelow: number | null; reportedAt: string | null; receivedAt: string | null;
   alert: { id: string; severity: 'LOW' | 'CRITICAL'; status: 'OPEN' | 'ACKNOWLEDGED'; openedAt: string; occurrences: number; acknowledgedAt: string | null; acknowledgedBy: string | null } | null;
   ticket: { id: string; number: number; status: string; assignee: string | null } | null;
+  /** 2.15 */
+  lastChange: { at: string; source: 'event' | 'inferred' | 'maintenance'; detail: string | null } | null;
+  reprogram: { at: string; ticketId: string; number: number; status: string } | null;
 }
+const OPEN_T = ['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS', 'ON_HOLD'];
+const needsProgramming = (d: BDoor) => Boolean(d.reprogram && OPEN_T.includes(d.reprogram.status));
+export const CHANGE_SOURCE: Record<string, string> = { event: 'lock event "battery exchanged"', inferred: 'voltage rose abruptly', maintenance: 'maintenance request' };
 
 export const STATE_LABEL: Record<BState, string> = { CRITICAL: 'Critical', LOW: 'Low', GOOD: 'Good', REPORTED: 'Reading only', NEVER: 'Never reported' };
 const STATE_PILL: Record<BState, string> = { CRITICAL: 'FAILED', LOW: 'PENDING', GOOD: 'ACTIVE', REPORTED: 'EXPIRED', NEVER: 'EXPIRED' };
@@ -19,6 +25,7 @@ const FILTERS: { id: string; label: string; test: (d: BDoor) => boolean }[] = [
   { id: 'attention', label: 'Low or critical', test: (d) => d.state === 'LOW' || d.state === 'CRITICAL' },
   { id: 'stale', label: 'Stale', test: (d) => d.stale },
   { id: 'never', label: 'Never reported', test: (d) => d.state === 'NEVER' },
+  { id: 'reprogram', label: 'Program lock', test: needsProgramming },
 ];
 const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
 
@@ -60,6 +67,22 @@ export function BatteryPage() {
           <div><div className="v">{s.stale}</div><div className="l">stale (no report for {b.data!.policy.staleAfterDays} days)</div></div>
           <div><div className="v">{s.never}<span style={{ fontSize: 18, color: 'var(--ink-3)' }}>/{s.total}</span></div><div className="l">never reported</div></div>
           <div><div className="v" style={{ color: 'var(--ok)' }}>{s.good}</div><div className="l">good</div></div>
+          {s.reprogram > 0 && <div><div className="v" style={{ color: 'var(--bad)' }}>{s.reprogram}</div><div className="l">to program (alarm after new batteries)</div></div>}
+        </div>
+      )}
+
+      {doors.some(needsProgramming) && (
+        <div className="panel">
+          <h2>Batteries changed, lock still alarming</h2>
+          <p className="small">These locks got new batteries but still report a battery alarm. <strong>Program the lock and upload its firmware with the service tool</strong>, then check that the alarm clears. Changing batteries in good time, before they are critically low, avoids this.</p>
+          <table className="grid"><thead><tr><th>Door</th><th>Batteries changed</th><th>Alarm since</th><th>Request</th></tr></thead>
+            <tbody>{doors.filter(needsProgramming).map((d) => (
+              <tr key={d.doorId} className="click" onClick={() => nav(`/battery/${encodeURIComponent(d.doorId)}`)}>
+                <td><strong>{d.name}</strong><span className="sub">{d.doorGroup ?? '—'}</span></td>
+                <td>{d.lastChange ? fmt.dt(d.lastChange.at) : '—'}<span className="sub">{d.lastChange ? CHANGE_SOURCE[d.lastChange.source] : ''}</span></td>
+                <td>{fmt.dt(d.reprogram!.at)}</td>
+                <td><Link to={`/maintenance/${d.reprogram!.ticketId}`} onClick={(e) => e.stopPropagation()}>#{d.reprogram!.number}</Link> <Status s={ticketTone(d.reprogram!.status)} label={TICKET_LABEL[d.reprogram!.status] ?? d.reprogram!.status} /></td>
+              </tr>))}</tbody></table>
         </div>
       )}
 
@@ -101,7 +124,7 @@ export function BatteryPage() {
               <div className="doors">
                 {ds.map((d) => (
                   <button key={d.doorId} className={`door wide ${d.state}${d.stale ? ' stale' : ''}`} onClick={() => nav(`/battery/${encodeURIComponent(d.doorId)}`)}
-                    title={`${d.name}: ${STATE_LABEL[d.state]}${d.stale ? ' (stale)' : ''}${d.reportedAt ? ` · ${fmt.dt(d.reportedAt)}` : ''}`}>
+                    title={`${d.name}: ${STATE_LABEL[d.state]}${d.stale ? ' (stale)' : ''}${d.reportedAt ? ` · ${fmt.dt(d.reportedAt)}` : ''}${d.lastChange ? ` · batteries changed ${fmt.dt(d.lastChange.at)}` : ''}${needsProgramming(d) ? ' · program the lock' : ''}`}>
                     <span className="cell" aria-hidden><i /></span>{d.name}
                     <span className="sr">{STATE_LABEL[d.state]}{d.stale ? ', stale' : ''}</span>
                   </button>
@@ -188,6 +211,8 @@ function DoorBattery({ id, door, onClose, onChanged }: { id: string; door: BDoor
             <dt>Last report</dt><dd>{door.lastEvent ? `${door.lastEvent.name}${door.lastEvent.code ? ` (event ${door.lastEvent.code})` : ''}` : 'This lock has not reported a battery event'}</dd>
             {door.voltsBelow != null && <><dt>Voltage</dt><dd>below {door.voltsBelow.toFixed(1)} V</dd></>}
             <dt>Reported</dt><dd>{door.reportedAt ? `${fmt.dt(door.reportedAt)} (lock time)` : '—'}{door.receivedAt ? <span className="small muted"> · received {fmt.rel(door.receivedAt)}</span> : null}</dd>
+            <dt>Batteries changed</dt><dd>{door.lastChange ? <>{fmt.dt(door.lastChange.at)} <span className="small muted">· {CHANGE_SOURCE[door.lastChange.source]}{door.lastChange.detail && door.lastChange.source === 'inferred' ? ` (${door.lastChange.detail.replace(/^Battery level rose from /, '')})` : ''}</span></> : <span className="muted">Not known yet (no "battery exchanged" event or voltage jump received)</span>}</dd>
+            {door.reprogram && <><dt>Program the lock</dt><dd><Link to={`/maintenance/${door.reprogram.ticketId}`}>Request #{door.reprogram.number}</Link> <Status s={ticketTone(door.reprogram.status)} label={TICKET_LABEL[door.reprogram.status] ?? door.reprogram.status} /><div className="small muted">Still alarming after new batteries: program the lock and upload its firmware with the service tool.</div></dd></>}
             <dt>Lock</dt><dd>{door.online == null ? '—' : door.online ? 'Online' : 'Offline (reports when its events reach Visionline)'}</dd>
             {a && <><dt>Alert</dt><dd><Status s={STATE_PILL[a.severity]} label={`${STATE_LABEL[a.severity]} · ${a.status === 'OPEN' ? 'open' : 'acknowledged'}`} /><span className="small muted"> since {fmt.dt(a.openedAt)} · {a.occurrences} {a.occurrences === 1 ? 'report' : 'reports'}{a.acknowledgedBy ? ` · acknowledged by ${a.acknowledgedBy}` : ''}</span></dd></>}
             {door.ticket && <><dt>Maintenance</dt><dd><Link to={`/maintenance/${door.ticket.id}`}>Request #{door.ticket.number}</Link> <Status s={ticketTone(door.ticket.status)} label={TICKET_LABEL[door.ticket.status]} /> <span className="small muted">{door.ticket.assignee ?? 'unassigned'}</span></dd></>}
@@ -195,7 +220,7 @@ function DoorBattery({ id, door, onClose, onChanged }: { id: string; door: BDoor
           <h3>Reports from this lock</h3>
           {(h.data?.readings ?? []).length ? (
             <table className="grid"><thead><tr><th>Lock time</th><th>Event</th><th>Meaning</th></tr></thead>
-              <tbody>{h.data!.readings.map((r, i) => <tr key={i}><td className="small">{fmt.dt(r.reportedAt)}</td><td>{r.event}{r.code ? <span className="sub">event {r.code}</span> : null}</td><td><Status s={STATE_PILL[r.state as BState] ?? 'EXPIRED'} label={STATE_LABEL[r.state as BState] ?? r.state} /></td></tr>)}</tbody></table>
+              <tbody>{h.data!.readings.map((r, i) => <tr key={i}><td className="small">{fmt.dt(r.reportedAt)}</td><td>{r.event}{r.code ? <span className="sub">event {r.code}{r.changeInferred ? ' · batteries changed (voltage rose)' : ''}</span> : null}</td><td><Status s={STATE_PILL[r.state as BState] ?? 'EXPIRED'} label={STATE_LABEL[r.state as BState] ?? r.state} /></td></tr>)}</tbody></table>
           ) : <p className="muted small">None yet.</p>}
         </div>
         <div>

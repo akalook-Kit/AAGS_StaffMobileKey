@@ -1,5 +1,5 @@
 <#
-  Staff Mobile Key - go back to the program files that were installed before the last upgrade.
+  Access Monitoring Tool - go back to the program files that were installed before the last upgrade.
   Run as administrator. With -RestoreDatabase, also puts back the copy of the database made just before that
   upgrade (everything entered since is lost; you are asked to confirm).
 #>
