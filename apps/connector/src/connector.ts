@@ -18,7 +18,7 @@ import { readDirectory } from './visionline/directory.ts';
 /** Commands that change Visionline; refused in read-only mode. */
 const WRITES = new Set(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'CREATE_USER_GROUP', 'ENCODE_KEYCARD', 'CANCEL_KEYCARD', 'DOOR_COMMANDS']);
 
-export const CONNECTOR_VERSION = '0.16.0';
+export const CONNECTOR_VERSION = '0.16.2';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**

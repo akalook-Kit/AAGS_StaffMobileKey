@@ -47,7 +47,7 @@ export function MonitoringPage() {
       <div className="seg" role="tablist" style={{ margin: '4px 0 14px', flexWrap: 'wrap' }}>
         {TABS.map((x) => <button key={x.id} role="tab" aria-pressed={tab === x.id} onClick={() => setSp({ tab: x.id })}>{x.l}</button>)}
       </div>
-      {!d ? null : tab === 'alerts' ? <Alerts d={d} t={t} ack={ack} canAck={can('alerts.manage')} />
+      {!d ? null : tab === 'alerts' ? <Alerts d={d} t={t} ack={ack} canAck={can('alerts.manage')} reload={() => void m.reload()} />
         : tab === 'doors' ? <Doors d={d} t={t} />
         : tab === 'vip' ? <Vip d={d} t={t} reload={m.reload} />
         : tab === 'system' ? <System d={d} t={t} />
@@ -56,25 +56,65 @@ export function MonitoringPage() {
   );
 }
 
-function Alerts({ d, t, ack, canAck }: { d: any; t: (v: string | null) => string; ack: (id: string) => void; canAck: boolean }) {
+/** How each kind of alert closes by itself (2.27.1, Armel: "Alerts, how can I be closing them?"). */
+const CLOSES: Record<string, string> = {
+  connector_offline: 'Closes when the connector on the Visionline server reports again (check that its service runs).',
+  visionline_unreachable: 'Closes when the connector reaches Visionline again.',
+  disk_low: 'Closes when the disk has more free space than the limit (Settings → Alerts & notifications).',
+  db_large: 'Closes when the database is below the limit, or after raising the limit in Settings → Alerts & notifications.',
+  lock_alarm: 'Closes when the alarm is completed in Visionline (Alarms), or 24 hours after it was raised.',
+  battery_critical: 'Closes when the batteries are changed (Battery status → New batteries) or the lock reports a good battery.',
+  door_offline: 'Closes when the door reports again (a keycard used there, or the lock back in contact). Door-silence alerts can be switched off in Settings → Alerts & notifications.',
+  gateway_offline: 'Closes when the gateway is online again.',
+  generic_keycards: 'Closes when those keycards are put in a person\'s name or cancelled (Staff keycards → Renewals & duplicates).',
+};
+
+function Alerts({ d, t, ack, canAck, reload }: { d: any; t: (v: string | null) => string; ack: (id: string) => void; canAck: boolean; reload: () => void }) {
+  const { base } = useHotel();
+  const [showSeen, setShowSeen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
   if (!d.alerts.length) return <div className="panel"><NoData text="No open alerts" hint="Everything is quiet. Checked every minute." /></div>;
+  const unseen = d.alerts.filter((a: any) => !a.acknowledged_at);
+  const seen = d.alerts.filter((a: any) => a.acknowledged_at);
+  const ackAll = async (kind?: string) => {
+    setBusy(true); setError(null);
+    try { await api(`${base}/monitoring/alerts/acknowledge-all`, { body: kind ? { kind } : {} }); reload(); } catch (e) { setError(e); } finally { setBusy(false); }
+  };
+  const kinds = [...new Set(unseen.map((a: any) => a.kind))] as string[];
+  const rows = (list: any[]) => list.map((a: any) => (
+    <tr key={a.id} className={a.severity}>
+      <td><span className={`sev ${a.severity}`}>{SEV[a.severity as keyof typeof SEV]}</span></td>
+      <td><strong>{a.title}</strong>{a.detail && <div className="small muted">{a.detail}</div>}{CLOSES[a.kind] && <div className="small muted">{CLOSES[a.kind]}</div>}</td>
+      <td className="nowrap">{t(a.opened_at)}</td>
+      <td className="small muted">{a.notified_at ? `by e-mail/SMS ${t(a.notified_at)}` : 'not sent'}{a.acknowledged_at && <div>Seen by {a.acknowledged_by} {t(a.acknowledged_at)}</div>}</td>
+      <td style={{ textAlign: 'right' }}>{canAck && !a.acknowledged_at && <button className="btn small" onClick={() => ack(a.id)}>Mark as seen</button>}</td>
+    </tr>));
   return (
-    <div className="panel" style={{ padding: 0 }}>
-      <table className="grid mon-alerts"><thead><tr><th>Severity</th><th>Alert</th><th>Since</th><th>Told</th><th /></tr></thead><tbody>
-        {d.alerts.map((a: any) => (
-          <tr key={a.id} className={a.severity}>
-            <td><span className={`sev ${a.severity}`}>{SEV[a.severity as keyof typeof SEV]}</span></td>
-            <td><strong>{a.title}</strong>{a.detail && <div className="small muted">{a.detail}</div>}</td>
-            <td className="nowrap">{t(a.opened_at)}</td>
-            <td className="small muted">{a.notified_at ? `by e-mail/SMS ${t(a.notified_at)}` : 'not sent'}{a.acknowledged_at && <div>Seen by {a.acknowledged_by} {t(a.acknowledged_at)}</div>}</td>
-            <td style={{ textAlign: 'right' }}>{canAck && !a.acknowledged_at && <button className="btn small" onClick={() => ack(a.id)}>Mark as seen</button>}</td>
-          </tr>
-        ))}
-      </tbody></table>
-      <p className="small muted" style={{ padding: '8px 14px' }}>Alerts close by themselves when the problem is gone. "Mark as seen" records who is handling it; a disk or connector alert stays red until it is fixed.</p>
-    </div>
+    <>
+      <div className="panel">
+        <p style={{ marginTop: 0 }}><strong>How alerts close:</strong> each one closes by itself, within a minute, once the problem is fixed (the line under each alert says how). <strong>Mark as seen</strong> says you are handling it: it leaves the count in the menu and moves down to "Seen", and stays listed until it is fixed.</p>
+        <ErrorNote error={error} />
+        {canAck && unseen.length > 0 && (
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn primary" disabled={busy} onClick={() => void ackAll()}>Mark all {unseen.length} as seen</button>
+            {kinds.length > 1 && kinds.map((k) => <button key={k} className="btn small" disabled={busy} onClick={() => void ackAll(k)}>{KIND_LABEL[k] ?? k} ({unseen.filter((a: any) => a.kind === k).length})</button>)}
+          </div>
+        )}
+      </div>
+      <div className="panel" style={{ padding: 0 }}>
+        {unseen.length ? <table className="grid mon-alerts"><thead><tr><th>Severity</th><th>To look at ({unseen.length})</th><th>Since</th><th>Told</th><th /></tr></thead><tbody>{rows(unseen)}</tbody></table>
+          : <p className="small" style={{ padding: '10px 14px' }}>Nothing new: every open alert has been seen.</p>}
+        {seen.length > 0 && <>
+          <button type="button" className="linklike" style={{ margin: '8px 14px' }} aria-expanded={showSeen} onClick={() => setShowSeen(!showSeen)}>{showSeen ? 'Hide' : 'Show'} the {seen.length} alert(s) already seen, still open</button>
+          {showSeen && <table className="grid mon-alerts"><tbody>{rows(seen)}</tbody></table>}
+        </>}
+      </div>
+    </>
   );
 }
+const KIND_LABEL: Record<string, string> = { connector_offline: 'Connector', visionline_unreachable: 'Visionline', disk_low: 'Disk', db_large: 'Database', lock_alarm: 'Lock alarms',
+  battery_critical: 'Batteries', door_offline: 'Doors offline', gateway_offline: 'Gateways', generic_keycards: 'Generic keycards' };
 
 function Doors({ d, t }: { d: any; t: (v: string | null) => string }) {
   const [show, setShow] = useState<'offline' | 'all'>('offline');

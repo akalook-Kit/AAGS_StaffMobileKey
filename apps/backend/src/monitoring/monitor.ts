@@ -186,6 +186,10 @@ export async function checkHotel(hotelId: string, now = new Date()) {
   await clearOthers(hotelId, 'connector_offline', offline);
   await clearOthers(hotelId, 'visionline_unreachable', vlDown);
 
+  // 2.25 The Demo Hotel shows no facts about the real server (disk, database): testers see made-up data only.
+  const demo = Boolean((await one(pool, 'SELECT is_demo FROM hotels WHERE id=$1', [hotelId]))?.is_demo);
+  if (demo) { await clearOthers(hotelId, 'disk_low', []); await clear(hotelId, 'db_large', 'database'); }
+  else {
   // Disk: this server, and the disk the connector reports (the Visionline PC). Same host and path = one alert.
   const minFree = pol.diskMinFreeGb * GB;
   const diskPath = pol.diskPath?.trim() || defaultDiskPath();
@@ -212,6 +216,7 @@ export async function checkHotel(hotelId: string, now = new Date()) {
     await raise(hotelId, { kind: 'db_large', subject: 'database', severity: 'warning', title: `Database is ${Math.round(db.bytes / MB)} MB`,
       detail: `Above the ${pol.dbMaxMb} MB limit. Make a copy (database-tools.ps1 -Action Copy) and check System health for the largest tables.`, data: { bytes: db.bytes } });
   } else await clear(hotelId, 'db_large', 'database');
+  }
 
   // Doors
   if (pol.doorOffline.enabled) await checkDoors(hotelId, pol, conns, now);

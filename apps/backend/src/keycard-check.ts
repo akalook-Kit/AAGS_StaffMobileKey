@@ -56,6 +56,14 @@ function readExpiry(s: string | null | undefined, tz: string): Date | null {
   try { return fromVisionlineLocal(s, tz); } catch { const d = new Date(s); return Number.isNaN(d.getTime()) ? null : d; }
 }
 
+/** 2.26.1 The connector that answered is older than the one that knows Bana's Visionline: say so with the error. */
+export async function oldConnectorNote(hotelId: string) {
+  const c = await one(pool, `SELECT health->>'connectorVersion' AS v FROM connectors WHERE hotel_id=$1 AND status='ACTIVE' ORDER BY last_seen_at DESC NULLS LAST LIMIT 1`, [hotelId]);
+  const v = (c?.v ?? '0.0.0').split('.').map(Number);
+  const old = (v[0]! * 10000 + v[1]! * 100 + v[2]!) < 1602;
+  return old ? ` (The connector on the Visionline server is version ${c?.v ?? 'unknown'}; reading cards needs 0.16.2 or newer: install the latest installer with "Everything".)` : '';
+}
+
 export function keycardCheckRoutes(app: FastifyInstance) {
   const base = `${P}/hotels/:hotelId/keycards/check`;
 
@@ -85,7 +93,7 @@ export function keycardCheckRoutes(app: FastifyInstance) {
     const id = z.string().uuid().parse((req.params as any).readId);
     const c = await one(pool, `SELECT status, result, error, payload, completed_at FROM commands WHERE id=$1 AND hotel_id=$2 AND type='READ_CARD'`, [id, hotelId]);
     if (!c) throw notFound('Card read');
-    if (c.status !== 'SUCCEEDED') return { status: c.status, error: c.error?.message ?? null };
+    if (c.status !== 'SUCCEEDED') return { status: c.status, error: c.status === 'FAILED' || c.status === 'EXPIRED' ? `${c.error?.message ?? 'The card could not be read.'}${await oldConnectorNote(hotelId)}` : null };
     const r = c.result ?? {};
     const tz = (await getConfig(pool, hotelId, 'property'))?.timezone ?? process.env.HOTEL_TIMEZONE ?? 'UTC';
     const exp = readExpiry(r.expireTime, tz);

@@ -35,6 +35,7 @@ export function InvitePage({ token, onSignedIn }: { token: string; onSignedIn: (
       {info && !doneSignIn && (
         <form onSubmit={submit}>
           <p className="muted">{info.reset ? 'Choose a new password' : 'Choose the password you will use'} to sign in as <strong>{info.email}</strong>.</p>
+          {info.testDays && <p className="small">This is a test account for the Demo Hotel (made-up data). It works for {info.testDays} day{info.testDays === 1 ? '' : 's'} from now. Use the Feedback button on any page to say what you think.</p>}
           <div className="field"><label htmlFor="p1">Password</label><input id="p1" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" minLength={12} required autoFocus /><span className="hint">At least 12 characters. A short sentence is easy to remember.</span></div>
           <div className="field"><label htmlFor="p2">Same password again</label><input id="p2" type="password" value={again} onChange={(e) => setAgain(e.target.value)} autoComplete="new-password" required /></div>
           {problem && <p className="small" style={{ color: 'var(--bad)' }}>{problem}</p>}

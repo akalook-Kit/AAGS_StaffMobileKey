@@ -135,8 +135,10 @@ export async function requireOperator(req: FastifyRequest): Promise<OperatorCtx>
   if ((req as any).operator) return (req as any).operator;
   const t = await readToken(req);
   if (t.typ !== 'op') throw new ApiError(401, 'UNAUTHENTICATED', 'Operator sign-in required.');
-  const op = await one(pool, 'SELECT id, email, display_name, is_platform_admin, status, mfa_enabled, token_version FROM operators WHERE id=$1', [t.sub]);
+  const op = await one(pool, 'SELECT id, email, display_name, is_platform_admin, status, mfa_enabled, token_version, access_until FROM operators WHERE id=$1', [t.sub]);
   if (!op || op.status !== 'ACTIVE') throw new ApiError(401, 'UNAUTHENTICATED', 'Account is disabled.');
+  // 2.25 Test access (Demo Hotel testers) ends on its date.
+  if (op.access_until && new Date(op.access_until).getTime() <= Date.now()) throw new ApiError(401, 'ACCESS_ENDED', 'Your test access has ended. Thank you for testing.');
   // 2.20 A session from before the last password change / password link / two-step reset is no longer valid.
   if ((t.ver ?? 0) !== (op.token_version ?? 0)) throw new ApiError(401, 'UNAUTHENTICATED', 'Session ended (password or two-step sign-in changed). Sign in again.');
   const roles = new Map<string, Role[]>();

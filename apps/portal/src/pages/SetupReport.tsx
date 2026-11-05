@@ -1,63 +1,98 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useHotel } from '../App';
+import { tr } from '../i18n';
 import { api } from '../api';
 import { ErrorNote, PageHead, fmt, useApi } from '../ui';
 import { RefreshVisionline } from '../components/RefreshVisionline';
 
-/** 2.14 System setup report, laid out like the Visionline "System Setup Report": one section per page, printable. */
+/**
+ * 2.14 System setup report, laid out like the Visionline "System Setup Report": one section per page, printable.
+ * 2.27 Two reports (Armel, 4 Nov): the Visionline report is about Visionline only, with the facts on its first page
+ * (version, AES, locks); everything about this portal is in the Portal setup report (?view=portal).
+ */
 export function SetupReportPage() {
   const { base, branding } = useHotel();
-  const r = useApi<any>(`${base}/reports/setup`);
-  if (!r.data) return <><PageHead title="System setup report" /><ErrorNote error={r.error} /></>;
-  const x = r.data;
-  const Head = ({ title }: { title: string }) => (
-    <div className="ssr-head">
-      <div>{branding?.logo ? <img src={branding.logo} alt="" /> : <strong>{x.property.name}</strong>}</div>
-      <div className="ssr-title"><strong>System Setup Report</strong><em>{title}</em></div>
-      <div className="ssr-right"><em>Access Monitoring Tool {x.property.version}</em><span>System ID: {x.property.systemId ?? '—'}</span><span>Property name: {x.property.name}</span></div>
+  const [sp, setSp] = useSearchParams();
+  const view = sp.get('view') === 'portal' ? 'portal' : 'visionline';
+  const r = useApi<any>(`${base}/reports/setup${view === 'portal' ? '?part=portal' : ''}`, [view]);
+  const secs = useSeconds(r.loading && !r.data);
+  const title = view === 'portal' ? 'Portal setup report' : 'Visionline setup report';
+  const tabs = (
+    <div className="seg no-print" role="tablist" aria-label={tr('System setup reports')}>
+      {(['visionline', 'portal'] as const).map((v) => <button key={v} type="button" role="tab" aria-selected={view === v} aria-pressed={view === v} onClick={() => setSp(v === 'portal' ? { view: 'portal' } : {}, { replace: true })}>{tr(v === 'portal' ? 'Portal setup report' : 'Visionline setup report')}</button>)}
     </div>
   );
-  const Sec = ({ title, children }: { title: string; children: ReactNode }) => (
-    <section className="ssr-page"><Head title={title} />{children}<div className="ssr-foot"><em>Printed: {fmt.dt(x.printedAt)} by {x.printedBy}</em></div></section>
+  if (!r.data) return (
+    <><PageHead title={title} />{tabs}
+      <ErrorNote error={r.error} />
+      {r.loading && !r.error && <div className="panel" role="status" aria-live="polite"><p><strong>{tr('Preparing the report…')}</strong> {secs} s</p>
+        <p className="small muted">{secs < 20 ? tr('It reads every lock, user group and keycard; on a large site this takes a few seconds.') : tr('Still working. If nothing comes after 90 seconds the page says which step is slow.')}</p></div>}
+      {!r.loading && !r.error && <div className="alert bad" role="alert">{tr('The server sent no report. Refresh the page; if it stays empty, send a screenshot of Connector health to support.')}</div>}
+    </>);
+  const x = r.data;
+  const gl = x.glance ?? {};
+  const Head = ({ title: t }: { title: string }) => (
+    <div className="ssr-head">
+      <div>{branding?.logo ? <img src={branding.logo} alt="" /> : <strong>{x.property.name}</strong>}</div>
+      <div className="ssr-title"><strong>{view === 'portal' ? 'Portal Setup Report' : 'System Setup Report'}</strong><em>{t}</em></div>
+      {view === 'portal'
+        ? <div className="ssr-right"><em>Access Monitoring Tool {x.property.version}</em><span>Property name: {x.property.name}</span></div>
+        : <div className="ssr-right"><em>Visionline {gl.version ?? ''}</em><span>System ID: {gl.systemId ?? '—'}</span><span>Property name: {x.property.name}</span></div>}
+    </div>
+  );
+  const Sec = ({ title: t, children }: { title: string; children: ReactNode }) => (
+    <section className="ssr-page"><Head title={t} />{children}<div className="ssr-foot"><em>Printed: {fmt.dt(x.printedAt)} by {x.printedBy}</em></div></section>
   );
   const kv = (rows: [string, ReactNode][]) => <dl className="ssr-kv">{rows.map(([k, v]) => <div key={k}><dt>{k}:</dt><dd>{v}</dd></div>)}</dl>;
   return (
     <>
-      <PageHead title="System setup report" intro="Your set-up in one printable document: what to look at first, every room and the user groups that open it, user groups, door groups, keycard types, who has access to what (portal and Visionline) and the system parameters.">
-        <button className="btn primary" onClick={() => window.print()}>Print / PDF</button>
+      <PageHead title={title} intro={view === 'portal'
+        ? 'How this portal is set up: version, connector, licence, who can sign in, the Visionline operators linked to people, keycard types and the portal parameters.'
+        : 'Visionline only, in one printable document: the version, AES and the locks on the first page, then every room and the user groups that open it, user groups, door groups, locks, Visionline operators, who has access to what and the Visionline system parameters.'}>
+        <button className="btn primary" onClick={() => window.print()}>{tr('Print / PDF')}</button>
       </PageHead>
-      <div className="no-print"><RefreshVisionline onDone={() => setTimeout(() => void r.reload(), 4000)} /></div>
-      <ImportPanel reload={r.reload} imported={x.visionline} />
+      {tabs}
+      {view === 'visionline' && <div className="no-print"><RefreshVisionline onDone={() => setTimeout(() => void r.reload(), 4000)} /></div>}
+      {view === 'visionline' && <ImportPanel reload={r.reload} imported={x.visionline} />}
+      {view === 'visionline' ? (
       <div className="ssr">
-        <Sec title="Property">{kv([['Property name', x.property.name], ['System ID', x.property.systemId ?? '—'], ['Time zone', x.property.timezone], ['Version', x.property.version],
-          ['Locks', `${x.property.locks} (${x.property.locksOnline} online)`], ['User groups', x.property.userGroups], ['Door groups', x.property.doorGroups], ['Time schedules', x.property.timeSchedules],
-          ['Encoders', x.property.encoders.join(', ') || '—'], ['People in Visionline', x.property.visionlineUsers], ['Valid keycards', x.property.validKeycards],
-          ['Connector', x.property.connector ? `${x.property.connector.name} ${x.property.connector.version ?? ''}, last seen ${fmt.dt(x.property.connector.lastSeen)}` : 'not connected'],
-          ['Licence', x.property.licence ? `${x.property.licence.id}${x.property.licence.expires ? ` until ${x.property.licence.expires}` : ''}` : 'trial']])}</Sec>
+        <Sec title="At a Glance">
+          <div className="ssr-glance">
+            <div><span>Visionline version</span><strong>{gl.version ?? 'Not known'}</strong><small>{gl.version ? (gl.versionFrom ? `From the System settings report, ${gl.versionFrom}` : '') : 'Import the System settings report (Visionline reports, above).'}</small></div>
+            <div className={gl.aes?.enabled === true ? 'ok' : gl.aes?.enabled === false ? 'bad' : ''}><span>AES encryption</span><strong>{gl.aes?.enabled === true ? 'Enabled' : gl.aes?.enabled === false ? 'Not enabled' : 'Not shown in the report'}</strong>
+              <small>{gl.aes?.evidence ? (/authentication/i.test(gl.aes.evidence) && gl.aes.enabled ? `AES card authentication is set up in Visionline: ${gl.aes.evidence.replace(/^\[[^\]]*\]\s*/, '')}` : `Visionline report: ${gl.aes.evidence}`) : gl.source ? 'The System settings report imported does not mention AES. Check in Visionline: Settings → System settings (Security / Encryption).' : 'Import the System settings report (Visionline reports, above).'}</small></div>
+            <div><span>Locks</span><strong>{gl.locks?.total ?? x.property.locks}</strong><small>{gl.locks?.onlineKnown ? `${gl.locks.online} online · ${gl.locks.offline} offline (stand-alone)` : 'Online state not read'}</small></div>
+            <div><span>User groups</span><strong>{gl.userGroups ?? x.property.userGroups}</strong><small>{gl.doorGroups ?? x.property.doorGroups} door groups · {gl.timeSchedules ?? x.property.timeSchedules} time schedules</small></div>
+            <div><span>Encoders</span><strong>{(gl.encoders ?? x.property.encoders).length}</strong><small>{(gl.encoders ?? x.property.encoders).join(', ') || '—'}</small></div>
+            <div><span>People and keycards</span><strong>{gl.people ?? x.property.visionlineUsers}</strong><small>{gl.validKeycards ?? x.property.validKeycards} valid keycards{gl.operators != null ? ` · ${gl.operators} Visionline operators` : ''}</small></div>
+          </div>
+          {kv([['System code', gl.systemCode ?? '—'], ['System ID', gl.systemId ?? '—'], ['Visionline version', gl.version ?? 'not in the imported report'],
+            ['AES encryption', gl.aes?.enabled === true ? `Yes${gl.aes.evidence ? ` (${gl.aes.evidence})` : ''}` : gl.aes?.enabled === false ? 'No' : 'not in the imported report'], ...(gl.encryption ? [['Card encryption', gl.encryption] as [string, ReactNode]] : []), ...(gl.pmsEncryptionKey ? [['PMS encryption key', gl.pmsEncryptionKey] as [string, ReactNode]] : []),
+            ['Visionline Web API', gl.webApiVersion ?? '—'], ['Firmware pack', gl.firmwarePack ?? '—'],
+            ['Mobile Access option', gl.mobileAccess === true ? 'Yes' : gl.mobileAccess === false ? 'No' : '—'], ['Licensed options', gl.options?.length ? `${gl.options.length}` : '—'],
+            ['Events recorded', gl.eventsTotal ? `${gl.eventsOn} of ${gl.eventsTotal}` : '—'],
+            ...(gl.locksInReport ?? []).map((l: any) => [l.label, l.value] as [string, ReactNode]),
+            ...(gl.guestCards ?? []).map((l: any) => [l.label, l.value] as [string, ReactNode]),
+            ['Source', gl.source ? `"${gl.source.file}", imported ${fmt.dt(gl.source.importedAt)}; locks, groups and keycards read live from Visionline` : 'Read live from Visionline; System settings report not imported']])}
+          <div className="ssr-two">
+            <table className="ssr-t"><thead><tr><th>Locks by category</th><th>Locks</th><th>Online</th></tr></thead><tbody>{(gl.locks?.byCategory ?? []).map((c: any) => <tr key={c.name}><td>{c.name}</td><td>{c.n}</td><td>{c.online}</td></tr>)}</tbody></table>
+            <table className="ssr-t"><thead><tr><th>Locks by door group</th><th>Locks</th><th>Online</th></tr></thead><tbody>{(gl.locks?.byDoorGroup ?? []).map((c: any) => <tr key={c.name}><td>{c.name}</td><td>{c.n}</td><td>{c.online}</td></tr>)}</tbody></table>
+          </div>
+        </Sec>
         {(x.insights ?? []).length > 0 && (
           <Sec title="Worth a Look">
             <ul className="ssr-insights">{x.insights.map((i: any, k: number) => <li key={k} className={i.level === 'warn' ? 'ssr-warn' : ''}>{i.text}</li>)}</ul>
           </Sec>
         )}
         {x.roomMatrix && <Sec title="User Groups vs. Rooms"><RoomMatrix m={x.roomMatrix} /></Sec>}
-        <Sec title="Keycard Types"><table className="ssr-t"><thead><tr><th>Name</th><th>Description</th></tr></thead><tbody>{x.keycardTypes.map(([n, d]: string[]) => <tr key={n}><td>{n}</td><td>{d}</td></tr>)}</tbody></table></Sec>
         <Sec title="User Groups"><table className="ssr-t"><thead><tr><th>Name</th><th>Uniform access</th><th>Override deadbolt</th><th>Override privacy</th><th>Cards with override</th><th>Time schedule</th><th>Doors / door groups</th></tr></thead>
           <tbody>{x.userGroups.map((g: any) => <tr key={g.name}><td>{g.name}</td><td>{g.uniformAccess ? 'Yes' : 'No'}</td><td>{yn(g.overrideDeadbolt)}</td><td>{yn(g.overridePrivacy)}</td><td>{g.cardsWithOverride || '—'}</td><td>{g.timeSchedule ?? 'All week'}</td><td>{g.doors.join(', ') || '—'}</td></tr>)}</tbody></table>
-          <p className="small muted">Override: the group's keycards open doors even when the deadbolt or privacy is on (Visionline user group settings). "Not read" = run resource discovery with connector 0.13.1 or newer.</p></Sec>
+          <p className="small muted">Override: the group's keycards open doors even when the deadbolt or privacy is on (Visionline user group settings).</p></Sec>
         <Sec title="Door Groups vs. Rooms"><table className="ssr-t"><thead><tr><th>Door group</th><th>Doors</th></tr></thead><tbody>{x.doorGroups.map((g: any) => <tr key={g.name}><td>{g.name}</td><td>{g.doors.join(', ')}</td></tr>)}</tbody></table></Sec>
         <Sec title="Locks"><table className="ssr-t"><thead><tr><th>Lock</th><th>Door group</th><th>Category</th><th>Online</th></tr></thead><tbody>{x.locks.map((l: any) => <tr key={l.name}><td>{l.name}</td><td>{l.group ?? '—'}</td><td>{l.category ?? '—'}</td><td>{l.online === true ? 'Yes' : l.online === false ? 'No' : '—'}</td></tr>)}</tbody></table></Sec>
         <Sec title="Time Tables">{x.timeSchedules.length ? <ul>{x.timeSchedules.map((t: string) => <li key={t}>{t}</li>)}</ul> : <p>None read from Visionline.</p>}</Sec>
-        {x.visionline?.systemSettings && (
-          <Sec title="Visionline System Settings">
-            <p className="small muted">From the Visionline report "{x.visionline.systemSettings.file}", imported {fmt.dt(x.visionline.systemSettings.importedAt)}.</p>
-            {kv(Object.entries(x.visionline.systemSettings.facts as Record<string, string>).slice(0, 80).map(([k, v]) => [k, v]))}
-            {x.visionline.systemSettings.options?.length > 0 && <><h4>Visionline options</h4><ul className="ssr-cols">{x.visionline.systemSettings.options.map((o: any) => <li key={o.code}>({o.code}) {o.name}</li>)}</ul></>}
-          </Sec>
-        )}
         <Sec title="Visionline Operators">
-          {kv([['Visionline user used by this portal', x.visionline?.operatorUsed ? `${x.visionline.operatorUsed}${x.visionline.operatorShared ? ' (shared: PMS / interface type)' : ''}` : 'not set'],
-            ['Personal Visionline users required', x.visionline?.personalCredentialsRequired ? 'Yes' : 'No']])}
-          {x.visionline?.operatorShared && <p className="ssr-warn">Visionline logs every keycard made from the portal under "{x.visionline.operatorUsed}". Change it or add operators: give each person a named Visionline operator.</p>}
           {x.visionline?.operators ? (
             <>
               <p className="small muted">From "{x.visionline.operators.file}", imported {fmt.dt(x.visionline.operators.importedAt)}.</p>
@@ -65,8 +100,7 @@ export function SetupReportPage() {
               <table className="ssr-t"><thead><tr>{x.visionline.operators.head.map((h: string) => <th key={h}>{h}</th>)}</tr></thead>
                 <tbody>{x.visionline.operators.rows.map((row: string[], i: number) => <tr key={i}>{row.map((c, j) => <td key={j}>{c}</td>)}</tr>)}</tbody></table>
             </>
-          ) : <p>Who can do what in Visionline is not given by the Visionline Web API. Export the operator list from Visionline and import it above to show it here.</p>}
-          <OperatorLinks />
+          ) : <p>The Visionline operators are not given by the Visionline Web API. Export the operator list from Visionline and import it above to show it here.</p>}
         </Sec>
         <Sec title="Access by User Group">
           <table className="ssr-t"><thead><tr><th>User group</th><th>People</th><th>Valid keycards</th><th>Mobile keys</th><th>Override</th><th>Door groups</th><th>Doors</th></tr></thead>
@@ -74,21 +108,40 @@ export function SetupReportPage() {
               <td>{g.overrideDeadbolt ? 'Deadbolt' : '—'}{g.cardsWithOverride ? ` · ${g.cardsWithOverride} card(s)` : ''}</td><td>{g.doorGroups.join(', ') || '—'}</td><td>{g.doors.join(', ') || '—'}</td></tr>)}</tbody></table>
         </Sec>
         <Sec title="Access by Person"><ByPerson rows={x.accessByPerson ?? []} /></Sec>
-        <Sec title="System Access (portal operators)"><table className="ssr-t"><thead><tr><th>Name</th><th>E-mail</th><th>Roles</th><th>Two-step</th><th>Last sign-in</th></tr></thead><tbody>{x.access.map((a: any) => <tr key={a.email}><td>{a.name}</td><td>{a.email}</td><td>{a.roles.join(', ')}</td><td>{a.mfa ? 'Yes' : 'No'}</td><td>{a.lastSignIn ? fmt.dt(a.lastSignIn) : 'never'}</td></tr>)}</tbody></table></Sec>
         <Sec title="System Parameters">
           {x.visionline?.systemSettings ? <>
-            <p className="small muted">Visionline, from the System settings report "{x.visionline.systemSettings.file}", imported {fmt.dt(x.visionline.systemSettings.importedAt)}.</p>
+            <p className="small muted">From the Visionline System settings report "{x.visionline.systemSettings.file}", imported {fmt.dt(x.visionline.systemSettings.importedAt)}.</p>
             {(x.visionline.systemSettings.sections ?? []).filter((sec: any) => !/^(components|internal events)$/i.test(sec.name)).map((sec: any) => (
               <div key={sec.name} className="ssr-param"><h4>{sec.name}</h4>
                 {sec.name.toLowerCase() === 'events'
                   ? <ul className="ssr-cols">{(x.visionline.systemSettings.events ?? []).flatMap((g: any) => g.items.map((it: any) => <li key={`${g.group}-${it.code}`}>{it.on ? '☑' : '☐'} ({it.code}) {it.name}</li>))}</ul>
-                  : <ul className="ssr-lines">{sec.lines.map((l: string, i: number) => <li key={i}>{l.trim()}</li>)}</ul>}
+                  : sec.name.toLowerCase() === 'options'
+                    ? <ul className="ssr-cols">{(x.visionline.systemSettings.options ?? []).map((o: any) => <li key={o.code}>({o.code}) {o.name}</li>)}</ul>
+                    : <ul className="ssr-lines">{sec.lines.map((l: string, i: number) => <li key={i}>{l.trim()}</li>)}</ul>}
               </div>))}
           </> : <p className="ssr-warn">The Visionline system parameters come from the Visionline System settings report: import it above (Visionline reports).</p>}
-          <h4>Access Monitoring Tool</h4>
-          {kv(x.parameters.map(([k, v]: string[]) => [k, v]))}
         </Sec>
       </div>
+      ) : (
+      <div className="ssr">
+        <Sec title="Portal at a Glance">
+          {kv([['Property name', x.property.name], ['Time zone', x.property.timezone], ['Access Monitoring Tool', x.property.version],
+            ['Connector', x.property.connector ? `${x.property.connector.name}${x.property.connector.version ? ` ${x.property.connector.version}` : ''}, last seen ${fmt.dt(x.property.connector.lastSeen)}` : 'not connected'],
+            ['Visionline Web API', x.property.connector?.visionlineApi ?? '—'],
+            ['Visionline operator used by the portal', x.visionline?.operatorUsed ? `${x.visionline.operatorUsed}${x.visionline.operatorShared ? ' (shared: PMS / interface type)' : ''}` : 'not set'],
+            ['Personal Visionline users required', x.visionline?.personalCredentialsRequired ? 'Yes' : 'No'],
+            ['Licence', x.property.licence ? `${x.property.licence.id}${x.property.licence.expires ? ` until ${x.property.licence.expires}` : ''}` : 'trial'],
+            ['Portal users', `${x.access.length} (${x.access.filter((a: any) => a.mfa).length} with two-step sign-in)`],
+            ['Visionline reports imported', [x.visionline?.systemSettings && 'System settings', x.visionline?.operators && 'Operators', x.visionline?.cardLog && 'Card log'].filter(Boolean).join(', ') || 'none']])}
+          {(x.portalInsights ?? []).length > 0 && <ul className="ssr-insights">{x.portalInsights.map((i: any, k: number) => <li key={k} className={i.level === 'warn' ? 'ssr-warn' : ''}>{i.text}</li>)}</ul>}
+          {x.visionline?.operatorShared && <p className="ssr-warn">Visionline logs every keycard made from the portal under "{x.visionline.operatorUsed}". Give each person a named Visionline operator.</p>}
+        </Sec>
+        <Sec title="System Access (portal users)"><table className="ssr-t"><thead><tr><th>Name</th><th>E-mail</th><th>Roles</th><th>Two-step</th><th>Last sign-in</th></tr></thead><tbody>{x.access.map((a: any) => <tr key={a.email}><td>{a.name}</td><td>{a.email}</td><td>{a.roles.join(', ')}</td><td>{a.mfa ? 'Yes' : 'No'}</td><td>{a.lastSignIn ? fmt.dt(a.lastSignIn) : 'never'}</td></tr>)}</tbody></table></Sec>
+        <Sec title="Visionline Operators and People"><OperatorLinks /><p className="small muted">Which portal user each Visionline operator is, so a keycard made in Visionline shows who issued it.</p></Sec>
+        <Sec title="Keycard Types"><table className="ssr-t"><thead><tr><th>Name</th><th>Description</th></tr></thead><tbody>{x.keycardTypes.map(([n, d]: string[]) => <tr key={n}><td>{n}</td><td>{d}</td></tr>)}</tbody></table></Sec>
+        <Sec title="Portal Parameters">{kv(x.parameters.map(([k, v]: string[]) => [k, v]))}</Sec>
+      </div>
+      )}
     </>
   );
 }
@@ -137,7 +190,7 @@ function ByPerson({ rows }: { rows: any[] }) {
       <table className="ssr-t"><thead><tr><th>Name</th><th>User group</th><th>Cards</th><th>Until</th><th>Door groups</th><th>Doors</th><th>Notes</th></tr></thead>
         <tbody>{shown.map((r) => <tr key={r.id}><td>{r.name ?? r.id}</td><td>{r.group ?? '—'}</td><td>{r.cards}</td><td>{r.until ? fmt.dt(r.until) : '—'}</td><td>{r.doorGroups.join(', ') || '—'}</td>
           <td>{r.doors.length > 12 ? `${r.doors.slice(0, 12).join(', ')} … (${r.doors.length})` : r.doors.join(', ') || '—'}</td>
-          <td>{[r.override && 'deadbolt override', r.mobile && 'mobile key', r.portalUser && `portal user: ${r.portalUser}`].filter(Boolean).join(' · ')}</td></tr>)}</tbody></table>
+          <td>{[r.override && 'deadbolt override', r.mobile && 'mobile key'].filter(Boolean).join(' · ')}</td></tr>)}</tbody></table>
       {!rows.length && <p>No keycards read from Visionline yet (Visionline cards &amp; people).</p>}
     </>
   );
@@ -207,3 +260,10 @@ function ImportPanel({ reload, imported }: { reload: () => void; imported: any }
 const KIND: Record<string, string> = { system_settings: 'System settings', operators: 'Visionline operators', card_log: 'Card log', user_groups: 'User groups', other: 'Other table' };
 
 const yn = (v: boolean | null | undefined) => (v === true ? 'Yes' : v === false ? 'No' : 'Not read');
+
+/** Seconds since `on` became true (for "Preparing the report… 12 s"). */
+function useSeconds(on: boolean) {
+  const [n, setN] = useState(0);
+  useEffect(() => { setN(0); if (!on) return; const t = setInterval(() => setN((x) => x + 1), 1000); return () => clearInterval(t); }, [on]);
+  return n;
+}

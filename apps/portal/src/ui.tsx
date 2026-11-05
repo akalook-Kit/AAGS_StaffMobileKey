@@ -1,3 +1,4 @@
+import { tr } from './i18n';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { KEY_STATUS_LABEL, ERROR_HELP, type KeyStatus } from '@smk/shared';
 import { api, ApiError } from './api';
@@ -70,7 +71,7 @@ export const fmt = {
 export function PageHead({ title, intro, children }: { title: string; intro?: ReactNode; children?: ReactNode }) {
   return (
     <div className="page-head">
-      <div><h1>{title}</h1>{intro && <p>{intro}</p>}</div>
+      <div><h1>{tr(title)}</h1>{intro && <p>{typeof intro === 'string' ? tr(intro) : intro}</p>}</div>
       {children && <div className="row">{children}</div>}
     </div>
   );

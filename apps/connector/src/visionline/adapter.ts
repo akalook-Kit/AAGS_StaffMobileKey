@@ -142,8 +142,36 @@ export class WebApiAdapter implements VisionlineAdapter {
     return { id: String(g.id ?? name), uniformAccess: Boolean(g.uniformAccess), doorOperations: g.doorOperations ?? [] };
   }
 
-  async readCardAtEncoder(encoder: string, action: 'read' | 'readCard') {
-    const r = await this.vl.request<any>('POST', `${VL.paths.cards}?action=${action}&encoder=${encodeURIComponent(encoder)}`, {}, HIGH);
+  /** 2.26.1 How each encoder's name must be written in the query (learned on the first read that works). */
+  static encoderStyles = new Map<string, 'encoded' | 'plus'>();
+  static encoderParam(encoder: string) {
+    const e = encodeURIComponent(encoder);
+    return WebApiAdapter.encoderStyles.get(encoder) === 'plus' ? e.replace(/%20/g, '+') : e;
+  }
+
+  async readCardAtEncoder(encoder: string, action: 'read' | 'readCard', encoderStyle: 'encoded' | 'plus' = WebApiAdapter.encoderStyles.get(encoder) ?? 'encoded') {
+    // 2.26 / 2.26.1 Bana, 2 Nov: Visionline answers "Invalid query parameter value" to reading a card on "Encoder .96".
+    // Which query value it refuses is not said. Reading changes nothing, so up to four forms are tried, the hotel's
+    // setting first: the read action named "read" or "readCard", and the encoder name with its space written as %20
+    // or as +. The form that works is reported (the platform keeps it); if none works, every answer is reported.
+    const enc = (style: string) => (style === 'plus' ? encodeURIComponent(encoder).replace(/%20/g, '+') : encodeURIComponent(encoder));
+    const other = action === 'read' ? 'readCard' : 'read';
+    const otherStyle = encoderStyle === 'plus' ? 'encoded' : 'plus';
+    const tries: [('read' | 'readCard'), ('encoded' | 'plus')][] = [[action, encoderStyle], [other, encoderStyle]];
+    if (/\s/.test(encoder)) tries.push([action, otherStyle], [other, otherStyle]);
+    const refused = (e: unknown) => e instanceof VisionlineApiError && e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 409
+      && /query parameter|parameter value|(invalid|unknown|illegal)[^.]*(action|encoder)/i.test(`${e.message} ${e.developerMessage ?? ''}`) && !/no card/i.test(e.message);
+    const answers: string[] = [];
+    let r: any; let actionUsed: 'read' | 'readCard' = action; let encoderStyleUsed: 'encoded' | 'plus' = encoderStyle;
+    for (const [i, [a, st]] of tries.entries()) {
+      const q = `?action=${a}&encoder=${enc(st)}`;
+      try { r = await this.vl.request<any>('POST', `${VL.paths.cards}${q}`, {}, HIGH); actionUsed = a; encoderStyleUsed = st; WebApiAdapter.encoderStyles.set(encoder, st); break; } catch (e) {
+        if (!refused(e)) throw e;
+        const v = e as VisionlineApiError;
+        answers.push(`${q} → ${v.status}${v.code ? ` ${v.code}` : ''} ${v.message}${v.developerMessage && v.developerMessage !== v.message ? ` (${v.developerMessage})` : ''}`);
+        if (i === tries.length - 1) throw new VisionlineApiError(v.status, v.code, `Visionline refused every form of "read the card on encoder ${encoder}": ${answers.join('; ')}`, v.developerMessage);
+      }
+    }
     const id = firstText(r?.id, r?.registrationNumber, r?.cardID);
     // Details of the card as Visionline knows it (validity, holder, doors). Serial numbers, PINs and tracks are never kept.
     let d: any = r;
@@ -157,7 +185,7 @@ export class WebApiAdapter implements VisionlineAdapter {
       // 2.23 The door operations as Visionline has them, so the card can be written again with a new expiry.
       operations: ops.slice(0, 10).map((o: any) => ({ operation: String(o?.operation ?? 'normal').slice(0, 30),
         doors: (Array.isArray(o?.doors) ? o.doors : []).map(String).slice(0, 2000), doorGroups: (Array.isArray(o?.doorGroups) ? o.doorGroups : []).map(String).slice(0, 200) })),
-      encoder, readAt: new Date().toISOString(),
+      encoder, readAt: new Date().toISOString(), actionUsed, encoderStyleUsed,
       // 2.17 a phone's mobile key reads as serial FFFFFFFF; only this yes/no is passed on
       mobile: isMobileCard(d),
     };
@@ -172,7 +200,7 @@ export class WebApiAdapter implements VisionlineAdapter {
       ...(onOff.length ? [{ [F.operation]: 'on/off', [F.doors]: onOff }] : []),
     ];
     const body: Record<string, unknown> = { [F.cardHolder]: p.cardHolder, [F.format]: F.formatTLCode };
-    const q = [`${VL.query.action}=encode`, `encoder=${encodeURIComponent(p.encoder)}`];
+    const q = [`${VL.query.action}=encode`, `encoder=${WebApiAdapter.encoderParam(p.encoder)}`];
     if (p.kind === 'emergency') q.push('type=emergency'); // [§7.22.2] all doors, always valid: no doors, no times
     else if (p.kind === 'clearance') { // [§7.22.1] rfid48, all doors, expireTime only
       q.push('type=clearance'); body[F.format] = 'rfid48';
@@ -431,7 +459,9 @@ export function toErrorInfo(e: unknown): ErrorInfo {
     40411: ['CARD_NOT_FOUND', false],
   };
   const m = e.code !== undefined ? map[e.code] : undefined;
-  if (m) return { code: m[0], message: e.message, retryable: m[1], vendorStatus: e.status, vendorCode: String(e.code) };
+  // 2.26 Visionline's own detail (which parameter or property) is part of the message: it tells the hotel what to fix.
+  const msg = e.developerMessage && !e.message.includes(e.developerMessage) ? `${e.message} (${e.developerMessage})` : e.message;
+  if (m) return { code: m[0], message: msg, retryable: m[1], vendorStatus: e.status, vendorCode: String(e.code) };
   if (e.status === 0) return { code: e.message.includes('credentials are not configured') ? 'NOT_CONFIGURED' : 'VISIONLINE_UNREACHABLE', message: e.message, retryable: true };
-  return { code: 'VISIONLINE_REJECTED', message: e.message, retryable: e.status >= 500, vendorStatus: e.status, vendorCode: e.code !== undefined ? String(e.code) : undefined };
+  return { code: 'VISIONLINE_REJECTED', message: msg, retryable: e.status >= 500, vendorStatus: e.status, vendorCode: e.code !== undefined ? String(e.code) : undefined };
 }

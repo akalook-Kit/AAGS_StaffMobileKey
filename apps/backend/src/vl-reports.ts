@@ -112,3 +112,88 @@ export function operatorColumns(head: string[]) {
   const h = head.map((x) => x.toLowerCase());
   return { name: h.findIndex((x) => /operator|login|user ?name|^name/.test(x)), template: h.findIndex((x) => /template|privilege|right|role|group|access/.test(x)) };
 }
+
+/**
+ * 2.27 The first page of the Visionline setup report (Armel, 4 Nov: "the version … whether the AES has been enabled or
+ * not, number of locks … not in a vague way"). Read from the imported System settings report, wherever Visionline put
+ * it: the [Visionline] section, a heading line, an option or a setting line. Works on reports imported before 2.27 too.
+ */
+export interface VisionlineGlance {
+  version: string | null; versionFrom: string | null;
+  pmsEncryptionKey: string | null;
+  aes: { enabled: boolean | null; evidence: string | null };
+  encryption: string | null;
+  systemCode: string | null; systemId: string | null; firmwarePack: string | null;
+  locksInReport: { label: string; value: string }[];
+  options: { code: string; name: string }[];
+  mobileAccess: boolean | null;
+  guestCards: { label: string; value: string }[];
+  eventsOn: number; eventsTotal: number;
+}
+const YES = /^(y|yes|on|true|enabled?|active|activated|1|oui|ja|s[ií])\b/i;
+const NO = /^(n|no|off|false|disabled?|inactive|not (?:enabled|activated|used)|none|0|non|nein)\b/i;
+
+export function visionlineGlance(s: Pick<SystemSettings, 'sections' | 'facts' | 'options' | 'events'>): VisionlineGlance {
+  const sections = s.sections ?? [];
+  const all = sections.flatMap((sec) => sec.lines.map((l) => ({ sec: sec.name, line: l.trim() })));
+  const kv = (l: string) => { const m = /^([^:=]{2,90})[:=]\s*(.*)$/.exec(l); return m ? { k: m[1]!.trim(), v: m[2]!.trim() } : null; };
+  // ---- version
+  let version: string | null = s.facts?.['Visionline version'] ?? null;
+  let versionFrom: string | null = version ? '[Visionline] Version' : null;
+  if (!version) {
+    const VER = /(\d+\.\d+(?:\.\d+){0,3})/;
+    for (const { sec, line } of all) {
+      const p = kv(line);
+      if (p && /(^|\s)(visionline\s+)?(software\s+|program\s+|application\s+|system\s+)?version$/i.test(p.k) && !/firmware|database|sql|windows|os\b|lock|encoder|api/i.test(p.k) && VER.test(p.v)) {
+        version = VER.exec(p.v)![1]!; versionFrom = `[${sec}] ${p.k}`; break;
+      }
+    }
+  }
+  if (!version) {
+    for (const { sec, line } of all) {
+      const m = /visionline\D{0,20}?(\d+\.\d+(?:\.\d+){1,3})/i.exec(line);
+      if (m) { version = m[1]!; versionFrom = `[${sec}] ${line.slice(0, 80)}`; break; }
+    }
+  }
+  if (!version) {
+    const sec = sections.find((x) => /^version$/i.test(x.name));
+    const m = sec?.lines.map((l) => /(\d+\.\d+(?:\.\d+){0,3})/.exec(l)).find(Boolean);
+    if (m) { version = m[1]!; versionFrom = '[Version]'; }
+  }
+  // ---- AES / card encryption
+  let aes: VisionlineGlance['aes'] = { enabled: null, evidence: null };
+  let encryption: string | null = null;
+  for (const { sec, line } of all) {
+    if (/^\s*options\s*$/i.test(sec)) continue;
+    const yn = /^([YN]):\s*(?:\(\d+\)\s*)?(.+)$/.exec(line);
+    const p = kv(line);
+    if (/\baes\b/i.test(line)) {
+      if (yn) { aes = { enabled: yn[1] === 'Y', evidence: `[${sec}] ${line}` }; break; }
+      if (p && /\baes\b/i.test(p.k)) { aes = { enabled: YES.test(p.v) ? true : NO.test(p.v) ? false : p.v ? true : null, evidence: `[${sec}] ${line}` }; if (aes.enabled !== null) break; }
+      if (p && /\baes\b/i.test(p.v)) { aes = { enabled: !/\b(no|not|off|disabled?)\b/i.test(p.v), evidence: `[${sec}] ${line}` }; encryption = p.v; break; }
+      // 2.27.1 A list of the card authentications Visionline knows (Bana: "[Known authentication information]
+      // Ultralight AES signature"): an AES entry there means AES card authentication is set up.
+      if (!p && !yn && /authentication|encryption|security|crypt|\bkeys?\b/i.test(sec) && !/\b(not|no|off|disabled?)\b/i.test(line)) { aes = { enabled: true, evidence: `[${sec}] ${line}` }; break; }
+      if (!aes.evidence) aes = { enabled: /\b(not|no|off|disabled?)\b/i.test(line) ? false : /\b(enabled?|on|active|used|yes)\b/i.test(line) ? true : null, evidence: `[${sec}] ${line}` };
+    } else if (p && /encrypt|cipher|crypt/i.test(p.k) && !/\bpms\b/i.test(p.k) && !encryption) {
+      encryption = `${p.k}: ${p.v}`;
+    }
+  }
+  const aesOption = (s.options ?? []).find((o) => /\baes\b/i.test(o.name));
+  if (aes.enabled === null && aesOption) aes = { enabled: true, evidence: `[Options] (${aesOption.code}) ${aesOption.name}` };
+  if (aes.enabled === null && encryption && !/\baes\b/i.test(encryption) && /\b(des|mifare|crypto1|none|off|no)\b/i.test(encryption)) aes = { enabled: false, evidence: encryption };
+  // ---- locks, guest cards, firmware
+  const locksInReport = all.map(({ line }) => kv(line)).filter((p): p is { k: string; v: string } => Boolean(p && /\b(locks?|doors?|rooms?|encoders?|gateways?|online|offline)\b/i.test(p.k) && /^\d[\d\s.,]*$/.test(p.v)))
+    .slice(0, 20).map((p) => ({ label: p.k, value: p.v }));
+  const guestCards = sections.filter((x) => /guest/i.test(x.name)).flatMap((x) => x.lines.map(kv).filter(Boolean) as { k: string; v: string }[]).slice(0, 12).map((p) => ({ label: p.k, value: p.v }));
+  const fwKey = Object.keys(s.facts ?? {}).find((k) => /firmware/i.test(k));
+  const options = s.options ?? [];
+  const evTotal = (s.events ?? []).reduce((n, g) => n + g.items.length, 0);
+  const evOn = (s.events ?? []).reduce((n, g) => n + g.items.filter((i) => i.on).length, 0);
+  const pmsLine = all.map(({ line }) => kv(line)).find((p) => p && /\bpms\b/i.test(p.k) && /encrypt|key/i.test(p.k));
+  return {
+    version, versionFrom, aes, encryption, pmsEncryptionKey: pmsLine ? pmsLine.v : null,
+    systemCode: s.facts?.['System code'] ?? null, systemId: s.facts?.['System ID'] ?? null, firmwarePack: fwKey ? s.facts[fwKey]! : null,
+    locksInReport, options, mobileAccess: options.length ? options.some((o) => /mobile/i.test(o.name)) : null, guestCards, eventsOn: evOn, eventsTotal: evTotal,
+  };
+}

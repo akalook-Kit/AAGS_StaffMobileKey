@@ -13,7 +13,8 @@ export interface SmsSettings {
 }
 export interface Channels { email: EmailSettings; sms: SmsSettings }
 
-export async function sendEmail(s: EmailSettings, to: string, subject: string, text: string, hotelId?: string) {
+export interface MailAttachment { filename: string; content: Buffer | string; contentType: string }
+export async function sendEmail(s: EmailSettings, to: string, subject: string, text: string, hotelId?: string, attachments?: MailAttachment[]) {
   const pass = getSecret(s.passwordRef, hotelId);
   const t = nodemailer.createTransport({
     host: s.host, port: s.port, secure: s.security === 'tls', requireTLS: s.security === 'starttls', ignoreTLS: s.security === 'none',
@@ -21,7 +22,7 @@ export async function sendEmail(s: EmailSettings, to: string, subject: string, t
     connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 30_000,
     disableFileAccess: true, disableUrlAccess: true,
   });
-  try { await t.sendMail({ from: s.from, to, subject, text }); } finally { t.close(); }
+  try { await t.sendMail({ from: s.from, to, subject, text, ...(attachments?.length ? { attachments } : {}) }); } finally { t.close(); }
 }
 
 /** Phone numbers in international form: +254712345678. */

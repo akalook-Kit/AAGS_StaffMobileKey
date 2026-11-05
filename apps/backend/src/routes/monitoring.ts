@@ -78,17 +78,21 @@ export function monitoringRoutes(app: FastifyInstance) {
     try { const d = await diskInfo(diskPath); disks.push({ where: `${d.path} on ${hostname()}`, role: 'Platform server', free: d.free, total: d.total }); } catch (e) { disks.push({ where: diskPath, role: 'Platform server', error: (e as Error).message }); }
     for (const c of conns) if (c.health?.disk) disks.push({ where: `${c.health.disk.path} on ${c.health.disk.host ?? c.name}`, role: `Connector "${c.name}"`, free: c.health.disk.freeBytes, total: c.health.disk.totalBytes, at: c.last_seen_at, online: isOnline(c.last_seen_at) });
     const minFree = pol.diskMinFreeGb * 1024 ** 3;
+    // 2.25 Testers of the Demo Hotel see no facts about the real server.
+    const demo = Boolean((await one(pool, 'SELECT is_demo FROM hotels WHERE id=$1', [hotelId]))?.is_demo);
+    if (demo) { disks.length = 0; samples.length = 0; }
     return {
       timeZone: tz,
-      alerts: open, counts: { critical: open.filter((a) => a.severity === 'critical').length, warning: open.filter((a) => a.severity === 'warning').length, info: open.filter((a) => a.severity === 'info').length },
+      alerts: open, counts: { critical: open.filter((a) => a.severity === 'critical').length, warning: open.filter((a) => a.severity === 'warning').length, info: open.filter((a) => a.severity === 'info').length,
+        unseen: open.filter((a) => !a.acknowledged_at && a.severity !== 'info').length },
       doors: { total: doors.length, online: doors.filter((d) => d.state === 'online').length, offline: doors.filter((d) => d.state === 'offline').length, unknown: doors.filter((d) => d.state === 'unknown').length, list: doors.slice(0, 500),
         watching: conns.some((c) => isOnline(c.last_seen_at) && /watching/.test(c.health?.visionlineWatch ?? '')), settings: pol.doorOffline },
       watched,
       system: {
-        database: { ...db, limitBytes: pol.dbMaxMb * 1024 ** 2, over: db.bytes > pol.dbMaxMb * 1024 ** 2 },
+        database: demo ? { bytes: 0, tables: [], limitBytes: pol.dbMaxMb * 1024 ** 2, over: false, demo: true } : { ...db, limitBytes: pol.dbMaxMb * 1024 ** 2, over: db.bytes > pol.dbMaxMb * 1024 ** 2 },
         disks: disks.map((d) => ({ ...d, minFree, low: typeof d.free === 'number' && d.free < minFree })),
         trend: samples.map((s) => ({ day: s.day, db: Number(s.db), free: s.free == null ? null : Number(s.free) })),
-        backup: lastBackup(),
+        backup: demo ? null : lastBackup(),
         connectors: conns.map((c) => ({ name: c.name, online: isOnline(c.last_seen_at), lastSeenAt: c.last_seen_at, version: c.health?.connectorVersion ?? null, visionline: c.health?.visionlineReachable ?? null, watch: c.health?.visionlineWatch ?? null })),
       },
       channels: { email: ch.email.enabled, sms: ch.sms.enabled, smsProvider: ch.sms.provider,
@@ -114,6 +118,16 @@ export function monitoringRoutes(app: FastifyInstance) {
     if (!r) throw notFound('Open alert');
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'monitor.alert_acknowledged', targetType: 'alert', targetId: id, details: { kind: r.kind } });
     return { ok: true };
+  });
+
+  /** 2.27.1 Mark every open alert (or those of one kind) as seen: they leave the menu count, and stay listed until fixed. */
+  app.post(`${P}/hotels/:hotelId/monitoring/alerts/acknowledge-all`, async (req) => {
+    const hotelId = hid(req);
+    const op = await requirePerm(req, hotelId, 'alerts.manage');
+    const b = z.object({ kind: z.string().max(40).optional() }).parse(req.body ?? {});
+    const r = await pool.query(`UPDATE monitor_alerts SET acknowledged_at=now(), acknowledged_by=$3 WHERE hotel_id=$1 AND resolved_at IS NULL AND acknowledged_at IS NULL AND ($2::text IS NULL OR kind=$2)`, [hotelId, b.kind ?? null, op.id]);
+    await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'monitor.alerts_acknowledged', details: { kind: b.kind ?? 'all', count: r.rowCount } });
+    return { ok: true, count: r.rowCount };
   });
 
   /** Runs the checks now instead of waiting for the next minute. */
@@ -215,7 +229,8 @@ export function monitoringRoutes(app: FastifyInstance) {
   app.get(`${P}/hotels/:hotelId/monitoring/summary`, async (req) => {
     const hotelId = hid(req);
     await requirePerm(req, hotelId, 'alerts.read');
-    const a = await one(pool, `SELECT count(*) FILTER (WHERE severity='critical')::int AS critical, count(*) FILTER (WHERE severity='warning')::int AS warning FROM monitor_alerts WHERE hotel_id=$1 AND resolved_at IS NULL`, [hotelId]);
+    const a = await one(pool, `SELECT count(*) FILTER (WHERE severity='critical')::int AS critical, count(*) FILTER (WHERE severity='warning')::int AS warning,
+      count(*) FILTER (WHERE severity='critical' AND acknowledged_at IS NULL)::int AS critical_unseen FROM monitor_alerts WHERE hotel_id=$1 AND resolved_at IS NULL`, [hotelId]);
     const d = await one(pool, `SELECT count(*) FILTER (WHERE state='online')::int AS online, count(*) FILTER (WHERE state='offline')::int AS offline, count(*)::int AS total FROM door_status WHERE hotel_id=$1`, [hotelId]);
     const w = await many(pool, `SELECT w.label, COALESCE(r.name, w.door_id) AS door, w.last_entrance_at FROM watched_doors w LEFT JOIN resources r ON r.hotel_id=w.hotel_id AND r.kind='door' AND r.external_id=w.door_id
       WHERE w.hotel_id=$1 AND w.active ORDER BY w.last_entrance_at DESC NULLS LAST LIMIT 6`, [hotelId]);

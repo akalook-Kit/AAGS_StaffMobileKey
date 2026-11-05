@@ -1,4 +1,6 @@
 import { existsSync } from 'node:fs';
+import { reportsCentreRoutes } from './routes/reports-centre.ts';
+import { demoRoutes } from './routes/demo.ts';
 import { keycardCheckRoutes } from './keycard-check.ts';
 import { resolve } from 'node:path';
 import Fastify from 'fastify';
@@ -46,7 +48,14 @@ export async function buildServer() {
   });
   await app.register(cors, { origin: config.corsOrigins, credentials: false });
 
-  app.setErrorHandler((err, req, reply) => {
+  // 2.25 In the Demo Hotel, "the connector is offline" and similar mean: there is no Visionline behind the demo.
+  const demoIds = new Set<string>(); let demoAt = 0;
+  const isDemo = async (id: string) => { if (Date.now() - demoAt > 60_000) { demoIds.clear(); for (const r of (await pool.query(`SELECT id FROM hotels WHERE is_demo`)).rows) demoIds.add(r.id); demoAt = Date.now(); } return demoIds.has(id); };
+  app.setErrorHandler(async (err, req, reply) => {
+    if (err instanceof ApiError && err.status === 409 && /^(CONNECTOR|NOT_CONFIGURED|NOT_READY|SYNC_OFF|ENCODER_READ_OFF|ENCODE_OFF)/.test(err.code)) {
+      const hid = /\/hotels\/([0-9a-f-]{36})\//.exec(req.url)?.[1];
+      if (hid && await isDemo(hid).catch(() => false)) return reply.code(409).send({ error: { code: 'DEMO_HOTEL', message: 'This is the Demo Hotel: there is no Visionline or encoder behind it, so this cannot run here. In a real hotel it would now go to Visionline.' } });
+    }
     if (err instanceof ApiError) return reply.code(err.status).send({ error: { code: err.code, message: err.message, details: err.details } });
     if (err instanceof ZodError) return reply.code(400).send({ error: { code: 'VALIDATION', message: err.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; '), details: err.issues } });
     // 2.13: a malformed id in the address (not a UUID, not a number) is the caller's mistake, not a server error.
@@ -96,6 +105,8 @@ export async function buildServer() {
   safetyRoutes(app);
   keycardRoutes(app);
   keycardCheckRoutes(app);
+  demoRoutes(app);
+  reportsCentreRoutes(app);
   inviteRoutes(app);
   noticeRoutes(app);
   vlImportRoutes(app);

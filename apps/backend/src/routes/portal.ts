@@ -40,6 +40,7 @@ export function portalRoutes(app: FastifyInstance) {
       recordFailure(tkey); recordIpFailure(req.ip);
       throw new ApiError(401, 'BAD_CREDENTIALS', 'Email or password is incorrect.');
     }
+    if (op.access_until && new Date(op.access_until).getTime() <= Date.now()) throw new ApiError(401, 'ACCESS_ENDED', 'Your test access has ended. Thank you for testing.');
     if (op.mfa_enabled) {
       if (!b.totp) return { mfaRequired: true };
       const st = totpStep(op.totp_secret, b.totp);
@@ -76,20 +77,21 @@ export function portalRoutes(app: FastifyInstance) {
   app.get(`${P}/me`, async (req) => {
     const op = await requireOperator(req);
     const hotels = op.isPlatformAdmin
-      ? await many(pool, 'SELECT id, slug, name FROM hotels ORDER BY name')
-      : await many(pool, 'SELECT id, slug, name FROM hotels WHERE id = ANY($1) ORDER BY name', [[...op.roles.keys()]]);
-    const r = await one(pool, 'SELECT mfa_enabled, prefs FROM operators WHERE id=$1', [op.id]);
+      ? await many(pool, 'SELECT id, slug, name, is_demo FROM hotels ORDER BY is_demo, name')
+      : await many(pool, 'SELECT id, slug, name, is_demo FROM hotels WHERE id = ANY($1) ORDER BY is_demo, name', [[...op.roles.keys()]]);
+    const r = await one(pool, 'SELECT mfa_enabled, prefs, access_until FROM operators WHERE id=$1', [op.id]);
     // 2.16 Hotel or institution, for the portal's words and the guest features.
     const kinds = new Map((await many(pool, `SELECT DISTINCT ON (hotel_id) hotel_id, data->>'kind' AS kind FROM hotel_config_versions WHERE kind='property' AND hotel_id = ANY($1) ORDER BY hotel_id, version DESC`,
       [hotels.map((h) => h.id)])).map((x) => [x.hotel_id, x.kind === 'institution' ? 'institution' : 'hotel']));
     return {
       id: op.id, email: op.email, displayName: op.displayName, isPlatformAdmin: op.isPlatformAdmin, mfaEnabled: r.mfa_enabled, prefs: r.prefs ?? {},
-      hotels: hotels.map((h) => {
+      accessUntil: r.access_until ?? null,
+      hotels: hotels.map(({ is_demo, ...h }) => {
         const roles = op.isPlatformAdmin ? ['PLATFORM_ADMIN'] : op.roles.get(h.id) ?? [];
         // 2.13 Administration stays closed until two-step sign-in is on, when the hotel requires it for administrators.
         const mfaRequired = Boolean(op.mfaRequiredIn?.has(h.id) && (op.isPlatformAdmin || roles.includes('HOTEL_ADMIN')));
         const perms = [...permsIn(op, h.id)].filter((p) => !mfaRequired || !['settings.manage', 'operators.manage', 'connector.manage', 'branding.manage'].includes(p));
-        return { ...h, kind: kinds.get(h.id) ?? 'hotel', roles, permissions: perms, hiddenModules: op.hidden?.get(h.id) ?? [], mfaRequired };
+        return { ...h, kind: kinds.get(h.id) ?? 'hotel', demo: Boolean(is_demo), roles, permissions: perms, hiddenModules: op.hidden?.get(h.id) ?? [], mfaRequired };
       }),
       roleLabels: ROLE_LABELS,
       modules: Object.fromEntries(MODULE_IDS.map((m) => [m, MODULES[m].label])),
@@ -99,7 +101,7 @@ export function portalRoutes(app: FastifyInstance) {
   /** 2.13 Personal preferences: menu items this person hides, appearance. Only the person's own. */
   app.put(`${P}/me/prefs`, async (req) => {
     const op = await requireOperator(req);
-    const b = z.object({ hiddenNav: z.array(z.string().regex(/^\/[a-z/?=&-]*$/).max(60)).max(40).default([]), theme: z.enum(['system', 'light', 'dark']).default('system') }).parse(req.body);
+    const b = z.object({ hiddenNav: z.array(z.string().regex(/^\/[a-z/?=&-]*$/).max(60)).max(40).default([]), theme: z.enum(['system', 'light', 'dark']).default('system'), lang: z.enum(['auto', 'en', 'fr']).optional() }).parse(req.body);
     await pool.query('UPDATE operators SET prefs=$2 WHERE id=$1', [op.id, b]);
     return b;
   });

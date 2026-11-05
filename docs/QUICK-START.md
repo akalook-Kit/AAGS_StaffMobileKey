@@ -1,4 +1,4 @@
-# Access Monitoring Tool — quick start (2.24)
+# Access Monitoring Tool — quick start (2.27.1)
 
 ## What it is and what you need
 
@@ -8,7 +8,7 @@ requests, watches lock batteries and supports emergencies. It works for a hotel 
 hospital, a school). Staff mobile keys are an optional module, off by default.
 
 It has two parts: the **portal** (with its database) and the **connector**, which talks to Visionline. One file
-installs either or both: `AccessMonitoringTool-Server-2.24.0.msi`.
+installs either or both: `AccessMonitoringTool-Server-2.27.1.msi`.
 
 | | A. One computer | B. Two computers |
 |---|---|---|
@@ -32,7 +32,7 @@ is installed beforehand: the .msi carries its own runtime.
 3. **Visionline account.** **Settings → Visionline**: the Visionline user and password (encrypted for the
    connector). Use a named Visionline operator, not the PMS / interface user, so Visionline's own log shows who
    made each card.
-4. **Visionline reports.** **Administration → System setup report → Import a Visionline report**: the *System
+4. **Visionline reports.** **Administration → System setup reports → Import a Visionline report**: the *System
    settings* report as Visionline saves it, and if you have them the operator list and a card list with the operator.
 5. **Checklist.** The **Overview** shows *Getting started* until everything is green.
 
@@ -59,6 +59,9 @@ leaves.
 | I want to… | Go to |
 |---|---|
 | See who opened a door | Event log (Print = verifiable PDF) |
+| Daily or monthly figures: guest keycards issued, staff keycards issued, who holds staff keycards, refused entries, batteries | Reports (PDF, Excel, e-mail now, or e-mailed every day / month) |
+| Visionline version, AES, number of locks on one page | Administration → System setup reports → Visionline setup report |
+| Use the portal in French | Automatic when the computer / browser is in French; or Français at the bottom of the menu (also on the sign-in page) |
 | See which keycards opened each room, and who issued them | Keycards per room |
 | Ask for / make a staff keycard | Staff keycards (Requests, Encode here, or link an *Existing keycard*) |
 | Who has a master keycard / who can open the cashier door | Visionline cards & people → Keycards → *Opens* filter and quick buttons |

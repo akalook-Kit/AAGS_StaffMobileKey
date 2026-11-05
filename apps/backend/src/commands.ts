@@ -1,3 +1,4 @@
+import { ApiError } from './lib/errors.ts';
 import { onKeycardCommandResult } from './routes/keycards.ts';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
@@ -5,6 +6,7 @@ import { PAYLOAD_SCHEMAS, type CommandType, type CommandResult } from '@smk/shar
 import { config } from './config.ts';
 import { pool, tx, one, many, lockHotel, type Db } from './db.ts';
 import { audit } from './audit.ts';
+import { getConfig, saveConfig } from './hotel-config.ts';
 import { onIssueResult, onRevokeResult } from './keys.ts';
 import { adoptUserGroups, requestDiscovery } from './visionline-sync.ts';
 import { onDirectorySyncResult } from './directory.ts';
@@ -15,6 +17,9 @@ import { onDirectorySyncResult } from './directory.ts';
  * a recorded result, and a lease so a crashed connector's command becomes available again.
  */
 export async function enqueue(c: Db, o: { hotelId: string; type: CommandType; payload: unknown; idempotencyKey: string; correlationId: string; ttlSec?: number; requestedBy?: string | null }) {
+  // 2.25 The Demo Hotel has no Visionline: nothing is sent, the person is told what would happen in a real hotel.
+  if ((await one(c, 'SELECT is_demo FROM hotels WHERE id=$1', [o.hotelId]))?.is_demo)
+    throw new ApiError(409, 'DEMO_HOTEL', 'This is the Demo Hotel: there is no Visionline behind it, so nothing is sent. In a real hotel this would now go to Visionline.');
   PAYLOAD_SCHEMAS[o.type].parse(o.payload);
   const inserted = await one(c, `INSERT INTO commands (hotel_id, type, payload, idempotency_key, correlation_id, expires_at, requested_by)
       VALUES ($1,$2,$3,$4,$5, now() + make_interval(secs => $6), $7)
@@ -92,7 +97,16 @@ async function applyResult(c: pg.PoolClient, cmd: any, result: CommandResult) {
         ON CONFLICT (hotel_id, kind, external_id) DO UPDATE SET active=true, discovered_at=now()`, [cmd.hotel_id, e]);
       return;
     }
-    case 'READ_CARD': return; // 2.12 pilot: the portal reads the result itself
+    case 'READ_CARD': {
+      // 2.26 The connector found which read action this Visionline accepts: keep it in the site's settings.
+      const used = result.status === 'SUCCEEDED' ? result.result?.actionUsed : null;
+      if ((used === 'read' || used === 'readCard') && used !== cmd.payload?.action) {
+        const vl = await getConfig(c, cmd.hotel_id, 'visionline');
+        if (vl) await saveConfig(c, cmd.hotel_id, 'visionline', { ...vl, encoderRead: { enabled: false, encoders: [], ...(vl.encoderRead ?? {}), action: used } }, null);
+        await audit(c, { hotelId: cmd.hotel_id, actorType: 'connector', action: 'visionline.encoder_read_action_learned', targetType: 'command', targetId: cmd.id, details: { from: cmd.payload?.action, to: used } });
+      }
+      return;
+    }
     case 'SYNC_DIRECTORY': return onDirectorySyncResult(c, cmd, result);
     case 'SET_PROPERTY_CREDENTIALS':
       // 2.10 With a working Visionline account, read doors and groups straight away (people follow on the minute).

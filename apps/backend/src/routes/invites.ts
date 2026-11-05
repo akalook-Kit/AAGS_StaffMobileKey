@@ -205,7 +205,7 @@ export function inviteRoutes(app: FastifyInstance) {
   app.get(`${P}/public/invites/:token`, async (req) => {
     limit(req.ip);
     const i = await find((req.params as any).token);
-    return { name: i.display_name, email: i.email, site: i.hotel, expiresAt: i.expires_at, reset: i.status === 'ACTIVE' };
+    return { name: i.display_name, email: i.email, site: i.hotel, expiresAt: i.expires_at, reset: i.status === 'ACTIVE', testDays: i.access_days ?? null };
   });
   app.post(`${P}/public/invites/:token`, async (req) => {
     limit(req.ip);
@@ -216,6 +216,8 @@ export function inviteRoutes(app: FastifyInstance) {
       const u = await c.query(`UPDATE operator_invites SET used_at=now() WHERE id=$1 AND used_at IS NULL AND revoked_at IS NULL`, [i.id]);
       if (!u.rowCount) return false;
       await c.query(`UPDATE operators SET password_hash=$2, status='ACTIVE', token_version=token_version+1 WHERE id=$1 AND status <> 'DISABLED'`, [i.operator_id, hashPassword(b.password)]);
+      // 2.25 A tester's access runs for the chosen number of days from the moment they accept.
+      if (i.access_days) await c.query(`UPDATE operators SET access_until = now() + make_interval(days => $2) WHERE id=$1`, [i.operator_id, i.access_days]);
       await audit(c, { hotelId: i.hotel_id, actorType: 'operator', actorId: i.operator_id, action: 'operator.invite_accepted', targetType: 'operator', targetId: i.operator_id });
       return true;
     });

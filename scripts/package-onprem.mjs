@@ -50,7 +50,7 @@ cpSync(join(root, 'apps/portal/dist'), join(out, 'portal'), { recursive: true })
 cpSync(join(root, 'brand'), join(out, 'brand'), { recursive: true });
 // 2.17 The quick start and the manual travel with the installer (everything in one file).
 mkdirSync(join(out, 'docs'), { recursive: true });
-for (const d of ['QUICK-START.md', 'USER-MANUAL.md', 'SECURITY-AND-COMPLIANCE.md']) cpSync(join(root, 'docs', d), join(out, 'docs', d));
+for (const d of ['QUICK-START.md', 'USER-MANUAL.md', 'SECURITY-AND-COMPLIANCE.md', 'TESTERS.md', 'EXTERNAL-ACCESS.md']) cpSync(join(root, 'docs', d), join(out, 'docs', d));
 const op = join(root, 'onprem');
 cpSync(join(op, 'service'), join(out, 'service'), { recursive: true });
 // Windows tools: CRLF line endings (cmd.exe needs them; Notepad shows them right).

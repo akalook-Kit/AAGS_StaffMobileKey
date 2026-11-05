@@ -148,6 +148,8 @@ export function registerVisionline(app: FastifyInstance, st: SimState, opts: {
   app.post(p('/cards'), async (req, reply) => {
     const q = req.query as Record<string, string>;
     // 2.12 pilot: the card lying on an encoder (placed with POST /sim/encoder). Reading changes nothing.
+    // 2.26 Like the Bana Visionline: only one name of the read action is accepted (SIM_READ_ACTION, default readCard).
+    if ((q.action === 'read' || q.action === 'readCard') && q.action !== (process.env.SIM_READ_ACTION ?? 'readCard')) return fail(reply, 40017, 'Invalid query parameter value.', 'action');
     if (q.action === 'read' || q.action === 'readCard') {
       if (!q.encoder) return fail(reply, E.missingProperty, 'A mandatory parameter is missing in the query string of the request.');
       const reg = encoderCards.get(q.encoder);

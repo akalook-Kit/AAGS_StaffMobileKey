@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useHotel } from '../App';
 import { ErrorNote, PageHead, Status, fmt, useApi } from '../ui';
+import { tr, trf } from '../i18n';
 import { NoData } from '../components/charts';
 import { GettingStarted } from '../components/GettingStarted';
 import { PinnedReports } from '../components/ReportBuilder';
@@ -18,8 +19,8 @@ export function Overview() {
   const hour = new Date().getHours();
   return (
     <>
-      <PageHead title={`Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}, ${me.displayName.split(' ')[0]}`} intro={`What is happening at ${hotel.name} right now: doors, keycards and locks.`}>
-        {can('key.issue') && <Link className="btn primary" to="/keys">Issue a key</Link>}
+      <PageHead title={`${tr(hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening')}, ${me.displayName.split(' ')[0]}`} intro={trf('What is happening at {site} right now: doors, keycards and locks.', { site: hotel.name })}>
+        {can('key.issue') && <Link className="btn primary" to="/keys">{tr('Issue a key')}</Link>}
       </PageHead>
       <ErrorNote error={s.error} />
       <TodoNow />
@@ -110,15 +111,16 @@ function TodoNow() {
     ['/muster', 'Who is in the building', 'Live occupancy', can('muster.read')],
     ['/events', 'Who opened a door', 'Event log', can('events.read')],
     ['/battery', 'Lock batteries', 'Low and critical locks', can('battery.read')],
+    ['/reports', 'Reports', 'Daily and monthly', can('reports.read') || can('events.read') || can('keycards.read')],
     ['/monitoring', 'Alerts', 'Doors, connector, server', can('alerts.read')]];
   return (
     <section className="todo-now" aria-label="To do now">
       <div className="todo-list">
         {items.length ? items.map((i: any) => (
           <Link key={i.id} to={i.to} className={`todo ${i.tone}`}><span className="todo-n">{i.n}</span><span><strong>{i.title}</strong><small>{i.detail}</small></span><span aria-hidden>→</span></Link>
-        )) : <div className="todo ok"><span className="todo-n">✓</span><span><strong>Nothing waiting for you</strong><small>Updated {t.data ? fmt.rel(t.data.at) : '…'}</small></span></div>}
+        )) : <div className="todo ok"><span className="todo-n">✓</span><span><strong>{tr('Nothing waiting for you')}</strong><small>{tr('Updated')} {t.data ? fmt.rel(t.data.at) : '…'}</small></span></div>}
       </div>
-      <nav className="quick" aria-label="Shortcuts">{quick.filter((q) => q[3]).slice(0, 6).map(([to, l, d]) => <Link key={to} to={to} className="quick-task"><strong>{l}</strong><small>{d}</small></Link>)}</nav>
+      <nav className="quick" aria-label="Shortcuts">{quick.filter((q) => q[3]).slice(0, 8).map(([to, l, d]) => <Link key={to} to={to} className="quick-task"><strong>{tr(l)}</strong><small>{tr(d)}</small></Link>)}</nav>
     </section>
   );
 }

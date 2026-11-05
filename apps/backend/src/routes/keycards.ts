@@ -16,6 +16,7 @@ import { permsIn, requireOperator, requirePerm } from '../auth.ts';
 import { ApiError, badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
 import { getConfig, saveConfig } from '../hotel-config.ts';
 import { importedForSetupReport } from './vl-imports.ts';
+import { visionlineGlance } from '../vl-reports.ts';
 import { sharedVisionlineOperator, ROLE_LABELS } from '@smk/shared';
 import { genericCards } from '../generic-cards.ts';
 import { enqueue, newCorrelationId } from '../commands.ts';
@@ -198,6 +199,8 @@ export async function maybeSendRenewalReminders() {
 
 const qrHits = new Map<string, { n: number; since: number }>();
 const tokenHash = (t: string) => createHash('sha256').update(t).digest('hex');
+
+const SETUP_REPORT_LIMIT_MS = Number(process.env.SMK_SETUP_REPORT_LIMIT_MS ?? 90_000);
 
 export function keycardRoutes(app: FastifyInstance) {
   const base = `${P}/hotels/:hotelId/keycards`;
@@ -531,112 +534,22 @@ export function keycardRoutes(app: FastifyInstance) {
   app.get(`${P}/hotels/:hotelId/reports/setup`, async (req) => {
     const hotelId = hid(req);
     const op = await requirePerm(req, hotelId, 'settings.manage');
-    const [prop, cs, pol, res, ops, h, conn, lic] = await Promise.all([
-      getConfig(pool, hotelId, 'property'), getConfig(pool, hotelId, 'credential_services'), getConfig(pool, hotelId, 'policy'),
-      many(pool, `SELECT kind, external_id, name, data FROM resources WHERE hotel_id=$1 AND active ORDER BY kind, name`, [hotelId]),
-      many(pool, `SELECT o.display_name, o.email, o.mfa_enabled, o.last_sign_in_at, array_agg(m.role ORDER BY m.role) AS roles FROM operators o JOIN memberships m ON m.operator_id=o.id WHERE m.hotel_id=$1 GROUP BY o.id ORDER BY o.display_name`, [hotelId]),
-      one(pool, `SELECT name, timezone FROM hotels WHERE id=$1`, [hotelId]),
-      one(pool, `SELECT name, last_seen_at, health FROM connectors WHERE hotel_id=$1 AND status='ACTIVE' ORDER BY last_seen_at DESC NULLS LAST LIMIT 1`, [hotelId]),
-      one(pool, `SELECT payload FROM hotel_licences WHERE hotel_id=$1`, [hotelId]),
-    ]);
-    const doors = res.filter((r) => r.kind === 'door');
-    const groups = new Map<string, string[]>();
-    for (const d of doors) { const g = d.data?.doorGroup ?? '(no group)'; groups.set(g, [...(groups.get(g) ?? []), d.name]); }
-    const vlUsers = await one(pool, `SELECT count(*)::int AS n FROM vl_users WHERE hotel_id=$1 AND active`, [hotelId]);
-    const vlCards = await one(pool, `SELECT count(*)::int AS n FROM vl_cards WHERE hotel_id=$1 AND active AND NOT cancelled`, [hotelId]);
-    // Valid keycards that may override the deadbolt / privacy, per user group (from the cards themselves).
-    const overrideCounts = new Map((await many(pool, `SELECT user_group, count(*)::int AS n FROM vl_cards WHERE hotel_id=$1 AND active AND NOT cancelled AND deadbolt_override GROUP BY 1`, [hotelId])).map((r) => [r.user_group, r.n]));
-    // 2.17 Who has access to what: per user group (doors, door groups, people, keycards) and per person.
-    const VALIDK = `k.active AND NOT (k.cancelled OR k.discarded OR k.overridden OR k.expired) AND (k.expires_at IS NULL OR k.expires_at > now())`;
-    const perGroup = await many(pool, `SELECT COALESCE(u.user_group, k.user_group) AS g, count(DISTINCT k.card_holder)::int AS people, count(*)::int AS cards,
-        count(*) FILTER (WHERE k.deadbolt_override)::int AS override, count(*) FILTER (WHERE k.key_id IS NOT NULL OR k.mobile IS TRUE)::int AS mobile
-      FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder WHERE k.hotel_id=$1 AND ${VALIDK} GROUP BY 1`, [hotelId]);
-    const people = await many(pool, `SELECT k.card_holder, NULLIF(trim(coalesce(u.given_name,'') || ' ' || coalesce(u.surname,'')), '') AS name, COALESCE(u.user_group, k.user_group) AS g,
-        count(*)::int AS cards, max(k.expires_at) AS until, bool_or(k.deadbolt_override) AS override, bool_or(k.key_id IS NOT NULL OR k.mobile IS TRUE) AS mobile,
-        (SELECT array_agg(DISTINCT x) FROM vl_cards k2, unnest(k2.doors) x WHERE k2.hotel_id=$1 AND k2.card_holder=k.card_holder AND ${VALIDK.replace(/k\./g, 'k2.')}) AS doors,
-        (SELECT array_agg(DISTINCT x) FROM vl_cards k2, unnest(k2.door_groups) x WHERE k2.hotel_id=$1 AND k2.card_holder=k.card_holder AND ${VALIDK.replace(/k\./g, 'k2.')}) AS door_groups,
-        (SELECT o.display_name FROM operator_vl_links l JOIN operators o ON o.id=l.operator_id WHERE l.hotel_id=$1 AND l.vl_user_id=k.card_holder LIMIT 1) AS portal_user
-      FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder WHERE k.hotel_id=$1 AND ${VALIDK} AND k.card_holder IS NOT NULL
-      GROUP BY k.card_holder, u.given_name, u.surname, u.user_group, k.user_group ORDER BY 3 NULLS LAST, 2 NULLS LAST LIMIT 2000`, [hotelId]);
-    const imported = await importedForSetupReport(hotelId);
-    const vlOperator = conn?.health?.propertyUsername ?? null;
-    // ---- 2.20 User groups vs. rooms: every room, which user groups open it (directly or through a door group) and how
-    // many people hold a valid keycard for it; then the points worth a look.
-    const ugs = res.filter((r) => r.kind === 'usergroup');
-    const opens = new Map<string, { doors: Set<string>; doorGroups: Set<string> }>();
-    for (const g of ugs) {
-      const ops2 = (g.data?.doorOperations ?? []) as any[];
-      opens.set(g.name, { doors: new Set(ops2.flatMap((o) => o.doors ?? [])), doorGroups: new Set(ops2.flatMap((o) => o.doorGroups ?? [])) });
+    // 2.27.1 Never a blank page: the report says which step is slow instead of waiting for ever, and the portal part
+    // (no Visionline data) comes on its own.
+    const part = (req.query as any)?.part === 'portal' ? 'portal' : 'all';
+    const st = { step: 'reading the site settings' };
+    const t0 = Date.now();
+    let timer: NodeJS.Timeout | undefined;
+    const slow = new Promise<'slow'>((resolve) => { timer = setTimeout(() => resolve('slow'), SETUP_REPORT_LIMIT_MS); });
+    const r = await Promise.race([buildSetupReport(hotelId, op, st, part), slow]).finally(() => clearTimeout(timer));
+    if (r === 'slow') {
+      const busy = await many(pool, `SELECT state, extract(epoch FROM now() - xact_start)::int AS s, left(regexp_replace(query, '\s+', ' ', 'g'), 90) AS q FROM pg_stat_activity
+        WHERE datname = current_database() AND pid <> pg_backend_pid() AND xact_start < now() - interval '30 seconds' ORDER BY xact_start LIMIT 3`).catch(() => []);
+      req.log.warn({ step: st.step, busy }, 'setup report too slow');
+      throw new ApiError(503, 'SETUP_REPORT_SLOW', `The setup report took more than ${Math.round(SETUP_REPORT_LIMIT_MS / 1000)} seconds (still ${st.step}).${busy.length ? ` The database is busy with: ${busy.map((b) => `${b.state} for ${b.s} s (${b.q})`).join('; ')}.` : ''} Try again in a minute; if it repeats, restart the service StaffMobileKeyPlatform.`);
     }
-    const validCards = await many(pool, `SELECT k.card_holder, COALESCE(u.user_group, k.user_group) AS g, k.doors, k.door_groups FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder
-      WHERE k.hotel_id=$1 AND ${VALIDK} AND k.key_id IS NULL AND NOT COALESCE(k.mobile, false) LIMIT 20000`, [hotelId]);
-    const holdersOf = (doorName: string, doorId: string, dg: string | null) => new Set(validCards.filter((k) => (k.doors ?? []).includes(doorName) || (k.doors ?? []).includes(doorId) || (dg != null && (k.door_groups ?? []).includes(dg))).map((k) => k.card_holder ?? '?')).size;
-    const groupNames = ugs.map((g) => g.name).sort((a, b) => a.localeCompare(b));
-    const rooms = doors.map((d) => {
-      const dg = d.data?.doorGroup ?? null;
-      const access = groupNames.map((gn) => { const o = opens.get(gn)!; return o.doors.has(d.name) || o.doors.has(d.external_id) ? 'D' : dg != null && o.doorGroups.has(dg) ? 'G' : ''; });
-      return { name: d.name, group: dg, category: d.data?.doorCategory ?? null, online: d.data?.online ?? null, access, groups: access.filter(Boolean).length, people: holdersOf(d.name, d.external_id, dg) };
-    }).sort((a, b) => (a.group ?? '~').localeCompare(b.group ?? '~') || a.name.localeCompare(b.name, undefined, { numeric: true }));
-    const insights: { level: 'warn' | 'info'; text: string }[] = [];
-    const noGroup = rooms.filter((r) => !r.groups);
-    if (noGroup.length) insights.push({ level: 'info', text: `${noGroup.length} of ${rooms.length} rooms are opened by no user group (only guest, master or special cards): ${noGroup.slice(0, 12).map((r) => r.name).join(', ')}${noGroup.length > 12 ? '…' : ''}.` });
-    const all = groupNames.filter((gn, i) => rooms.length > 0 && rooms.every((r) => r.access[i]));
-    if (all.length) insights.push({ level: 'warn', text: `Opening every room (master level): ${all.map((gn) => `${gn} (${perGroup.find((x) => x.g === gn)?.people ?? 0} people)`).join(', ')}. Check that only the right people hold these cards.` });
-    const ov = ugs.filter((g) => g.data?.ignoreDeadbolt);
-    if (ov.length) insights.push({ level: 'warn', text: `Override the deadbolt (open a room locked from inside): ${ov.map((g) => `${g.name} (${perGroup.find((x) => x.g === g.name)?.people ?? 0} people)`).join(', ')}.` });
-    const guestRooms = rooms.filter((r) => /guest/i.test(r.category ?? ''));
-    if (guestRooms.length) {
-      const into = groupNames.map((gn, i) => ({ gn, n: guestRooms.filter((r) => r.access[i]).length })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n);
-      if (into.length) insights.push({ level: 'info', text: `Guest rooms opened by staff user groups: ${into.slice(0, 8).map((x) => `${x.gn} ${x.n}/${guestRooms.length}`).join(', ')}.` });
-    }
-    const busiest = [...rooms].sort((a, b) => b.people - a.people).filter((r) => r.people > 0).slice(0, 5);
-    if (busiest.length) insights.push({ level: 'info', text: `Rooms most people can open: ${busiest.map((r) => `${r.name} (${r.people})`).join(', ')}.` });
-    const unused = groupNames.filter((gn) => !(perGroup.find((x) => x.g === gn)?.cards));
-    if (unused.length && validCards.length) insights.push({ level: 'info', text: `User groups with no valid keycard: ${unused.slice(0, 10).join(', ')}${unused.length > 10 ? '…' : ''}.` });
-    const gen = await genericCards(hotelId);
-    if (gen.length) insights.push({ level: 'warn', text: `${gen.length} valid staff keycard(s) in a generic name (not a person): ${[...new Set(gen.map((x) => x.name || '(no name)'))].slice(0, 6).join(', ')}. Nobody can tell who used them.` });
-    if (sharedVisionlineOperator(vlOperator)) insights.push({ level: 'warn', text: `The portal works in Visionline as "${vlOperator}", a shared operator: give it a named operator.` });
-    if (!imported.systemSettings) insights.push({ level: 'info', text: 'Import the Visionline System settings report (above) to show the system parameters.' });
-    await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'report.setup_viewed' });
-    return {
-      printedAt: new Date().toISOString(), printedBy: op.displayName,
-      property: { name: prop?.displayName ?? h?.name, systemId: cs?.systemId ?? null, timezone: prop?.timezone ?? h?.timezone, version: (await import('../version.ts')).PLATFORM_VERSION,
-        locks: doors.length, locksOnline: doors.filter((d) => d.data?.online === true).length, userGroups: res.filter((r) => r.kind === 'usergroup').length, doorGroups: groups.size,
-        timeSchedules: res.filter((r) => r.kind === 'timeschedule').length, encoders: res.filter((r) => r.kind === 'encoder').map((r) => r.name), visionlineUsers: vlUsers?.n ?? 0, validKeycards: vlCards?.n ?? 0,
-        connector: conn ? { name: conn.name, lastSeen: conn.last_seen_at, version: conn.health?.connectorVersion ?? null, visionlineApi: conn.health?.visionlineApiVersion ?? null } : null,
-        licence: lic?.payload ? { id: lic.payload.id, expires: lic.payload.expires ?? null, modules: lic.payload.modules } : null },
-      userGroups: res.filter((r) => r.kind === 'usergroup').map((g) => ({ name: g.name, uniformAccess: Boolean(g.data?.uniformAccess), timeSchedule: g.data?.timeSchedule ?? null,
-        // 2.16.1 Override rights [Web API §5.29.2]; null = not read yet (connector older than 0.13.1) or not reported.
-        overrideDeadbolt: g.data?.ignoreDeadbolt ?? null, overridePrivacy: g.data?.ignorePrivacy ?? null,
-        cardsWithOverride: overrideCounts.get(g.name) ?? 0,
-        doors: (g.data?.doorOperations ?? []).flatMap((o: any) => [...(o.doors ?? []), ...(o.doorGroups ?? []).map((x: string) => `[${x}]`)]) })),
-      doorGroups: [...groups.entries()].map(([g, ds]) => ({ name: g, doors: ds })),
-      locks: doors.map((d) => ({ name: d.name, group: d.data?.doorGroup ?? null, category: d.data?.doorCategory ?? null, online: d.data?.online ?? null })),
-      timeSchedules: res.filter((r) => r.kind === 'timeschedule').map((t) => t.name),
-      keycardTypes: [['Staff keycard', 'Encoded at an encoder from the portal or issued from Visionline; one per person (override cancels older cards)'], ['Daily staff keycard', `Valid ${pol?.keycards?.dailyHours ?? 14} hours`],
-        ['Emergency card', 'All doors, also with the deadbolt on; always valid until cancelled'], ['Stand-open card', 'Keeps chosen doors open'], ['Clearance card', 'Clears guest access from a lock'],
-        ['One-time card', 'Opens chosen doors once'], ['Blocking card (unpaid guest)', 'Guest card for one room, override, expires after a minute'], ['Staff mobile key', 'On the staff app; issued through Visionline']],
-      access: ops.map((o) => ({ name: o.display_name, email: o.email, roles: (o.roles as string[]).map((r) => (ROLE_LABELS as Record<string, string>)[r] ?? r), mfa: o.mfa_enabled, lastSignIn: o.last_sign_in_at })),
-      accessByGroup: res.filter((r) => r.kind === 'usergroup').map((g) => {
-        const ops2 = (g.data?.doorOperations ?? []) as any[];
-        const st = perGroup.find((x) => x.g === g.name);
-        return { name: g.name, uniformAccess: Boolean(g.data?.uniformAccess), doors: [...new Set(ops2.flatMap((o) => o.doors ?? []))], doorGroups: [...new Set(ops2.flatMap((o) => o.doorGroups ?? []))],
-          overrideDeadbolt: g.data?.ignoreDeadbolt ?? null, people: st?.people ?? 0, cards: st?.cards ?? 0, cardsWithOverride: st?.override ?? 0, mobileKeys: st?.mobile ?? 0, timeSchedule: g.data?.timeSchedule ?? null };
-      }),
-      accessByPerson: people.map((p) => ({ id: p.card_holder, name: p.name, group: p.g, cards: p.cards, until: p.until, override: Boolean(p.override), mobile: Boolean(p.mobile),
-        doors: (p.doors ?? []).slice(0, 400), doorGroups: p.door_groups ?? [], portalUser: p.portal_user ?? null })),
-      visionline: { operatorUsed: vlOperator, operatorShared: sharedVisionlineOperator(vlOperator), ...imported },
-      roomMatrix: { groups: groupNames, rooms }, insights,
-      parameters: [
-        ['Key policy', `Longest key ${pol?.maxValidityHours ?? '-'} h; broad access from ${pol?.broadDoorThreshold ?? '-'} doors needs approval: ${pol?.requireApprovalForBroad === false ? 'no' : 'yes'}; wrong-door limit ${pol?.wrongDoorLimit ?? '-'}`],
-        ['Keycard requests', `Encoding from the portal: ${pol?.keycards?.encodeEnabled ? 'on' : 'off'}; encoders: ${(pol?.keycards?.encoders ?? []).join(', ') || '-'}; HR e-mail: ${pol?.keycards?.hrEmail ? 'set' : 'not set'}`],
-        ['Emergency', `Remote door commands: ${pol?.safety?.doorCommands?.enabled ? 'on' : 'off'}; back to normal at the end: ${pol?.safety?.doorCommands?.closeOnEnd === false ? 'no' : 'yes'}; emergency key template: ${pol?.safety?.emergencyTemplateId ? 'set' : 'not set'}`],
-        ['Live occupancy', `Staff on site ${pol?.safety?.staffOnSiteHours ?? 10} h after their last door; rooms used ${pol?.safety?.roomActivityHours ?? 12} h`],
-        ['Accounts report', pol?.accountsReport?.enabled ? `Daily at ${pol.accountsReport.time} to ${pol.accountsReport.emails.length} address(es)` : 'off'],
-        ['Administrator protection', `Two-step sign-in required for administrators: ${pol?.adminSecurity?.requireAdminMfa ? 'yes' : 'no'}`],
-        ['Privacy', `Lock events ${pol?.privacy?.lockEventsDays ?? 730} days; guest lists ${pol?.privacy?.guestListDays ?? 400} days; usage ${pol?.privacy?.usageDays ?? 730} days`],
-      ],
-    };
+    req.log.info({ ms: Date.now() - t0, part }, 'setup report');
+    return r;
   });
 
   // ---- 2.14 "To do now" for the Overview: only what this person can act on ----------------------------------------
@@ -754,4 +667,143 @@ export function keycardRoutes(app: FastifyInstance) {
     await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'lockout.restored', targetType: 'guest_lockout', targetId: id, details: { note: b.note } });
     return { status: 'RESTORED' };
   });
+}
+
+/** The System setup report (Visionline and portal). `part: 'portal'` skips the per-person and per-room work. */
+async function buildSetupReport(hotelId: string, op: { id: string; displayName: string }, st: { step: string }, part: 'portal' | 'all') {
+  const portalOnly = part === 'portal';
+  const [prop, cs, pol, res, ops, h, conn, lic] = await Promise.all([
+    getConfig(pool, hotelId, 'property'), getConfig(pool, hotelId, 'credential_services'), getConfig(pool, hotelId, 'policy'),
+    many(pool, `SELECT kind, external_id, name, data FROM resources WHERE hotel_id=$1 AND active ORDER BY kind, name`, [hotelId]),
+    many(pool, `SELECT o.display_name, o.email, o.mfa_enabled, o.last_sign_in_at, array_agg(m.role ORDER BY m.role) AS roles FROM operators o JOIN memberships m ON m.operator_id=o.id WHERE m.hotel_id=$1 GROUP BY o.id ORDER BY o.display_name`, [hotelId]),
+    one(pool, `SELECT name, timezone FROM hotels WHERE id=$1`, [hotelId]),
+    one(pool, `SELECT name, last_seen_at, health FROM connectors WHERE hotel_id=$1 AND status='ACTIVE' ORDER BY last_seen_at DESC NULLS LAST LIMIT 1`, [hotelId]),
+    one(pool, `SELECT payload FROM hotel_licences WHERE hotel_id=$1`, [hotelId]),
+  ]);
+  st.step = 'counting doors, keycards and people';
+  const doors = res.filter((r) => r.kind === 'door');
+  const groups = new Map<string, string[]>();
+  for (const d of doors) { const g = d.data?.doorGroup ?? '(no group)'; groups.set(g, [...(groups.get(g) ?? []), d.name]); }
+  const vlUsers = await one(pool, `SELECT count(*)::int AS n FROM vl_users WHERE hotel_id=$1 AND active`, [hotelId]);
+  const vlCards = await one(pool, `SELECT count(*)::int AS n FROM vl_cards WHERE hotel_id=$1 AND active AND NOT cancelled`, [hotelId]);
+  // Valid keycards that may override the deadbolt / privacy, per user group (from the cards themselves).
+  const overrideCounts = new Map((await many(pool, `SELECT user_group, count(*)::int AS n FROM vl_cards WHERE hotel_id=$1 AND active AND NOT cancelled AND deadbolt_override GROUP BY 1`, [hotelId])).map((r) => [r.user_group, r.n]));
+  // 2.17 Who has access to what: per user group (doors, door groups, people, keycards) and per person.
+  const VALIDK = `k.active AND NOT (k.cancelled OR k.discarded OR k.overridden OR k.expired) AND (k.expires_at IS NULL OR k.expires_at > now())`;
+  st.step = 'working out access per user group';
+  const perGroup = portalOnly ? [] : await many(pool, `SELECT COALESCE(u.user_group, k.user_group) AS g, count(DISTINCT k.card_holder)::int AS people, count(*)::int AS cards,
+      count(*) FILTER (WHERE k.deadbolt_override)::int AS override, count(*) FILTER (WHERE k.key_id IS NOT NULL OR k.mobile IS TRUE)::int AS mobile
+    FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder WHERE k.hotel_id=$1 AND ${VALIDK} GROUP BY 1`, [hotelId]);
+  st.step = 'working out access per person';
+  const people = portalOnly ? [] : await many(pool, `SELECT k.card_holder, NULLIF(trim(coalesce(u.given_name,'') || ' ' || coalesce(u.surname,'')), '') AS name, COALESCE(u.user_group, k.user_group) AS g,
+      count(*)::int AS cards, max(k.expires_at) AS until, bool_or(k.deadbolt_override) AS override, bool_or(k.key_id IS NOT NULL OR k.mobile IS TRUE) AS mobile,
+      (SELECT array_agg(DISTINCT x) FROM vl_cards k2, unnest(k2.doors) x WHERE k2.hotel_id=$1 AND k2.card_holder=k.card_holder AND ${VALIDK.replace(/k\./g, 'k2.')}) AS doors,
+      (SELECT array_agg(DISTINCT x) FROM vl_cards k2, unnest(k2.door_groups) x WHERE k2.hotel_id=$1 AND k2.card_holder=k.card_holder AND ${VALIDK.replace(/k\./g, 'k2.')}) AS door_groups,
+      (SELECT o.display_name FROM operator_vl_links l JOIN operators o ON o.id=l.operator_id WHERE l.hotel_id=$1 AND l.vl_user_id=k.card_holder LIMIT 1) AS portal_user
+    FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder WHERE k.hotel_id=$1 AND ${VALIDK} AND k.card_holder IS NOT NULL
+    GROUP BY k.card_holder, u.given_name, u.surname, u.user_group, k.user_group ORDER BY 3 NULLS LAST, 2 NULLS LAST LIMIT 2000`, [hotelId]);
+  st.step = 'reading the imported Visionline reports';
+  const imported = await importedForSetupReport(hotelId);
+  const vlOperator = conn?.health?.propertyUsername ?? null;
+  // ---- 2.20 User groups vs. rooms: every room, which user groups open it (directly or through a door group) and how
+  // many people hold a valid keycard for it; then the points worth a look.
+  const ugs = res.filter((r) => r.kind === 'usergroup');
+  const opens = new Map<string, { doors: Set<string>; doorGroups: Set<string> }>();
+  for (const g of ugs) {
+    const ops2 = (g.data?.doorOperations ?? []) as any[];
+    opens.set(g.name, { doors: new Set(ops2.flatMap((o) => o.doors ?? [])), doorGroups: new Set(ops2.flatMap((o) => o.doorGroups ?? [])) });
+  }
+  st.step = 'matching rooms with user groups';
+  const validCards = portalOnly ? [] : await many(pool, `SELECT k.card_holder, COALESCE(u.user_group, k.user_group) AS g, k.doors, k.door_groups FROM vl_cards k LEFT JOIN vl_users u ON u.hotel_id=k.hotel_id AND u.user_id=k.card_holder
+    WHERE k.hotel_id=$1 AND ${VALIDK} AND k.key_id IS NULL AND NOT COALESCE(k.mobile, false) LIMIT 20000`, [hotelId]);
+  // Who can open each door: indexed once (a large site has thousands of keycards and hundreds of doors).
+  const byDoor = new Map<string, Set<string>>(); const byGroup = new Map<string, Set<string>>();
+  const add = (m: Map<string, Set<string>>, k: string, who: string) => { let v = m.get(k); if (!v) { v = new Set(); m.set(k, v); } v.add(who); };
+  for (const k of validCards) { const who = k.card_holder ?? '?'; for (const d of k.doors ?? []) add(byDoor, d, who); for (const g of k.door_groups ?? []) add(byGroup, g, who); }
+  const holdersOf = (doorName: string, doorId: string, dg: string | null) => new Set([...(byDoor.get(doorName) ?? []), ...(byDoor.get(doorId) ?? []), ...(dg != null ? byGroup.get(dg) ?? [] : [])]).size;
+  const groupNames = ugs.map((g) => g.name).sort((a, b) => a.localeCompare(b));
+  const rooms = doors.map((d) => {
+    const dg = d.data?.doorGroup ?? null;
+    const access = groupNames.map((gn) => { const o = opens.get(gn)!; return o.doors.has(d.name) || o.doors.has(d.external_id) ? 'D' : dg != null && o.doorGroups.has(dg) ? 'G' : ''; });
+    return { name: d.name, group: dg, category: d.data?.doorCategory ?? null, online: d.data?.online ?? null, access, groups: access.filter(Boolean).length, people: holdersOf(d.name, d.external_id, dg) };
+  }).sort((a, b) => (a.group ?? '~').localeCompare(b.group ?? '~') || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const insights: { level: 'warn' | 'info'; text: string }[] = [];
+  const noGroup = rooms.filter((r) => !r.groups);
+  if (noGroup.length) insights.push({ level: 'info', text: `${noGroup.length} of ${rooms.length} rooms are opened by no user group (only guest, master or special cards): ${noGroup.slice(0, 12).map((r) => r.name).join(', ')}${noGroup.length > 12 ? '…' : ''}.` });
+  const all = groupNames.filter((gn, i) => rooms.length > 0 && rooms.every((r) => r.access[i]));
+  if (all.length) insights.push({ level: 'warn', text: `Opening every room (master level): ${all.map((gn) => `${gn} (${perGroup.find((x) => x.g === gn)?.people ?? 0} people)`).join(', ')}. Check that only the right people hold these cards.` });
+  const ov = ugs.filter((g) => g.data?.ignoreDeadbolt);
+  if (ov.length) insights.push({ level: 'warn', text: `Override the deadbolt (open a room locked from inside): ${ov.map((g) => `${g.name} (${perGroup.find((x) => x.g === g.name)?.people ?? 0} people)`).join(', ')}.` });
+  const guestRooms = rooms.filter((r) => /guest/i.test(r.category ?? ''));
+  if (guestRooms.length) {
+    const into = groupNames.map((gn, i) => ({ gn, n: guestRooms.filter((r) => r.access[i]).length })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n);
+    if (into.length) insights.push({ level: 'info', text: `Guest rooms opened by staff user groups: ${into.slice(0, 8).map((x) => `${x.gn} ${x.n}/${guestRooms.length}`).join(', ')}.` });
+  }
+  const busiest = [...rooms].sort((a, b) => b.people - a.people).filter((r) => r.people > 0).slice(0, 5);
+  if (busiest.length) insights.push({ level: 'info', text: `Rooms most people can open: ${busiest.map((r) => `${r.name} (${r.people})`).join(', ')}.` });
+  const unused = groupNames.filter((gn) => !(perGroup.find((x) => x.g === gn)?.cards));
+  if (unused.length && validCards.length) insights.push({ level: 'info', text: `User groups with no valid keycard: ${unused.slice(0, 10).join(', ')}${unused.length > 10 ? '…' : ''}.` });
+  st.step = 'looking for keycards in generic names';
+  const gen = portalOnly ? [] : await genericCards(hotelId);
+  if (gen.length) insights.push({ level: 'warn', text: `${gen.length} valid staff keycard(s) in a generic name (not a person): ${[...new Set(gen.map((x) => x.name || '(no name)'))].slice(0, 6).join(', ')}. Nobody can tell who used them.` });
+  const portalInsights: { level: 'warn' | 'info'; text: string }[] = [];
+  if (sharedVisionlineOperator(vlOperator)) portalInsights.push({ level: 'warn', text: `The portal works in Visionline as "${vlOperator}", a shared operator: give it a named operator.` });
+  if (!imported.systemSettings) insights.push({ level: 'info', text: 'Import the Visionline System settings report (above) to show the Visionline version, AES and the system parameters.' });
+  // 2.27 First page of the Visionline report: the facts, plainly.
+  const g = imported.systemSettings ? visionlineGlance(imported.systemSettings as any) : null;
+  const count = (f: (d: any) => string | null) => { const m = new Map<string, { n: number; online: number }>(); for (const d of doors) { const k = f(d) ?? '(none)'; const c = m.get(k) ?? { n: 0, online: 0 }; c.n++; if (d.data?.online === true) c.online++; m.set(k, c); } return [...m.entries()].map(([name, c]) => ({ name, ...c })).sort((x, y) => y.n - x.n); };
+  const onlineKnown = doors.filter((d) => typeof d.data?.online === 'boolean').length;
+  const glance = {
+    version: g?.version ?? null, versionFrom: g?.versionFrom ?? null, webApiVersion: conn?.health?.visionlineApiVersion ?? null,
+    aes: g ? g.aes : { enabled: null, evidence: null }, encryption: g?.encryption ?? null, pmsEncryptionKey: g?.pmsEncryptionKey ?? null,
+    systemCode: g?.systemCode ?? null, systemId: g?.systemId ?? cs?.systemId ?? null, firmwarePack: g?.firmwarePack ?? null,
+    locks: { total: doors.length, online: doors.filter((d) => d.data?.online === true).length, offline: doors.filter((d) => d.data?.online === false).length, onlineKnown,
+      byCategory: count((d) => d.data?.doorCategory ?? null), byDoorGroup: count((d) => d.data?.doorGroup ?? null), inReport: g?.locksInReport ?? [] },
+    userGroups: ugs.length, doorGroups: groups.size, timeSchedules: res.filter((r) => r.kind === 'timeschedule').length, encoders: res.filter((r) => r.kind === 'encoder').map((r) => r.name),
+    people: vlUsers?.n ?? 0, validKeycards: vlCards?.n ?? 0, operators: imported.operators?.rows?.length ?? null,
+    options: g?.options ?? [], mobileAccess: g?.mobileAccess ?? null, guestCards: g?.guestCards ?? [], eventsOn: g?.eventsOn ?? 0, eventsTotal: g?.eventsTotal ?? 0,
+    source: imported.systemSettings ? { file: imported.systemSettings.file, importedAt: imported.systemSettings.importedAt } : null,
+  };
+  // Recorded without making the report wait (a busy audit trail must not leave the page blank).
+  void audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'report.setup_viewed', details: { part } }).catch(() => undefined);
+  st.step = 'putting the report together';
+  return {
+    printedAt: new Date().toISOString(), printedBy: op.displayName,
+    property: { name: prop?.displayName ?? h?.name, systemId: cs?.systemId ?? null, timezone: prop?.timezone ?? h?.timezone, version: (await import('../version.ts')).PLATFORM_VERSION,
+      locks: doors.length, locksOnline: doors.filter((d) => d.data?.online === true).length, userGroups: res.filter((r) => r.kind === 'usergroup').length, doorGroups: groups.size,
+      timeSchedules: res.filter((r) => r.kind === 'timeschedule').length, encoders: res.filter((r) => r.kind === 'encoder').map((r) => r.name), visionlineUsers: vlUsers?.n ?? 0, validKeycards: vlCards?.n ?? 0,
+      connector: conn ? { name: conn.name, lastSeen: conn.last_seen_at, version: conn.health?.connectorVersion ?? null, visionlineApi: conn.health?.visionlineApiVersion ?? null } : null,
+      licence: lic?.payload ? { id: lic.payload.id, expires: lic.payload.expires ?? null, modules: lic.payload.modules } : null },
+    userGroups: res.filter((r) => r.kind === 'usergroup').map((g) => ({ name: g.name, uniformAccess: Boolean(g.data?.uniformAccess), timeSchedule: g.data?.timeSchedule ?? null,
+      // 2.16.1 Override rights [Web API §5.29.2]; null = not read yet (connector older than 0.13.1) or not reported.
+      overrideDeadbolt: g.data?.ignoreDeadbolt ?? null, overridePrivacy: g.data?.ignorePrivacy ?? null,
+      cardsWithOverride: overrideCounts.get(g.name) ?? 0,
+      doors: (g.data?.doorOperations ?? []).flatMap((o: any) => [...(o.doors ?? []), ...(o.doorGroups ?? []).map((x: string) => `[${x}]`)]) })),
+    doorGroups: [...groups.entries()].map(([g, ds]) => ({ name: g, doors: ds })),
+    locks: doors.map((d) => ({ name: d.name, group: d.data?.doorGroup ?? null, category: d.data?.doorCategory ?? null, online: d.data?.online ?? null })),
+    timeSchedules: res.filter((r) => r.kind === 'timeschedule').map((t) => t.name),
+    keycardTypes: [['Staff keycard', 'Encoded at an encoder from the portal or issued from Visionline; one per person (override cancels older cards)'], ['Daily staff keycard', `Valid ${pol?.keycards?.dailyHours ?? 14} hours`],
+      ['Emergency card', 'All doors, also with the deadbolt on; always valid until cancelled'], ['Stand-open card', 'Keeps chosen doors open'], ['Clearance card', 'Clears guest access from a lock'],
+      ['One-time card', 'Opens chosen doors once'], ['Blocking card (unpaid guest)', 'Guest card for one room, override, expires after a minute'], ['Staff mobile key', 'On the staff app; issued through Visionline']],
+    access: ops.map((o) => ({ name: o.display_name, email: o.email, roles: (o.roles as string[]).map((r) => (ROLE_LABELS as Record<string, string>)[r] ?? r), mfa: o.mfa_enabled, lastSignIn: o.last_sign_in_at })),
+    accessByGroup: res.filter((r) => r.kind === 'usergroup').map((g) => {
+      const ops2 = (g.data?.doorOperations ?? []) as any[];
+      const st = perGroup.find((x) => x.g === g.name);
+      return { name: g.name, uniformAccess: Boolean(g.data?.uniformAccess), doors: [...new Set(ops2.flatMap((o) => o.doors ?? []))], doorGroups: [...new Set(ops2.flatMap((o) => o.doorGroups ?? []))],
+        overrideDeadbolt: g.data?.ignoreDeadbolt ?? null, people: st?.people ?? 0, cards: st?.cards ?? 0, cardsWithOverride: st?.override ?? 0, mobileKeys: st?.mobile ?? 0, timeSchedule: g.data?.timeSchedule ?? null };
+    }),
+    accessByPerson: people.map((p) => ({ id: p.card_holder, name: p.name, group: p.g, cards: p.cards, until: p.until, override: Boolean(p.override), mobile: Boolean(p.mobile),
+      doors: (p.doors ?? []).slice(0, 400), doorGroups: p.door_groups ?? [], portalUser: p.portal_user ?? null })),
+    visionline: { operatorUsed: vlOperator, operatorShared: sharedVisionlineOperator(vlOperator), ...imported },
+    roomMatrix: { groups: groupNames, rooms }, insights, portalInsights, glance,
+    parameters: [
+      ['Key policy', `Longest key ${pol?.maxValidityHours ?? '-'} h; broad access from ${pol?.broadDoorThreshold ?? '-'} doors needs approval: ${pol?.requireApprovalForBroad === false ? 'no' : 'yes'}; wrong-door limit ${pol?.wrongDoorLimit ?? '-'}`],
+      ['Keycard requests', `Encoding from the portal: ${pol?.keycards?.encodeEnabled ? 'on' : 'off'}; encoders: ${(pol?.keycards?.encoders ?? []).join(', ') || '-'}; HR e-mail: ${pol?.keycards?.hrEmail ? 'set' : 'not set'}`],
+      ['Emergency', `Remote door commands: ${pol?.safety?.doorCommands?.enabled ? 'on' : 'off'}; back to normal at the end: ${pol?.safety?.doorCommands?.closeOnEnd === false ? 'no' : 'yes'}; emergency key template: ${pol?.safety?.emergencyTemplateId ? 'set' : 'not set'}`],
+      ['Live occupancy', `Staff on site ${pol?.safety?.staffOnSiteHours ?? 10} h after their last door; rooms used ${pol?.safety?.roomActivityHours ?? 12} h`],
+      ['Accounts report', pol?.accountsReport?.enabled ? `Daily at ${pol.accountsReport.time} to ${pol.accountsReport.emails.length} address(es)` : 'off'],
+      ['Administrator protection', `Two-step sign-in required for administrators: ${pol?.adminSecurity?.requireAdminMfa ? 'yes' : 'no'}`],
+      ['Privacy', `Lock events ${pol?.privacy?.lockEventsDays ?? 730} days; guest lists ${pol?.privacy?.guestListDays ?? 400} days; usage ${pol?.privacy?.usageDays ?? 730} days`],
+    ],
+  };
 }

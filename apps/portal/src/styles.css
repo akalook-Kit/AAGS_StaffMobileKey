@@ -68,7 +68,7 @@ p { margin: 0 0 10px; max-width: 70ch; }
 .rail .foot button { background: none; border: 0; color: inherit; opacity: .8; padding: 0; cursor: pointer; text-decoration: underline; }
 .rail select { width: 100%; background: rgba(255,255,255,.1); color: inherit; border: 1px solid rgba(255,255,255,.25); border-radius: var(--radius); padding: 5px 8px; }
 .rail select option { color: var(--ink); }
-main.content { padding: 28px 36px 60px; min-width: 0; }
+main.content { padding: 28px 36px 96px; min-width: 0; }
 .page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
 .page-head p { margin: 6px 0 0; color: var(--ink-2); }
 
@@ -198,7 +198,7 @@ code, .mono { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; f
   .shell { grid-template-columns: 1fr; }
   .rail { position: static; height: auto; }
   .rail nav { flex-direction: column; flex-wrap: nowrap; }
-  main.content { padding: 20px 16px 40px; }
+  main.content { padding: 20px 16px 96px; }
   .split { grid-template-columns: 1fr; }
   .login { grid-template-columns: 1fr; }
   .login .side { display: none; }
@@ -895,3 +895,63 @@ ol.steps > li { margin-bottom: 14px; }
   .tap-handle { top: 66px; left: 28px; width: 64px; height: 12px; }
   .land-form { padding: 28px 20px 40px; gap: 36px; }
 }
+
+/* ---- 2.25 Feedback and the Demo Hotel ------------------------------------------------------------------------ */
+.fb-button { position: fixed; right: 18px; bottom: 18px; z-index: 40; border: 1px solid var(--brass); background: var(--brand); color: var(--brand-ink); padding: 9px 16px; border-radius: 999px; cursor: pointer; box-shadow: var(--shadow); }
+.fb-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: grid; place-items: center; z-index: 60; padding: 16px; }
+.fb-dialog { background: var(--surface); color: var(--ink); width: min(480px, 100%); border-radius: 10px; padding: 22px; box-shadow: var(--shadow); display: grid; gap: 12px; }
+.fb-dialog h2 { margin: 0; }
+.fb-dialog p { margin: 0; }
+.fb-dialog textarea { width: 100%; border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; background: var(--input-bg); resize: vertical; }
+.fb-rate { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.fb-rate button { width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); cursor: pointer; }
+.fb-rate button[aria-pressed="true"] { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+.demo-band { background: var(--warn-bg); color: var(--warn-ink); border: 1px solid var(--warn-line); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.demo-band .linklike { padding: 0; color: inherit; }
+.copy-box { display: flex; gap: 8px; align-items: center; }
+.copy-box input { flex: 1; min-width: 0; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+@media print { .fb-button { display: none; } }
+.fb-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.fb-list li { border-top: 1px solid var(--line); padding: 10px 0; }
+.fb-list p { margin: 4px 0 0; white-space: pre-wrap; }
+
+/* ---- 2.27 Reports ----------------------------------------------------------------------------------------- */
+.rep-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 20px; align-items: start; }
+.rep-list { position: sticky; top: 12px; display: grid; gap: 14px; }
+.rep-list h3 { font-size: 12px; color: var(--ink-3); margin: 0 0 4px; font-weight: 600; }
+.rep-list button, .rep-list a { display: block; width: 100%; text-align: left; background: none; border: 0; border-left: 3px solid transparent; padding: 6px 10px; color: var(--ink); text-decoration: none; cursor: pointer; border-radius: 0 var(--radius) var(--radius) 0; }
+.rep-list button:hover, .rep-list a:hover { background: var(--hover); }
+.rep-list button[aria-current="page"] { border-left-color: var(--brass); background: var(--surface); font-weight: 600; }
+.rep-main { display: grid; gap: 16px; min-width: 0; }
+.rep-figures { display: flex; flex-wrap: wrap; gap: 8px; }
+.rep-figures div { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; min-width: 120px; display: grid; background: var(--surface); }
+.rep-figures strong { font-size: 22px; }
+.rep-figures span { font-size: 12px; color: var(--ink-2); }
+.rep-send { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; display: grid; gap: 6px; }
+tr.row-bad td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+tr.row-warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+@media (max-width: 900px) { .rep-layout { grid-template-columns: 1fr; } .rep-list { position: static; } }
+
+/* 2.27 Shorter menu: a few sections, one open at a time, readable by anyone. */
+.rail nav > div > button.group { font-size: 14px; text-transform: none; letter-spacing: 0; opacity: .85; padding: 9px 10px; border-radius: 8px; margin-top: 2px; }
+.rail nav > div > button.group:hover { opacity: 1; background: rgba(255,255,255,.06); }
+.rail nav > div > button.group[aria-expanded='true'] { opacity: 1; font-weight: 600; }
+.rail nav > div > button.group.here { opacity: 1; }
+.rail nav > div > button.group > span:first-child { display: inline-flex; gap: 6px; align-items: center; }
+.rail nav .navgroup a { padding-left: 22px; font-size: 13.5px; }
+.lang-switch { margin-top: 2px; }
+.land-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.land-top .lang-switch { margin: 0; }
+.land-top .lang-switch button { padding: 4px 10px; flex: 0 0 auto; }
+.ssr-glance { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 6px 0 14px; }
+.ssr-glance > div { border: 1px solid var(--line, #ddd); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; break-inside: avoid; }
+.ssr-glance span { font-size: 12px; opacity: .7; }
+.ssr-glance strong { font-size: 22px; line-height: 1.2; }
+.ssr-glance small { font-size: 11.5px; opacity: .75; }
+.ssr-glance .ok { border-color: var(--ok, #2e7d4f); box-shadow: inset 4px 0 0 var(--ok, #2e7d4f); }
+.ssr-glance .bad { border-color: var(--bad, #b3261e); box-shadow: inset 4px 0 0 var(--bad, #b3261e); }
+.ssr-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; }
+@media (max-width: 700px) { .ssr-glance { grid-template-columns: 1fr 1fr; } .ssr-two { grid-template-columns: 1fr; } }
+.rail nav > div > button.group span { font-size: inherit; letter-spacing: 0; }
+.rail nav > div > button.group > span:last-child { font-size: 11px; opacity: .7; }
+.page-head + .seg { margin-bottom: 12px; }

@@ -10,6 +10,7 @@ import { loadStoredSecrets } from './secret-store.ts';
 import { scheduleDiscovery } from './visionline-sync.ts';
 import { applyRetention } from './retention.ts';
 import { maybeSendAccountsReport } from './accounts-report.ts';
+import { sendScheduledReports } from './routes/reports-centre.ts';
 import { maybeSendRenewalReminders } from './routes/keycards.ts';
 
 /**
@@ -157,6 +158,7 @@ export function startJobs() {
       if (n % 12 === 9) await maybeDailyBackup().catch((e) => console.error('[backup]', (e as Error).message));
       if (n % 60 === 30) await loadStoredSecrets();
       if (n % 720 === 400) await maybeSendRenewalReminders().catch((e) => console.error('[renewals]', (e as Error).message));
+      if (n % 12 === 10) await sendScheduledReports().catch((e) => console.error('[reports]', (e as Error).message)); // every minute
       if (n % 60 === 45) await maybeSendAccountsReport().catch((e) => console.error('[accounts]', (e as Error).message));
       if (n % 720 === 100) await applyRetention().catch((e) => console.error('[retention]', (e as Error).message)); // hourly
     } catch (e) {

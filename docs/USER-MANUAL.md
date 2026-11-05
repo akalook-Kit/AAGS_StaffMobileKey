@@ -1,4 +1,4 @@
-# Access Monitoring Tool — user manual (2.18)
+# Access Monitoring Tool — user manual (2.27.1)
 
 New here? Start with **QUICK-START.md** (5 steps, adding people, everyday tasks).
 
@@ -58,6 +58,87 @@ online reader or when the lock is read.
 Every lock event received from Visionline (entrances, refused entries, alarms, battery), every mobile-key event and
 system events, with filters (period, type, door, person, known/unknown card). **Print** makes a PDF with a
 fingerprint (SHA-256) that can be checked later under *Verify a PDF*: any change to the file shows.
+
+### 5k. New in 2.27: Reports, the two setup reports, a shorter menu and French
+
+**Reports** (menu → *Reports*) puts every report in one place. Choose a report on the left, then **Day** or
+**Month** (yesterday and last month are one click away). Each report shows its figures, then the full list, and can
+be **downloaded as a PDF** (fingerprinted, checkable under *Verify a PDF*), **downloaded for Excel (CSV)**, or
+**e-mailed now** to one or more addresses (the PDF and the CSV are attached).
+
+| Report | What it answers |
+|---|---|
+| Daily summary | Entrances, refused entries, guest and staff keycards issued, keycard requests, battery alarms, locks offline, open alarms, maintenance: one page per day or month |
+| Guest keycards issued | How many guest keycards Visionline made, and in which rooms they were used; for a month, one line per day |
+| Staff keycards issued | Every staff keycard made in the day or month: for whom, user group, card, who issued it, valid until, still working or not |
+| Who holds staff keycards | Every valid staff keycard now: holder, user group, card and register number, doors, deadbolt override, valid until, who issued it, last used. Generic names in red; people with two cards or cards ending within 30 days in orange |
+| Keycard requests and returns | New, replacement, return and cancellation requests, their state and who handled them |
+| Door activity | For each door: entrances, refused entries, how many staff and guest keycards were used, last use |
+| Refused entries | Every refused entry: when, door, card, whose, why |
+| Locks and batteries | Battery alarms and changes, battery state now, how long the batteries have been in, locks offline |
+
+*More reports* on the same page links to Insights, My charts, the printable Event log, Keycards per room, the
+Accounts daily report and the two setup reports.
+
+**E-mailed every day or every month** (administrators): under *Reports sent by e-mail*, choose the report, *Every day*
+(the previous day, at the time you choose) or *Every month* (the previous month, on the 1st), and the addresses.
+E-mail must be set up first (*Settings → Alerts & notifications*). *Stop* ends it. The Demo Hotel never sends any.
+
+How guest keycards are counted: Visionline's live feed reports each keycard it makes; the report counts those that are
+not staff keycards or mobile keys. A guest keycard made while the connector was off is counted when it is first used
+at a door.
+
+**Two setup reports** (*Administration → System setup reports*):
+
+- **Visionline setup report**: Visionline only. Its first page, *At a Glance*, states plainly the **Visionline
+  version**, whether **AES encryption is enabled**, the **number of locks** (online and stand-alone, by category and
+  by door group), user groups, door groups, encoders, people and valid keycards, then the system code and ID, the
+  Web API version, the firmware pack, the licensed options and the guest card defaults. The version and AES come from
+  the Visionline **System settings report**: import it on the same page (*Import a Visionline report*). If the report
+  does not mention AES, the page says so and where to check in Visionline, rather than guessing.
+- **Portal setup report**: this portal only: its version, the connector, the Visionline operator the portal uses,
+  the licence, who can sign in (with two-step sign-in or not), which person each Visionline operator is, keycard
+  types and the portal parameters.
+
+2.27.1: while the setup report is being prepared the page says so and counts the seconds. If it takes more than 90
+seconds it says which step is slow and what the database is busy with, instead of staying blank. The portal setup
+report is prepared on its own, so it shows even when the Visionline part is slow.
+
+**Closing alerts (2.27.1)**: an alert closes by itself within a minute once the problem is fixed; the line under
+each alert says how (door reports again, new batteries recorded, alarm completed in Visionline, connector back…).
+**Mark as seen** (or **Mark all as seen**, for all or one type) says someone is handling it: it leaves the red count
+in the menu and moves to *Seen*, still listed until fixed. Door-silence alerts can be switched off in *Settings →
+Alerts & notifications*.
+
+AES on the first page of the Visionline setup report also reads Visionline's *Known authentication information*
+list (for example *Ultralight AES signature* = AES card authentication set up). The *PMS encryption key* line is
+shown on its own: it is the key of the PMS interface, not the card encryption.
+
+**A shorter menu**: Overview, Reports and Alerts at the top, then four sections that open one at a time: *Doors &
+safety*, *Keycards & people*, *Locks* and *Administration*. The section of the page you are on opens by itself; a
+closed section shows a number when something inside needs attention (critical batteries, locks offline…).
+
+**Languages**: **Auto**, English or Français, at the bottom of the menu and on the sign-in page. **Auto** (the
+default, 2.27.1) follows the language of the browser, which normally follows Windows (*Settings → Time & language →
+Language*; in Chrome or Edge, *Settings → Languages*): a computer set to French opens the portal in French. Choosing
+English or Français keeps that language on this computer and with your account. The menu, sign-in page, overview, reports and feedback are translated; some detailed
+pages are still in English and will follow.
+
+### 5j. New in 2.26: reading a card at the encoder
+
+Visionline does not use the same name for "read the card on the encoder" everywhere. When it answers *Invalid query
+parameter value*, the connector (0.16.1) tries the other name once (reading changes nothing), and the platform keeps
+the one that works (Settings → Reports & sync → Encoders). 2.26.1 (connector 0.16.2) also tries the encoder name
+with its space written as "+" (for names such as "Encoder .96"), remembers the form that works for encoding too, and
+when nothing works lists Visionline's answer to each form. If the connector on the Visionline server is older, the
+message says so: install the latest installer with **Everything** (Connector health shows the connector's version).
+
+### 5i. New in 2.25: Demo Hotel, testers and feedback
+
+- **Feedback** (bottom right of every page): a few words and an optional 1–5 rating, with the page you were on.
+- **Administration → Demo Hotel and testers** (platform administrators): a site with made-up data, one-time
+  invitation links for testers with access for 1, 7 or 14 days, the testers' state, and all feedback (CSV export).
+  Testers see only the Demo Hotel; nothing there is sent to Visionline. See TESTERS.md.
 
 ### 5h. New in 2.24: sign-in page and finding your way
 

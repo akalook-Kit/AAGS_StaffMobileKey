@@ -14,6 +14,18 @@ WHAT THE SERVER NEEDS
   - .NET Framework 4.8 (part of Windows)
   - 2 GB free disk space (more as the database grows; Monitoring warns below 50 GB)
 
+NEW IN 2.26.1
+  Connector 0.16.2: reading a card also tries the encoder name with "+" for its space ("Encoder .96"); if nothing
+  works, Visionline's answer to each form is shown. An older connector is pointed out in the message.
+
+NEW IN 2.26
+  Reading a card at the encoder works whichever name your Visionline uses for the read action ("Invalid query
+  parameter value" fixed; connector 0.16.1, install with Everything). Visionline's own detail is shown in errors.
+
+NEW IN 2.25
+  Demo Hotel with made-up data for testers: one-time invitation links, access for 1, 7 or 14 days, Feedback button on
+  every page, feedback list and CSV (Administration → Demo Hotel and testers; docs\TESTERS.md).
+
 NEW IN 2.24
   New sign-in page (logo, keycard-and-lock picture, what each team does, help for a forgotten password), shortcuts
   on the Overview, page titles, a clearer phone menu, no listing by search engines. Updated e-mail library.

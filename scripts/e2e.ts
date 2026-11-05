@@ -1554,6 +1554,7 @@ async function main() {
     const k23 = ck.json?.card;
     ok(ck.json?.status === 'SUCCEEDED' && k23?.holder === 'Ines Ndongo' && k23.valid && k23.label === 'HK 021' && k23.doors.length > 0, `Verify at the encoder: card ${k23?.regNo} is HK 021 of ${k23?.holder}, works until ${String(k23?.expiresAt).slice(0, 10)}`, ck.json);
     ok(ck.json.extend?.possible === true, 'it can be extended from the portal', ck.json.extend);
+    ok((await call('GET', `${H}/config/visionline`, admin)).json.data?.encoderRead?.action === 'readCard', 'Visionline refused one name of the read action ("Invalid query parameter value"): the other was used and is kept');
     ok((await call('POST', `${H}/keycards/check/read`, rest, { encoder: 'fd1' })).status === 403 && (await call('POST', `${H}/keycards/check/read`, lakeAdmin, { encoder: 'fd1' })).status === 403, 'the restaurant and another site cannot read keycards here');
     const newDate = new Date(Date.now() + 360 * 86_400_000); newDate.setUTCHours(20, 59, 0, 0);
     const ex = await call('POST', `${H}/keycards/check/${ck.readId}/extend`, issuer, { validUntil: newDate.toISOString() });
@@ -1597,6 +1598,112 @@ async function main() {
     ok((await (await fetch(`${API}/robots.txt`)).text()).includes('Disallow: /'), 'robots.txt keeps search engines out');
     const cfg = (await call('GET', `${API}/mobile/v1/config?hotel=k-hotel-bana`)).json;
     ok(cfg.property?.kind === 'hotel' && !Object.keys(cfg.property).some((k) => /password|secret|token/i.test(k)), 'the sign-in page learns the property name and kind, nothing secret', cfg.property);
+  }
+
+  console.log('\n2.25: Demo Hotel, testers with a one-time link and a few days of access, feedback');
+  {
+    const plat = await login('platform@smk.test');
+    ok((await call('GET', `${API}/api/v1/platform/demo`, admin)).status === 403, 'only platform administrators manage the Demo Hotel');
+    const mk = await call('POST', `${API}/api/v1/platform/demo`, plat, {});
+    ok(mk.status === 200 && mk.json.created === true, 'the Demo Hotel is created with sample data', mk.json);
+    const D = `${API}/api/v1/hotels/${mk.json.hotelId}`;
+    const dm = (await call('GET', `${API}/api/v1/platform/demo`, plat)).json;
+    ok(dm.exists && dm.name === 'Demo Hotel', 'it is listed for the platform administrator');
+    const bat = (await call('GET', `${D}/battery`, plat)).json;
+    ok(bat.doors?.some((d: any) => d.state === 'CRITICAL') && bat.doors.some((d: any) => d.state === 'LOW'), 'sample data: locks with low and critical batteries');
+    const ev = (await call('GET', `${D}/events?from=${new Date(Date.now() - 15 * 86_400_000).toISOString()}&to=${new Date(Date.now() + 3_600_000).toISOString()}`, plat)).json;
+    ok((ev.counts?.all ?? ev.total ?? ev.events?.length ?? 0) > 100, `sample data: two weeks of door events (${ev.counts?.all ?? ev.events?.length})`);
+    ok((await call('GET', `${D}/keycards/attention`, plat)).json.generic?.length >= 1, 'sample data: a keycard in a generic name to find');
+    ok((await call('POST', `${D}/visionline/refresh`, plat)).json.error?.code === 'DEMO_HOTEL', 'nothing is sent to a Visionline from the Demo Hotel (explained)');
+    // A tester
+    ok((await call('POST', `${API}/api/v1/platform/demo/testers`, plat, { displayName: 'Real Admin', email: 'admin@khb.test', days: 7 })).json.error?.code === 'REAL_ACCOUNT', 'an e-mail with access to a real site cannot become a tester');
+    const inv = await call('POST', `${API}/api/v1/platform/demo/testers`, plat, { displayName: 'Tina Tester', email: 'tina.tester@example.org', days: 7 });
+    ok(inv.status === 200 && inv.json.token && inv.json.days === 7, 'a tester is invited: one-time link, 7 days');
+    const pre = (await call('GET', `${API}/api/v1/public/invites/${inv.json.token}`)).json;
+    ok(pre.testDays === 7 && pre.site === 'Demo Hotel', 'the link says it is a 7-day test account of the Demo Hotel');
+    const acc = await call('POST', `${API}/api/v1/public/invites/${inv.json.token}`, undefined, { password: 'Testing-the-demo-2026' });
+    ok(acc.status === 200 && acc.json.token, 'the tester chooses a password and is in');
+    ok((await call('POST', `${API}/api/v1/public/invites/${inv.json.token}`, undefined, { password: 'Testing-the-demo-2026' })).status === 410, 'the link works only once');
+    const tina = acc.json.token as string;
+    const tme = (await call('GET', `${API}/api/v1/me`, tina)).json;
+    const days = (Date.parse(tme.accessUntil) - Date.now()) / 86_400_000;
+    ok(tme.hotels.length === 1 && tme.hotels[0].demo === true && days > 6.9 && days <= 7, `the tester sees only the Demo Hotel, for ${days.toFixed(1)} days`);
+    ok((await call('GET', `${H}/keycards/requests`, tina)).status === 403 && (await call('GET', `${H}/battery`, tina)).status === 403, 'the tester cannot read K Hotel Bana');
+    ok((await call('GET', `${D}/battery`, tina)).status === 200, 'the tester can use the Demo Hotel');
+    await call('POST', `${D}/monitoring/check`, plat, {});
+    const dmon = (await call('GET', `${D}/monitoring`, plat)).json;
+    ok(!dmon.alerts.some((x: any) => ['disk_low', 'db_large'].includes(x.kind)) && dmon.system.disks.length === 0 && !dmon.system.database.tables?.length, 'the Demo Hotel shows nothing about the real server (disk, database)');
+    ok((await call('PUT', `${D}/config/policy`, tina, {})).status === 403, 'the tester cannot change settings');
+    const fb = await call('POST', `${D}/feedback`, tina, { text: 'The battery page is clear; I could not find how to extend a card.', rating: 4, page: '/battery' });
+    ok(fb.status === 200, 'the tester sends feedback');
+    ok((await call('POST', `${H}/feedback`, tina, { text: 'trying another site' })).status === 403, 'feedback only to the tester\'s own site');
+    const dm2 = (await call('GET', `${API}/api/v1/platform/demo`, plat)).json;
+    ok(dm2.feedback.some((f: any) => f.rating === 4 && f.who === 'Tina Tester') && dm2.testers.some((t: any) => t.email === 'tina.tester@example.org' && t.state === 'active' && t.feedback === 1), 'the platform administrator reads the feedback and sees the tester active');
+    ok((await call('GET', `${API}/api/v1/platform/demo/feedback.csv`, plat)).json.includes('Tina Tester'), 'feedback exports as CSV');
+    const rs = await call('POST', `${API}/api/v1/platform/demo/reset`, plat, {});
+    ok(rs.status === 200 && (await call('GET', `${D}/battery`, tina)).json.doors?.length > 0 && (await call('GET', `${API}/api/v1/platform/demo`, plat)).json.feedback.length >= 1, 'the sample data can be reset; testers and feedback stay');
+    const tid = dm2.testers.find((t: any) => t.email === 'tina.tester@example.org').id;
+    await call('POST', `${API}/api/v1/platform/demo/testers/${tid}/end`, plat, {});
+    ok((await call('GET', `${API}/api/v1/me`, tina)).status === 401, 'ending a tester\'s access signs them out at once');
+    ok((await call('POST', `${API}/api/v1/auth/login`, undefined, { email: 'tina.tester@example.org', password: 'Testing-the-demo-2026' })).json.error?.code === 'ACCESS_ENDED', 'and they cannot sign in again');
+    ok((await call('POST', `${H}/feedback`, admin, { text: 'Feedback from the real site works too', rating: 5 })).status === 200, 'staff of a real site can send feedback too');
+  }
+
+  console.log('\n2.27: Reports (daily and monthly, PDF, CSV, e-mail), Visionline and portal setup reports, languages');
+  {
+    const plat = await login('platform@smk.test');
+    const demoId = (await call('GET', `${API}/api/v1/platform/demo`, plat)).json.hotelId as string;
+    const D = `${API}/api/v1/hotels/${demoId}`;
+    const cat = await call('GET', `${D}/reports-centre`, plat);
+    ok(cat.status === 200 && ['daily-summary', 'guest-keycards', 'staff-keycards-issued', 'keycard-holders', 'keycard-requests', 'door-activity', 'refused-entries', 'locks-batteries'].every((id) => cat.json.reports.some((r: any) => r.id === id)) && cat.json.canSchedule,
+      'the Reports page lists the daily and monthly reports', cat.json.reports?.map((r: any) => r.id));
+    const month = cat.json.month as string;
+    const sum = (await call('GET', `${D}/reports-centre/daily-summary?period=month&date=${month}`, plat)).json;
+    const fig = (k: string) => Number(sum.summary?.find((x: string[]) => x[0] === k)?.[1] ?? -1);
+    ok(fig('Entrances') > 0 && fig('Guest keycards issued') >= 0 && sum.rows.length >= 10, `monthly summary: ${fig('Entrances')} entrances, ${fig('Guest keycards issued')} guest keycards, ${fig('Staff keycards issued')} staff keycards`);
+    const gy = (await call('GET', `${D}/reports-centre/guest-keycards?period=day&date=${cat.json.yesterday}`, plat)).json;
+    ok(Number(gy.summary[0][1]) > 0 && gy.rows.length > 0 && gy.columns[0].label === 'Room / door', `guest keycards issued yesterday: ${gy.summary[0][1]}, used in ${gy.rows.length} rooms`);
+    const gm = (await call('GET', `${D}/reports-centre/guest-keycards?period=month&date=${cat.json.lastMonth}`, plat)).json;
+    ok(gm.columns[0].label === 'Day' && gm.rows.every((r: string[]) => /^\d{4}-\d{2}-\d{2}$/.test(r[0]!)), `guest keycards for last month: one line per day (${gm.rows.length} days)`);
+    const sk = (await call('GET', `${D}/reports-centre/staff-keycards-issued?period=month&date=${month}`, plat)).json;
+    ok(sk.rows.length > 0 && sk.columns.some((c: any) => c.label === 'Issued by'), `staff keycards issued this month: ${sk.rows.length}, with who issued them`);
+    const kh = (await call('GET', `${D}/reports-centre/keycard-holders`, plat)).json;
+    ok(kh.rows.length > 0 && kh.columns.some((c: any) => c.label === 'Holder') && /^As of/.test(kh.period) && kh.tones.includes('error'), `who holds staff keycards now: ${kh.rows.length} cards (a generic name in red)`);
+    const pdf = await fetch(`${D}/reports-centre/keycard-holders/pdf`, { headers: { authorization: `Bearer ${plat}` } });
+    ok(pdf.status === 200 && pdf.headers.get('content-type') === 'application/pdf' && /^[0-9a-f]{64}$/.test(pdf.headers.get('x-report-sha256') ?? ''), 'downloads as a fingerprinted PDF');
+    const csvR = await call('GET', `${D}/reports-centre/door-activity/csv?period=month&date=${month}`, plat);
+    ok(csvR.status === 200 && typeof csvR.json === 'string' && csvR.json.split('\n').length > 3, 'and as CSV for Excel');
+    ok((await call('GET', `${D}/reports-centre/guest-keycards?period=month&date=2026-13`, plat)).status === 400, 'a month that does not exist is refused');
+    ok((await call('POST', `${D}/reports-centre/daily-summary/send`, plat, { period: 'day', emails: ['gm@example.org'] })).json.error?.code === 'EMAIL_OFF', 'e-mail now: explained when e-mail is not set up');
+    const sc = await call('POST', `${H}/report-schedules`, admin, { report: 'staff-keycards-issued', frequency: 'monthly', sendTime: '07:30', emails: ['hr@example.org'] });
+    ok(sc.status === 200 && (await call('GET', `${H}/reports-centre`, admin)).json.schedules.some((x: any) => x.id === sc.json.id && x.frequency === 'monthly'), 'an administrator has a report e-mailed every month');
+    ok((await call('POST', `${H}/report-schedules`, issuer, { report: 'daily-summary', frequency: 'daily', emails: ['x@example.org'] })).status === 403, 'only administrators set up e-mailed reports');
+    ok((await call('DELETE', `${H}/report-schedules/${sc.json.id}`, admin)).status === 200, 'and can stop it');
+    const rest = await login('restaurant@khb.test');
+    const rc = await call('GET', `${H}/reports-centre`, rest);
+    ok(rc.status === 200 && !rc.json.reports.some((r: any) => r.id === 'keycard-holders') && (await call('GET', `${H}/reports-centre/keycard-holders`, rest)).status === 403, 'people see only the reports their role allows');
+    ok((await call('GET', `${D}/reports-centre/daily-summary`, admin)).status === 403, 'no report of another site');
+    // Setup reports: Visionline only (version, AES, locks on the first page) and the portal's own.
+    const ss = ['[System code]', '1111-2222-3333', 'AA-00000', '', '[Visionline]', 'Version: 1.27.0.25', '', '[Security]', 'AES encryption: Yes', '', '[Options]', '(39) Mobile Access', ''].join('\r\n');
+    ok((await call('POST', `${H}/visionline-imports`, admin, { fileName: 'SystemSettings.xls', data: Buffer.from(ss).toString('base64') })).status === 200, 'the Visionline System settings report is imported');
+    const sr = (await call('GET', `${H}/reports/setup`, admin)).json;
+    ok(sr.glance?.version === '1.27.0.25' && sr.glance.aes?.enabled === true && sr.glance.locks?.total > 0 && sr.glance.mobileAccess === true,
+      `Visionline setup report, first page: Visionline ${sr.glance?.version}, AES ${sr.glance?.aes?.enabled ? 'enabled' : '?'}, ${sr.glance?.locks?.total} locks (${sr.glance?.locks?.online} online)`);
+    ok(Array.isArray(sr.portalInsights) && !sr.insights.some((i: any) => /portal works in Visionline/.test(i.text)), 'remarks about the portal go to the portal setup report');
+    const t0 = Date.now();
+    const pr = (await call('GET', `${H}/reports/setup?part=portal`, admin)).json;
+    ok(pr.access?.length > 0 && pr.property?.version && pr.accessByPerson?.length === 0, `the portal setup report comes on its own, without the per-person work (${Date.now() - t0} ms)`);
+    ok((await call('PUT', `${API}/api/v1/me/prefs`, issuer, { hiddenNav: [], theme: 'system', lang: 'auto' })).status === 200, 'language "Auto" (the browser\'s) can be chosen');
+    // Alerts: mark all as seen (they leave the menu count, stay open until fixed)
+    ok((await call('POST', `${H}/monitoring/alerts/acknowledge-all`, issuer, {})).status === 403, 'only people who manage alerts mark them as seen');
+    const ackAll = await call('POST', `${H}/monitoring/alerts/acknowledge-all`, admin, {});
+    const sumA = (await call('GET', `${H}/monitoring/summary`, admin)).json;
+    ok(ackAll.status === 200 && sumA.alerts.critical_unseen === 0, `"Mark all as seen": ${ackAll.json.count} alert(s) seen, none left in the menu count (${sumA.alerts.critical} critical still open until fixed)`);
+    // Languages
+    const pf = await call('PUT', `${API}/api/v1/me/prefs`, issuer, { hiddenNav: [], theme: 'system', lang: 'fr' });
+    ok(pf.status === 200 && (await call('GET', `${API}/api/v1/me`, issuer)).json.prefs?.lang === 'fr', 'a person\'s language (French) is kept with their preferences');
+    ok((await call('PUT', `${API}/api/v1/me/prefs`, issuer, { lang: 'xx' })).status === 400, 'only the languages offered');
+    await call('PUT', `${API}/api/v1/me/prefs`, issuer, { hiddenNav: [], theme: 'system', lang: 'en' });
   }
 
   console.log('\nGate: every request is traceable without exposing secrets');

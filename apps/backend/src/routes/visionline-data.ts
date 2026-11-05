@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { enqueue } from '../commands.ts';
 import { audit } from '../audit.ts';
 import { queryEvents } from '../event-log.ts';
+import { oldConnectorNote } from '../keycard-check.ts';
 
 const P = '/api/v1';
 const hid = (req: FastifyRequest) => {
@@ -259,6 +260,7 @@ export function visionlineDataRoutes(app: FastifyInstance) {
     await requirePerm(req, hotelId, 'reports.read');
     const c = await one(pool, `SELECT id, status, result, error FROM commands WHERE id=$1 AND hotel_id=$2 AND type='READ_CARD'`, [z.string().uuid().parse((req.params as any).commandId), hotelId]);
     if (!c) throw notFound('Card read');
+    if (c.status === 'FAILED' && c.error) c.error = { ...c.error, message: `${c.error.message ?? ''}${await oldConnectorNote(hotelId)}` };
     return c;
   });
 }

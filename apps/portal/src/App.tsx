@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type FormEvent } from 'react';
+import { createContext, useContext, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { CommandPalette } from './components/CommandPalette';
 import { AccessPage } from './pages/Access';
 import { LicenceBanner } from './components/Licence';
@@ -38,13 +38,18 @@ import { KeycardsPage } from './pages/Keycards';
 import { SetupReportPage } from './pages/SetupReport';
 import { PublicRequestPage } from './pages/PublicRequest';
 import { InvitePage } from './pages/Invite';
+import { DemoPage } from './pages/Demo';
+import { FeedbackButton } from './components/Feedback';
+import { ReportsPage } from './pages/Reports';
+import { LANGS, hasLangChoice, lang, langChoice, setLang, tr, type LangChoice } from './i18n';
 
 export interface Me {
   id: string; email: string; displayName: string; isPlatformAdmin: boolean; mfaEnabled: boolean;
-  hotels: { id: string; slug: string; name: string; kind?: 'hotel' | 'institution'; roles: string[]; permissions: Permission[]; hiddenModules?: string[]; mfaRequired?: boolean }[];
+  accessUntil?: string | null;
+  hotels: { id: string; slug: string; name: string; kind?: 'hotel' | 'institution'; demo?: boolean; roles: string[]; permissions: Permission[]; hiddenModules?: string[]; mfaRequired?: boolean }[];
   modules?: Record<string, string>;
   roleLabels: Record<string, string>;
-  prefs?: { hiddenNav?: string[]; theme?: 'system' | 'light' | 'dark' };
+  prefs?: { hiddenNav?: string[]; theme?: 'system' | 'light' | 'dark'; lang?: LangChoice };
 }
 interface Ctx { me: Me; hotel: Me['hotels'][number]; can: (p: Permission) => boolean; branding: any; reloadBranding: () => void; base: string; pages: { to: string; label: string }[]; setPrefs: (p: NonNullable<Me['prefs']>) => void }
 const HotelCtx = createContext<Ctx | null>(null);
@@ -58,6 +63,8 @@ export const useTerms = () => termsFor(useContext(HotelCtx)?.hotel.kind);
 
 export function App() {
   const [token, setToken] = useState(auth.token);
+  const [, setLangTick] = useState(0);
+  useEffect(() => { const f = () => setLangTick((n) => n + 1); window.addEventListener('smk:lang', f); return () => window.removeEventListener('smk:lang', f); }, []);
   const [me, setMe] = useState<Me | null>(null);
   // 2.9 A new on-premises installation opens on the first-run setup page until the hotel is set up.
   const [setup, setSetup] = useState<any>(undefined);
@@ -90,6 +97,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [prefs, setPrefs] = useState(me.prefs ?? {});
   // A person's appearance follows them to any computer (unless this computer already has a choice).
   useEffect(() => { try { if (me.prefs?.theme && !localStorage.getItem('smk.theme')) setThemePref(me.prefs.theme); } catch { /* ignore */ } }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (me.prefs?.lang && !hasLangChoice() && me.prefs.lang !== langChoice()) setLang(me.prefs.lang); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const vis = (to: string) => !(prefs.hiddenNav ?? []).includes(to);
   useEffect(() => setMenu(false), [loc.pathname, loc.search]);
   const [hotelId, setHotelId] = useState(() => { try { return localStorage.getItem('smk.hotel') ?? me.hotels[0]!.id; } catch { return me.hotels[0]!.id; } });
@@ -113,28 +121,69 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const can = (p: Permission) => hotel.permissions.includes(p);
   // 2.17 Own charts for everyone who can read some data.
   const chartsOk = (['reports.read', 'events.read', 'maintenance.read', 'key.read', 'breakfast.read'] as Permission[]).some((p) => hotel.permissions.includes(p));
-  // 2.16.1 Menu groups fold away (remembered on this computer); the group of the page you are on stays open.
-  const [navClosed0, setNavClosed] = useState<Set<string>>(() => { try { return new Set(JSON.parse(localStorage.getItem('smk.nav.closed') ?? '[]')); } catch { return new Set(); } });
-  const activeGroup = /^\/(muster|emergency)/.test(loc.pathname) ? 'safety' : /^\/(visionline|keycards|idcards|staff|keys|attendance|breakfast)/.test(loc.pathname) ? 'people'
-    : /^\/(battery|maintenance|lock-troubleshoot|locks-online)/.test(loc.pathname) ? 'building' : /^\/(operators|connector|branding|settings|audit|usage|setup-report)/.test(loc.pathname) ? 'admin' : '';
-  const navClosed = new Set([...navClosed0].filter((g) => g !== activeGroup));
-  const toggleGroup = (g: string) => setNavClosed((cur) => {
-    const n = new Set(cur); if (navClosed.has(g)) n.delete(g); else n.add(g);
-    try { localStorage.setItem('smk.nav.closed', JSON.stringify([...n])); } catch { /* ignore */ }
-    return n;
-  });
-  const initials = hotel.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 3).toUpperCase();
+  // 2.27 A shorter menu (Armel, 4 Nov): a few groups, one open at a time; the group of the page you are on opens by itself.
+  const activeGroup = /^\/(access|events|room-keycards|muster|emergency)/.test(loc.pathname) ? 'doors'
+    : /^\/(visionline|keycards|idcards|staff|keys|attendance|breakfast)/.test(loc.pathname) ? 'people'
+    : /^\/(battery|maintenance|lock-troubleshoot|locks-online)/.test(loc.pathname) ? 'locks'
+    : /^\/(operators|connector|branding|settings|audit|usage|setup-report|demo)/.test(loc.pathname) ? 'admin' : '';
+  const [openGroup, setOpenGroup] = useState(activeGroup);
+  useEffect(() => { if (activeGroup) setOpenGroup(activeGroup); }, [activeGroup]);
+  // 2.27.1 The menu counts critical alerts nobody has looked at yet ("Mark as seen" takes them off the count).
+  const critical = mon.data?.alerts?.critical_unseen ?? mon.data?.alerts?.critical ?? 0;
   const pendingCount = pending.data?.length ?? 0;
+  const keycardsOk = can('keycards.request') || can('keycards.read') || can('lockout.request') || can('lockout.approve');
+  const reportsOk = can('reports.read') || can('events.read') || can('keycards.read') || can('battery.read') || can('settings.manage');
+  type Item = { to: string; label: string; show: boolean; badge?: ReactNode; count?: number };
+  const NAV: { id?: string; label: string; items: Item[] }[] = [
+    { label: '', items: [
+      { to: '/', label: 'Overview', show: can('resources.read') || can('reports.read') || !can('muster.read') },
+      { to: '/reports', label: 'Reports', show: reportsOk },
+      { to: '/monitoring', label: 'Alerts', show: can('alerts.read'), badge: critical > 0 ? <span className="count bad" title={tr('Critical alerts')}>{critical}</span> : null },
+    ] },
+    { id: 'doors', label: 'Doors & safety', items: [
+      { to: '/access', label: 'Access history', show: can('events.read') },
+      { to: '/muster', label: 'Live occupancy', show: can('muster.read'), badge: emergency.data?.open ? <span className="count bad" title={tr('Emergency')}>!</span> : null, count: emergency.data?.open ? 1 : 0 },
+      { to: '/emergency', label: 'Emergency', show: can('muster.read') },
+      { to: '/events', label: 'Event log', show: can('events.read') },
+      { to: '/room-keycards', label: 'Keycards per room', show: can('events.read') },
+    ] },
+    { id: 'people', label: 'Keycards & people', items: [
+      { to: '/keycards', label: 'Staff keycards', show: keycardsOk },
+      { to: '/visionline', label: 'Visionline cards & people', show: can('reports.read') },
+      { to: '/idcards', label: 'Staff ID cards', show: can('idcards.manage') },
+      { to: '/staff', label: 'Staff', show: can('staff.read') },
+      { to: '/keys', label: 'Mobile keys', show: can('key.read'), badge: pendingCount > 0 ? <span className="count" title={tr('Awaiting approval')}>{pendingCount}</span> : null, count: pendingCount },
+      { to: '/attendance', label: 'Time & attendance', show: can('attendance.clock') },
+      { to: '/breakfast', label: 'Breakfast', show: can('breakfast.read') && Boolean(attention.data?.breakfast) && hotel.kind !== 'institution' },
+    ] },
+    { id: 'locks', label: 'Locks', items: [
+      { to: '/battery', label: 'Battery status', show: can('battery.read') && Boolean(attention.data?.batteryMonitoring), badge: (attention.data?.battery?.critical ?? 0) > 0 ? <span className="count" title={tr('Critical batteries')}>{attention.data.battery.critical}</span> : null, count: attention.data?.battery?.critical ?? 0 },
+      { to: '/locks-online', label: 'Online locks & gateways', show: can('resources.read'), badge: (attention.data?.offlineLocks ?? 0) > 0 ? <span className="count" title={tr('Locks offline now')}>{attention.data.offlineLocks}</span> : null, count: attention.data?.offlineLocks ?? 0 },
+      { to: '/lock-troubleshoot', label: 'Lock troubleshooting', show: can('battery.read') },
+      { to: '/maintenance', label: 'Maintenance', show: can('maintenance.read') && Boolean(attention.data?.maintenance), badge: (attention.data?.maintenance?.open ?? 0) > 0 ? <span className="count" title={tr('Open requests')}>{attention.data.maintenance.open}</span> : null, count: attention.data?.maintenance?.open ?? 0 },
+    ] },
+    { id: 'admin', label: 'Administration', items: [
+      { to: '/operators', label: 'Users', show: can('operators.manage') },
+      { to: '/settings', label: 'Settings', show: can('settings.manage') },
+      { to: '/connector', label: 'Connector health', show: can('connector.read') },
+      { to: '/setup-report', label: 'System setup reports', show: can('settings.manage') },
+      { to: '/audit', label: 'Audit trail', show: can('audit.read') },
+      { to: '/branding', label: 'Branding and logo', show: can('branding.manage') },
+      { to: '/usage', label: 'Usage', show: can('settings.manage') },
+      { to: '/demo', label: 'Demo Hotel and testers', show: me.isPlatformAdmin },
+    ] },
+  ];
+  const initials = hotel.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 3).toUpperCase();
   const pageList = ([
-    ['/', 'Overview', true], ['/insights', 'Insights', can('reports.read')], ['/insights?page=mine', 'My reports', can('reports.read')], ['/insights?page=build', 'Build a report', can('reports.read')],
+    ['/', 'Overview', true], ['/reports', 'Reports', reportsOk], ['/insights', 'Insights', can('reports.read')], ['/insights?page=mine', 'My reports', can('reports.read')], ['/insights?page=build', 'Build a report', can('reports.read')],
     ['/access', 'Access history', can('events.read')], ['/events', 'Event log', can('events.read')], ['/room-keycards', 'Keycards per room', can('events.read')], ['/charts', 'My charts', chartsOk], ['/monitoring', 'Monitoring', can('alerts.read')],
     ['/muster', 'Live occupancy', can('muster.read')], ['/emergency', 'Emergency', can('muster.read')],
     ['/visionline', 'Visionline cards & people', can('reports.read')], ['/visionline?tab=lookup', 'Card lookup', can('reports.read')], ['/idcards', 'Staff ID cards', can('idcards.manage')], ['/keycards', 'Staff keycards', can('keycards.request') || can('keycards.read') || can('lockout.request') || can('lockout.approve')], ['/staff', 'Staff', can('staff.read')], ['/keys', 'Mobile keys', can('key.read')],
     ['/attendance', 'Time & attendance', can('attendance.clock')], ['/breakfast', 'Breakfast', can('breakfast.read') && Boolean(attention.data?.breakfast) && hotel.kind !== 'institution'],
     ['/battery', 'Battery status', can('battery.read') && Boolean(attention.data?.batteryMonitoring)], ['/lock-troubleshoot', 'Lock troubleshooting', can('battery.read')], ['/locks-online', 'Online locks & gateways', can('resources.read')], ['/maintenance', 'Maintenance', can('maintenance.read') && Boolean(attention.data?.maintenance)],
     ['/operators', 'Users', can('operators.manage')], ['/connector', 'Connector health', can('connector.read')], ['/branding', 'Branding and logo', can('branding.manage')],
-    ['/settings', 'Settings', can('settings.manage')], ['/settings?tab=licence', 'Licence', can('settings.manage')], ['/audit', 'Audit trail', can('audit.read')], ['/usage', 'Usage', can('settings.manage')], ['/setup-report', 'System setup report', can('settings.manage')], ['/help', 'Help and manual', true], ['/account', 'My account', true],
-  ] as [string, string, boolean][]).filter((x) => x[2]).map(([to, label]) => ({ to, label }));
+    ['/settings', 'Settings', can('settings.manage')], ['/settings?tab=licence', 'Licence', can('settings.manage')], ['/audit', 'Audit trail', can('audit.read')], ['/usage', 'Usage', can('settings.manage')], ['/setup-report', 'Visionline setup report', can('settings.manage')], ['/setup-report?view=portal', 'Portal setup report', can('settings.manage')], ['/demo', 'Demo Hotel and testers', me.isPlatformAdmin], ['/help', 'Help and manual', true], ['/account', 'My account', true],
+  ] as [string, string, boolean][]).filter((x) => x[2]).map(([to, label]) => ({ to, label: tr(label) }));
 
   // 2.24 Each page has its own title (browser tabs, history, bookmarks).
   const here = `${loc.pathname}${loc.search}`;
@@ -143,10 +192,10 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
 
   return (
     <HotelCtx.Provider value={{ me: { ...me, prefs }, hotel, can, branding: b, reloadBranding: branding.reload, base, pages: pageList, setPrefs }}>
-      <a className="skip" href="#main">Skip to the page</a>
+      <a className="skip" href="#main">{tr('Skip to the page')}</a>
       <div className="shell">
         <aside className={`rail${menu ? ' open' : ''}`}>
-          <button className="menu-btn" aria-expanded={menu} aria-label="Menu" onClick={() => setMenu(!menu)}>{menu ? '✕' : '☰'}</button>
+          <button className="menu-btn" aria-expanded={menu} aria-label={tr('Menu')} onClick={() => setMenu(!menu)}>{menu ? '✕' : '☰'}</button>
           {b?.logo ? (
             <div className="hotel has-logo"><img src={b.logo} alt={hotel.name} style={{ width: ({ small: 120, medium: 168, large: 210 } as Record<string, number>)[b.logoSize?.portal ?? 'medium'] ?? 168 }} /><span>{hotel.name} · Access monitoring</span></div>
           ) : (
@@ -161,58 +210,34 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             </select>
           )}
           <CommandPalette pages={pageList} />
-          <nav aria-label="Main">
-            {(can('resources.read') || can('reports.read') || !can('muster.read')) && <NavLink to="/" end>Overview</NavLink>}
-            {vis('/insights') && can('reports.read') && <NavLink to="/insights">Insights</NavLink>}
-            {vis('/access') && can('events.read') && <NavLink to="/access">Access history</NavLink>}
-            {vis('/events') && can('events.read') && <NavLink to="/events">Event log</NavLink>}
-            {vis('/room-keycards') && can('events.read') && <NavLink to="/room-keycards">Keycards per room</NavLink>}
-            {vis('/charts') && chartsOk && <NavLink to="/charts">My charts</NavLink>}
-            {vis('/monitoring') && can('alerts.read') && <NavLink to="/monitoring">Monitoring {(mon.data?.alerts?.critical ?? 0) > 0 && <span className="count bad" title="Critical alerts">{mon.data.alerts.critical}</span>}</NavLink>}
-            {can('muster.read') && (vis('/muster') || vis('/emergency')) && <button type="button" className="group" aria-expanded={!navClosed.has('safety')} onClick={() => toggleGroup('safety')}>Safety<span aria-hidden>{navClosed.has('safety') ? '▸' : '▾'}</span></button>}
-            <div className="navgroup" hidden={navClosed.has('safety')}>
-            {vis('/muster') && can('muster.read') && <NavLink to="/muster">Live occupancy {emergency.data?.open && <span className="count bad" title="Emergency open">!</span>}</NavLink>}
-            {vis('/emergency') && can('muster.read') && <NavLink to="/emergency">Emergency</NavLink>}
-            </div>
-            {(can('reports.read') || can('staff.read') || can('key.read') || can('attendance.clock') || can('breakfast.read') || can('idcards.manage') || can('keycards.request') || can('lockout.request')) && <button type="button" className="group" aria-expanded={!navClosed.has('people')} onClick={() => toggleGroup('people')}>People &amp; keys<span aria-hidden>{navClosed.has('people') ? '▸' : '▾'}</span></button>}
-            <div className="navgroup" hidden={navClosed.has('people')}>
-            {vis('/visionline') && can('reports.read') && <NavLink to="/visionline">Visionline cards & people</NavLink>}
-            {vis('/keycards') && (can('keycards.request') || can('keycards.read') || can('lockout.request') || can('lockout.approve')) && <NavLink to="/keycards">Staff keycards</NavLink>}
-            {vis('/idcards') && can('idcards.manage') && <NavLink to="/idcards">Staff ID cards</NavLink>}
-            {vis('/staff') && can('staff.read') && <NavLink to="/staff">Staff</NavLink>}
-            {vis('/keys') && can('key.read') && <NavLink to="/keys">Mobile keys {pendingCount > 0 && <span className="count" title="Awaiting approval">{pendingCount}</span>}</NavLink>}
-            {vis('/attendance') && can('attendance.clock') && <NavLink to="/attendance">Time & attendance</NavLink>}
-            {vis('/breakfast') && can('breakfast.read') && attention.data?.breakfast && hotel.kind !== 'institution' && <NavLink to="/breakfast">Breakfast</NavLink>}
-            </div>
-            {(can('battery.read') || can('resources.read') || (can('maintenance.read') && attention.data?.maintenance)) && <button type="button" className="group" aria-expanded={!navClosed.has('building')} onClick={() => toggleGroup('building')}>Building<span aria-hidden>{navClosed.has('building') ? '▸' : '▾'}</span></button>}
-            <div className="navgroup" hidden={navClosed.has('building')}>
-            {vis('/battery') && can('battery.read') && attention.data?.batteryMonitoring && <NavLink to="/battery">Battery status {(attention.data.battery?.critical ?? 0) > 0 && <span className="count" title="Critical lock batteries">{attention.data.battery.critical}</span>}</NavLink>}
-            {vis('/locks-online') && can('resources.read') && <NavLink to="/locks-online">Online locks &amp; gateways {(attention.data?.offlineLocks ?? 0) > 0 && <span className="count" title="Locks or gateways offline">{attention.data.offlineLocks}</span>}</NavLink>}
-            {vis('/lock-troubleshoot') && can('battery.read') && <NavLink to="/lock-troubleshoot">Lock troubleshooting</NavLink>}
-            {vis('/maintenance') && can('maintenance.read') && attention.data?.maintenance && <NavLink to="/maintenance">Maintenance {(attention.data.maintenance?.open ?? 0) > 0 && <span className="count" title="Open requests">{attention.data.maintenance.open}</span>}</NavLink>}
-            </div>
-            {(can('operators.manage') || can('connector.read') || can('branding.manage') || can('settings.manage') || can('audit.read')) && <button type="button" className="group" aria-expanded={!navClosed.has('admin')} onClick={() => toggleGroup('admin')}>Administration<span aria-hidden>{navClosed.has('admin') ? '▸' : '▾'}</span></button>}
-            <div className="navgroup" hidden={navClosed.has('admin')}>
-            {vis('/operators') && can('operators.manage') && <NavLink to="/operators">Users</NavLink>}
-            {vis('/connector') && can('connector.read') && <NavLink to="/connector">Connector health</NavLink>}
-            {vis('/branding') && can('branding.manage') && <NavLink to="/branding">Branding and logo</NavLink>}
-            {vis('/settings') && can('settings.manage') && <NavLink to="/settings">Settings</NavLink>}
-            {vis('/audit') && can('audit.read') && <NavLink to="/audit">Audit trail</NavLink>}
-            {vis('/usage') && can('settings.manage') && <NavLink to="/usage">Usage</NavLink>}
-            {vis('/setup-report') && can('settings.manage') && <NavLink to="/setup-report">System setup report</NavLink>}
-
-            </div>
+          <nav aria-label={tr('Main')}>
+            {NAV.map((g) => {
+              const items = g.items.filter((i) => i.show && vis(i.to));
+              if (!items.length) return null;
+              if (!g.id) return items.map((i) => <NavLink key={i.to} to={i.to} end={i.to === '/'}>{tr(i.label)} {i.badge}</NavLink>);
+              const open = openGroup === g.id;
+              const badges = items.reduce((n, i) => n + (i.count ?? 0), 0);
+              return (
+                <div key={g.id}>
+                  <button type="button" className={`group${activeGroup === g.id ? ' here' : ''}`} aria-expanded={open} onClick={() => setOpenGroup(open ? '' : g.id!)}>
+                    <span>{tr(g.label)}{!open && badges > 0 && <span className="count" aria-label={`${badges}`}>{badges}</span>}</span><span aria-hidden>{open ? '▾' : '▸'}</span>
+                  </button>
+                  <div className="navgroup" hidden={!open}>{items.map((i) => <NavLink key={i.to} to={i.to}>{tr(i.label)} {i.badge}</NavLink>)}</div>
+                </div>
+              );
+            })}
           </nav>
           <div className="foot">
             <div><NavLink to="/account" style={{ color: 'inherit' }}>{me.displayName}</NavLink></div>
             <div style={{ opacity: 0.7 }}>{hotel.roles.map((r) => me.roleLabels[r] ?? r).join(', ')}</div>
-            <NavLink to="/help" className="help-link">Help and manual</NavLink>
+            <NavLink to="/help" className="help-link">{tr('Help and manual')}</NavLink>
             <ThemeSwitch />
-            <button onClick={onSignOut}>Sign out</button>
+            <LangSwitch />
+            <button onClick={onSignOut}>{tr('Sign out')}</button>
           </div>
         </aside>
         <main className="content" id="main" tabIndex={-1} key={hotel.id}>
-          <LicenceBanner />
+          {hotel.demo ? <div className="demo-band no-print" role="note"><strong>{tr('Demo Hotel')}</strong><span>{tr('Made-up doors, people and keycards for trying the portal. Nothing is real and nothing is sent to Visionline.')}{me.accessUntil ? ` Your test access ends ${new Date(me.accessUntil).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.` : ''}</span></div> : <LicenceBanner />}
           {hotel.mfaRequired && <div className="sys-banner no-print" role="alert"><strong>Two-step sign-in is required for administrators.</strong><span>Settings, Users and Branding open once it is on.</span><NavLink to="/account?tab=mfa">Turn it on →</NavLink></div>}
           {(banner.data ?? []).map((a) => (
             <div key={a.id} className="sys-banner no-print" role="alert"><strong>{a.title}</strong><span>{a.detail}</span><NavLink to="/monitoring?tab=system">Monitoring →</NavLink></div>
@@ -230,6 +255,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/account" element={<AccountPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
             <Route path="/insights" element={<InsightsPage />} />
             <Route path="/events" element={<EventLogPage />} />
             <Route path="/room-keycards" element={<RoomKeycardsPage />} />
@@ -253,12 +279,14 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <Route path="/setup-report" element={<SetupReportPage />} />
             <Route path="/usage" element={<UsagePage />} />
             <Route path="/help" element={<HelpPage />} />
+            <Route path="/demo" element={me.isPlatformAdmin ? <DemoPage /> : <Navigate to="/" />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
           </div>
           </ErrorBoundary>
         </main>
       </div>
+      <FeedbackButton />
     </HotelCtx.Provider>
   );
 }
@@ -290,47 +318,48 @@ function Login({ onSignedIn }: { onSignedIn: (t: string) => void }) {
   const org = brand?.kind === 'institution' ? 'institution' : 'hotel';
   return (
     <div className="landing">
-      <a className="skip" href="#signin">Skip to sign in</a>
+      <a className="skip" href="#signin">{tr('Skip to sign in')}</a>
       <section className="land-hero" aria-label={name ?? 'Access Monitoring Tool'}>
         <header className="land-top">
           {brand?.logo ? <img className="land-logo" src={brand.logo} alt={name ?? 'Logo'} /> : <strong className="land-name">{name ?? 'Access Monitoring Tool'}</strong>}
+          <LangPicker />
         </header>
         <div className="land-copy">
-          <h1>{name ? <>Every door, keycard and lock at {name}.</> : <>Every door, keycard and lock, in one place.</>}</h1>
-          <p>Who opened which door, which keycards are in use, which locks need batteries, and who is in the building in an emergency. Read from Visionline; nothing is changed without a person asking for it.</p>
+          <h1>{name ? (lang() === 'fr' ? <>Chaque porte, badge et serrure de {name}.</> : <>Every door, keycard and lock at {name}.</>) : tr('Every door, keycard and lock, in one place.')}</h1>
+          <p>{tr('Who opened which door, which keycards are in use, which locks need batteries, and who is in the building in an emergency. Read from Visionline; nothing is changed without a person asking for it.')}</p>
         </div>
         <TapScene logo={brand?.logo} name={name} />
       </section>
-      <section className="land-form" id="signin" aria-label="Sign in">
+      <section className="land-form" id="signin" aria-label={tr('Sign in')}>
         <form onSubmit={submit}>
-          <h2>Sign in</h2>
-          <p className="muted small">{needTotp ? 'Enter the code from your authenticator app.' : `With the work e-mail address your ${org}'s administrator invited.`}</p>
+          <h2>{tr('Sign in')}</h2>
+          <p className="muted small">{needTotp ? tr('Enter the code from your authenticator app.') : tr(`With the work e-mail address your ${org}'s administrator invited.`)}</p>
           <ErrorNote error={error} />
           {!needTotp ? (
             <>
-              <div className="field"><label htmlFor="em">Work email</label><input id="em" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></div>
-              <div className="field"><label htmlFor="pw">Password</label><input id="pw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></div>
+              <div className="field"><label htmlFor="em">{tr('Work email')}</label><input id="em" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></div>
+              <div className="field"><label htmlFor="pw">{tr('Password')}</label><input id="pw" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></div>
             </>
           ) : (
-            <div className="field"><label htmlFor="otp">Authentication code</label><input id="otp" inputMode="numeric" autoComplete="one-time-code" value={totp} onChange={(e) => setTotp(e.target.value)} autoFocus required /><span className="hint">The 6-digit code from your authenticator app.</span></div>
+            <div className="field"><label htmlFor="otp">{tr('Authentication code')}</label><input id="otp" inputMode="numeric" autoComplete="one-time-code" value={totp} onChange={(e) => setTotp(e.target.value)} autoFocus required /><span className="hint">{tr('The 6-digit code from your authenticator app.')}</span></div>
           )}
-          <button className="btn primary land-submit" disabled={busy}>{busy ? 'Signing in…' : needTotp ? 'Verify' : 'Sign in'}</button>
-          <button type="button" className="linklike" aria-expanded={help} onClick={() => setHelp(!help)}>Forgotten password or first time here?</button>
+          <button className="btn primary land-submit" disabled={busy}>{tr(busy ? 'Signing in…' : needTotp ? 'Verify' : 'Sign in')}</button>
+          <button type="button" className="linklike" aria-expanded={help} onClick={() => setHelp(!help)}>{tr('Forgotten password or first time here?')}</button>
           {help && (
             <div className="land-help">
-              <p><strong>First time:</strong> open the invitation link from your e-mail and choose your password there.</p>
-              <p><strong>Forgotten password:</strong> ask an administrator for a password link (Users, then Password link). It works once.</p>
-              <p><strong>Lost the phone with your authenticator app:</strong> an administrator can reset your two-step sign-in.</p>
-              {(brand?.supportPhone || brand?.supportEmail) && <p><strong>Help:</strong> {brand.supportPhone && <a href={`tel:${brand.supportPhone}`}>{brand.supportPhone}</a>}{brand.supportPhone && brand.supportEmail ? ', ' : ''}{brand.supportEmail && <a href={`mailto:${brand.supportEmail}`}>{brand.supportEmail}</a>}</p>}
+              <p><strong>{tr('First time:')}</strong> {tr('open the invitation link from your e-mail and choose your password there.')}</p>
+              <p><strong>{tr('Forgotten password:')}</strong> {tr('ask an administrator for a password link (Users, then Password link). It works once.')}</p>
+              <p><strong>{tr('Lost the phone with your authenticator app:')}</strong> {tr('an administrator can reset your two-step sign-in.')}</p>
+              {(brand?.supportPhone || brand?.supportEmail) && !/\.(invalid|example)$/.test(brand?.supportEmail ?? '') && <p><strong>{tr('Help:')}</strong> {brand.supportPhone && <a href={`tel:${brand.supportPhone}`}>{brand.supportPhone}</a>}{brand.supportPhone && brand.supportEmail ? ', ' : ''}{brand.supportEmail && <a href={`mailto:${brand.supportEmail}`}>{brand.supportEmail}</a>}</p>}
             </div>
           )}
         </form>
         <div className="land-more">
           <LoginFeed />
           <ul className="land-roles">
-            {ROLES.map(([t, d]) => <li key={t}><strong>{t}</strong><span>{d}</span></li>)}
+            {ROLES.map(([t, d]) => <li key={t}><strong>{tr(t!)}</strong><span>{tr(d!)}</span></li>)}
           </ul>
-          <p className="land-foot small muted">Access Monitoring Tool. Every sign-in and every change is kept in the audit trail.</p>
+          <p className="land-foot small muted">{tr('Access Monitoring Tool. Every sign-in and every change is kept in the audit trail.')}</p>
         </div>
       </section>
     </div>
@@ -377,9 +406,9 @@ function LoginFeed() {
     <div className="land-feed">
       <div className="login-slide" key={i % slides.length} aria-live="polite">
         {cur.image && <img src={cur.image} alt="" />}
-        <span className={`notice-kind k-${cur.kind}`}>{cur.kind === 'tip' ? 'Good to know' : cur.kind === 'important' ? 'Important' : cur.kind === 'event' ? 'Event' : 'News'}</span>
-        <strong>{cur.title}</strong>
-        {cur.body && <p>{cur.body}</p>}
+        <span className={`notice-kind k-${cur.kind}`}>{tr(cur.kind === 'tip' ? 'Good to know' : cur.kind === 'important' ? 'Important' : cur.kind === 'event' ? 'Event' : 'News')}</span>
+        <strong>{cur.kind === 'tip' ? tr(cur.title) : cur.title}</strong>
+        {cur.body && <p>{cur.kind === 'tip' ? tr(cur.body) : cur.body}</p>}
       </div>
       <div className="login-dots" role="tablist" aria-label="Messages">{slides.map((_, k) => <button key={k} aria-label={`Message ${k + 1}`} aria-pressed={k === i % slides.length} onClick={() => setI(k)} />)}</div>
     </div>
@@ -392,12 +421,30 @@ function ThemeSwitch() {
   const [pref, setPref] = useState<ThemePref>(themePref());
   const choose = (p: ThemePref) => {
     setThemePref(p); setPref(p);
-    const next = { hiddenNav: me.prefs?.hiddenNav ?? [], theme: p };
+    const next = { ...me.prefs, hiddenNav: me.prefs?.hiddenNav ?? [], theme: p };
     setPrefs(next); void api('/api/v1/me/prefs', { method: 'PUT', body: next }).catch(() => undefined);
   };
   return (
     <div className="theme-switch" role="group" aria-label="Appearance">
-      {(['system', 'light', 'dark'] as const).map((p) => <button key={p} aria-pressed={pref === p} onClick={() => choose(p)} title={p === 'system' ? 'Follow this computer' : undefined}>{p === 'system' ? 'Auto' : p === 'light' ? 'Light' : 'Dark'}</button>)}
+      {(['system', 'light', 'dark'] as const).map((p) => <button key={p} aria-pressed={pref === p} onClick={() => choose(p)} title={p === 'system' ? 'Follow this computer' : undefined}>{tr(p === 'system' ? 'Auto' : p === 'light' ? 'Light' : 'Dark')}</button>)}
+    </div>
+  );
+}
+
+/** 2.27 Language: English or French. Remembered on this computer and with the person's preferences. */
+function LangSwitch() {
+  const { me, setPrefs } = useHotel();
+  const choose = (l: LangChoice) => {
+    setLang(l);
+    const next = { ...me.prefs, hiddenNav: me.prefs?.hiddenNav ?? [], theme: me.prefs?.theme ?? themePref(), lang: l };
+    setPrefs(next); void api('/api/v1/me/prefs', { method: 'PUT', body: next }).catch(() => undefined);
+  };
+  return <LangPicker onPick={choose} />;
+}
+export function LangPicker({ onPick = setLang }: { onPick?: (l: LangChoice) => void }) {
+  return (
+    <div className="theme-switch lang-switch" role="group" aria-label={tr('Language')}>
+      {LANGS.map((l) => <button key={l.id} lang={l.id === 'auto' ? undefined : l.id} aria-pressed={langChoice() === l.id} title={l.id === 'auto' ? tr('Follow this browser / computer language') : undefined} onClick={() => onPick(l.id)}>{l.id === 'auto' ? tr('Auto') : l.label}</button>)}
     </div>
   );
 }

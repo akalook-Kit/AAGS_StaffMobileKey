@@ -86,7 +86,7 @@ export const VerifyOperatorCredentialsPayload = OperatorCredential;
  * operations take the encoder as a query parameter (ASSA ABLOY's own Postman reference: POST /cards?action=encode&encoder=fd1);
  * the read action's name is chosen per hotel until confirmed on the hotel's Visionline. Read-only: nothing is written to the card.
  */
-export const ReadCardPayload = z.object({ encoder: z.string().regex(/^[\w .-]{1,40}$/, 'Encoder name: letters, digits, space, dot, dash'), action: z.enum(['read', 'readCard']).default('read') });
+export const ReadCardPayload = z.object({ encoder: z.string().regex(/^[\w .-]{1,40}$/, 'Encoder name: letters, digits, space, dot, dash'), action: z.enum(['read', 'readCard']).default('read'), encoderStyle: z.enum(['encoded', 'plus']).default('encoded') });
 /**
  * 2.14 Encode a keycard at an encoder [Web API §7.6.1 staff card, §7.22 special cards]. kind:
  *  - staff: format TLCode, doors with operation normal (on/off doors optional), override=true replaces the holder's
