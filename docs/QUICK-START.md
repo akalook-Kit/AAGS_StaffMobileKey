@@ -1,4 +1,4 @@
-# Access Monitoring Tool — quick start (2.27.1)
+# Access Monitoring Tool — quick start (2.28.0)
 
 ## What it is and what you need
 
@@ -8,7 +8,7 @@ requests, watches lock batteries and supports emergencies. It works for a hotel 
 hospital, a school). Staff mobile keys are an optional module, off by default.
 
 It has two parts: the **portal** (with its database) and the **connector**, which talks to Visionline. One file
-installs either or both: `AccessMonitoringTool-Server-2.27.1.msi`.
+installs either or both: `AccessMonitoringTool-Server-2.28.0.msi`.
 
 | | A. One computer | B. Two computers |
 |---|---|---|

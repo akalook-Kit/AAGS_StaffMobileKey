@@ -751,11 +751,18 @@ async function buildSetupReport(hotelId: string, op: { id: string; displayName: 
   if (!imported.systemSettings) insights.push({ level: 'info', text: 'Import the Visionline System settings report (above) to show the Visionline version, AES and the system parameters.' });
   // 2.27 First page of the Visionline report: the facts, plainly.
   const g = imported.systemSettings ? visionlineGlance(imported.systemSettings as any) : null;
+  // Keycards made through the PMS interface (shared PMS / interface operator), from the imported card list.
+  const issuers = await many(pool, `SELECT operator, count(*)::int AS n, max(issued_at) AS last FROM vl_card_issuers WHERE hotel_id=$1 GROUP BY operator`, [hotelId]);
+  const pmsIss = issuers.filter((r) => sharedVisionlineOperator(r.operator));
+  const pmsActivity = issuers.length ? { operators: pmsIss.map((r) => r.operator as string), cards: pmsIss.reduce((n, r) => n + r.n, 0), last: pmsIss.map((r) => r.last).filter(Boolean).sort().pop() ?? null,
+    fromCardLog: imported.cardLog ? { file: imported.cardLog.file, importedAt: imported.cardLog.importedAt } : null } : null;
   const count = (f: (d: any) => string | null) => { const m = new Map<string, { n: number; online: number }>(); for (const d of doors) { const k = f(d) ?? '(none)'; const c = m.get(k) ?? { n: 0, online: 0 }; c.n++; if (d.data?.online === true) c.online++; m.set(k, c); } return [...m.entries()].map(([name, c]) => ({ name, ...c })).sort((x, y) => y.n - x.n); };
   const onlineKnown = doors.filter((d) => typeof d.data?.online === 'boolean').length;
   const glance = {
     version: g?.version ?? null, versionFrom: g?.versionFrom ?? null, webApiVersion: conn?.health?.visionlineApiVersion ?? null,
     aes: g ? g.aes : { enabled: null, evidence: null }, encryption: g?.encryption ?? null, pmsEncryptionKey: g?.pmsEncryptionKey ?? null,
+    keyMode: g?.keyMode ?? null, knownAuth: g?.knownAuth ?? [], clients: g?.clients ?? null, ev1: g?.ev1 ?? null, pms: g?.pms ?? [], pmsOptions: g?.pmsOptions ?? [], mobileLicence: g?.mobileLicence ?? null,
+    pmsActivity,
     systemCode: g?.systemCode ?? null, systemId: g?.systemId ?? cs?.systemId ?? null, firmwarePack: g?.firmwarePack ?? null,
     locks: { total: doors.length, online: doors.filter((d) => d.data?.online === true).length, offline: doors.filter((d) => d.data?.online === false).length, onlineKnown,
       byCategory: count((d) => d.data?.doorCategory ?? null), byDoorGroup: count((d) => d.data?.doorGroup ?? null), inReport: g?.locksInReport ?? [] },

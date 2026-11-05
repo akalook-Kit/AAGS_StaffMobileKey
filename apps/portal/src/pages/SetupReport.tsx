@@ -60,15 +60,23 @@ export function SetupReportPage() {
         <Sec title="At a Glance">
           <div className="ssr-glance">
             <div><span>Visionline version</span><strong>{gl.version ?? 'Not known'}</strong><small>{gl.version ? (gl.versionFrom ? `From the System settings report, ${gl.versionFrom}` : '') : 'Import the System settings report (Visionline reports, above).'}</small></div>
-            <div className={gl.aes?.enabled === true ? 'ok' : gl.aes?.enabled === false ? 'bad' : ''}><span>AES encryption</span><strong>{gl.aes?.enabled === true ? 'Enabled' : gl.aes?.enabled === false ? 'Not enabled' : 'Not shown in the report'}</strong>
-              <small>{gl.aes?.evidence ? (/authentication/i.test(gl.aes.evidence) && gl.aes.enabled ? `AES card authentication is set up in Visionline: ${gl.aes.evidence.replace(/^\[[^\]]*\]\s*/, '')}` : `Visionline report: ${gl.aes.evidence}`) : gl.source ? 'The System settings report imported does not mention AES. Check in Visionline: Settings → System settings (Security / Encryption).' : 'Import the System settings report (Visionline reports, above).'}</small></div>
+            <AesTile gl={gl} />
             <div><span>Locks</span><strong>{gl.locks?.total ?? x.property.locks}</strong><small>{gl.locks?.onlineKnown ? `${gl.locks.online} online · ${gl.locks.offline} offline (stand-alone)` : 'Online state not read'}</small></div>
+            <div><span>Clients allowed</span><strong>{gl.clients?.value ?? '—'}</strong><small>{gl.clients ? `[${gl.clients.section}] ${gl.clients.label}` : gl.source ? 'Not in the imported report: Visionline → Help → About / Option code shows it.' : 'Import the System settings report.'}</small></div>
+            <div className={gl.mobileLicence?.state === 'licensed' ? 'ok' : gl.mobileLicence?.state === 'demo' ? 'warn' : ''}><span>Mobile key licence</span><strong>{gl.mobileLicence ? ({ licensed: 'Licensed', demo: 'Demo', none: 'None' } as Record<string, string>)[gl.mobileLicence.state] : '—'}</strong><small>{gl.mobileLicence?.evidence ?? 'Import the System settings report.'}</small></div>
+            <div className={gl.pmsActivity?.cards ? 'ok' : ''}><span>PMS interface</span><strong>{gl.pmsActivity?.cards ? `${gl.pmsActivity.cards} keycards` : gl.pms?.length || gl.pmsOptions?.length ? 'Set up' : '—'}</strong>
+              <small>{gl.pmsActivity?.cards ? `Made through ${gl.pmsActivity.operators.join(', ')}${gl.pmsActivity.last ? `, last ${fmt.dt(gl.pmsActivity.last)}` : ''} (card list imported)` : [...(gl.pmsOptions ?? []), ...(gl.pms ?? []).slice(0, 2).map((p: any) => `${p.label}: ${p.value}`)].join(' · ') || 'No PMS setting in the report'}</small></div>
             <div><span>User groups</span><strong>{gl.userGroups ?? x.property.userGroups}</strong><small>{gl.doorGroups ?? x.property.doorGroups} door groups · {gl.timeSchedules ?? x.property.timeSchedules} time schedules</small></div>
             <div><span>Encoders</span><strong>{(gl.encoders ?? x.property.encoders).length}</strong><small>{(gl.encoders ?? x.property.encoders).join(', ') || '—'}</small></div>
             <div><span>People and keycards</span><strong>{gl.people ?? x.property.visionlineUsers}</strong><small>{gl.validKeycards ?? x.property.validKeycards} valid keycards{gl.operators != null ? ` · ${gl.operators} Visionline operators` : ''}</small></div>
           </div>
           {kv([['System code', gl.systemCode ?? '—'], ['System ID', gl.systemId ?? '—'], ['Visionline version', gl.version ?? 'not in the imported report'],
-            ['AES encryption', gl.aes?.enabled === true ? `Yes${gl.aes.evidence ? ` (${gl.aes.evidence})` : ''}` : gl.aes?.enabled === false ? 'No' : 'not in the imported report'], ...(gl.encryption ? [['Card encryption', gl.encryption] as [string, ReactNode]] : []), ...(gl.pmsEncryptionKey ? [['PMS encryption key', gl.pmsEncryptionKey] as [string, ReactNode]] : []),
+            ['AES key mode', gl.keyMode?.text ? `${gl.keyMode.text}${gl.keyMode.disableLegacyCardCreated ? ' · "Disable legacy key mode" card created' : ''}` : 'not in the imported report'],
+            ...(gl.keyMode?.systemIdLastSet ? [['System ID last set', gl.keyMode.systemIdLastSet] as [string, ReactNode]] : []),
+            ['DESFire EV1 enhancement', gl.ev1 ? `${gl.ev1.value} (${gl.ev1.label})` : 'not in the imported report'],
+            ...(gl.knownAuth?.length ? [['Card authentications known', gl.knownAuth.join(', ')] as [string, ReactNode]] : []),
+            ...(gl.pms ?? []).map((p: any) => [p.label, p.value] as [string, ReactNode]),
+            ...(gl.pmsOptions?.length ? [['PMS options', gl.pmsOptions.join(', ')] as [string, ReactNode]] : []), ...(gl.encryption ? [['Card encryption', gl.encryption] as [string, ReactNode]] : []),
             ['Visionline Web API', gl.webApiVersion ?? '—'], ['Firmware pack', gl.firmwarePack ?? '—'],
             ['Mobile Access option', gl.mobileAccess === true ? 'Yes' : gl.mobileAccess === false ? 'No' : '—'], ['Licensed options', gl.options?.length ? `${gl.options.length}` : '—'],
             ['Events recorded', gl.eventsTotal ? `${gl.eventsOn} of ${gl.eventsTotal}` : '—'],
@@ -266,4 +274,20 @@ function useSeconds(on: boolean) {
   const [n, setN] = useState(0);
   useEffect(() => { setN(0); if (!on) return; const t = setInterval(() => setN((x) => x + 1), 1000); return () => clearInterval(t); }, [on]);
   return n;
+}
+
+/**
+ * 2.28 AES key mode as Visionline reports it ([Security enhancement process] Key mode, ASSA ABLOY 66 5013 166-1B):
+ * Not started = legacy key mode; In progress = AES site key made, locks being prepared, cards still legacy;
+ * Finished = Visionline makes AES credentials (then a "Disable legacy key mode" card closes the locks to old cards).
+ */
+function AesTile({ gl }: { gl: any }) {
+  const st = gl.keyMode?.state as string | null | undefined;
+  const big = st === 'finished' ? 'AES (finished)' : st === 'in_progress' ? 'In progress' : st === 'not_started' ? 'Legacy key mode' : gl.aes?.enabled === true ? 'Enabled' : gl.aes?.enabled === false ? 'Not enabled' : 'Not shown in the report';
+  const tone = st === 'finished' || (!st && gl.aes?.enabled) ? 'ok' : st === 'in_progress' ? 'warn' : st === 'not_started' || gl.aes?.enabled === false ? 'bad' : '';
+  const why = st === 'finished' ? (gl.keyMode.disableLegacyCardCreated ? 'Visionline makes AES keycards; the "Disable legacy key mode" card has been made (locks stop accepting old cards once it is shown to each).' : 'Visionline makes AES keycards. Next: make the "Disable legacy key mode" card and show it to every lock.')
+    : st === 'in_progress' ? 'AES site key generated; locks are being updated and initialised. Keycards are still made in legacy key mode.'
+    : st === 'not_started' ? 'Keycards use the legacy key mode. Visionline 1.28 or newer can switch to AES (ASSA ABLOY guide "Switch to AES key mode").'
+    : gl.source ? 'The imported System settings report has no [Security enhancement process] section (Visionline older than 1.28, or an older report): import it again from View → System settings.' : 'Import the System settings report (Visionline reports, above).';
+  return <div className={tone}><span>AES key mode</span><strong>{big}</strong><small>{why}{gl.keyMode?.systemIdLastSet ? ` System ID last set ${gl.keyMode.systemIdLastSet}.` : ''}</small></div>;
 }

@@ -135,3 +135,20 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\amt-2.24.0\access-monitoring
 
 Only the newest zip is strictly needed: each zip holds the whole project, so pushing 2.24.0 alone also brings every
 earlier change (as one commit instead of one per version).
+
+## Catching up 2.25 → 2.28 (5 Nov 2026)
+
+Download the project zips you have not pushed yet (for example `access-monitoring-tool-project-2.25.0.zip` …
+`access-monitoring-tool-project-2.28.0.zip`) into **Downloads**, then in PowerShell:
+
+```powershell
+$v = '2.28.0'
+Expand-Archive "$env:USERPROFILE\Downloads\access-monitoring-tool-project-$v.zip" "$env:TEMP\amt-$v" -Force
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\amt-$v\access-monitoring-tool-project-$v\scripts\git-catch-up.ps1" `
+  -Repo C:\khb\staff-mobile-key\staff-mobile-key -From "$env:USERPROFILE\Downloads"
+cd C:\khb\staff-mobile-key\staff-mobile-key
+git log --oneline --decorate -8        # one commit and one tag per version
+git tag --list "v2.2*"
+```
+
+Only the newest zip is needed if the older ones are no longer at hand (each zip is the whole project).

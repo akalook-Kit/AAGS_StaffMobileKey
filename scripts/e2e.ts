@@ -1689,6 +1689,12 @@ async function main() {
     const sr = (await call('GET', `${H}/reports/setup`, admin)).json;
     ok(sr.glance?.version === '1.27.0.25' && sr.glance.aes?.enabled === true && sr.glance.locks?.total > 0 && sr.glance.mobileAccess === true,
       `Visionline setup report, first page: Visionline ${sr.glance?.version}, AES ${sr.glance?.aes?.enabled ? 'enabled' : '?'}, ${sr.glance?.locks?.total} locks (${sr.glance?.locks?.online} online)`);
+    const ss2 = ['[System code]', '1111-2222-3333', 'AA-00000', '', '[Visionline]', 'Version: 1.34.0.17', '', '[Security enhancement process]', 'Key mode: In progress', 'System ID last set: 2026-10-01 09:00:00', '',
+      '[Known authentication information]', 'Ultralight AES signature', '', '[License]', 'Number of clients: 5', '', '[Options]', '(39) Mobile Access', ''].join('\r\n');
+    await call('POST', `${H}/visionline-imports`, admin, { fileName: 'SystemSettings2.xls', data: Buffer.from(ss2).toString('base64') });
+    const sr2 = (await call('GET', `${H}/reports/setup`, admin)).json.glance;
+    ok(sr2.keyMode?.state === 'in_progress' && sr2.aes.enabled === false && sr2.clients?.value === '5' && sr2.mobileLicence?.state === 'licensed' && sr2.knownAuth[0] === 'Ultralight AES signature',
+      `AES key mode read from [Security enhancement process] (${sr2.keyMode?.text}); clients allowed ${sr2.clients?.value}; mobile key licence ${sr2.mobileLicence?.state}`);
     ok(Array.isArray(sr.portalInsights) && !sr.insights.some((i: any) => /portal works in Visionline/.test(i.text)), 'remarks about the portal go to the portal setup report');
     const t0 = Date.now();
     const pr = (await call('GET', `${H}/reports/setup?part=portal`, admin)).json;

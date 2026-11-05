@@ -1,4 +1,4 @@
-# Access Monitoring Tool — user manual (2.27.1)
+# Access Monitoring Tool — user manual (2.28)
 
 New here? Start with **QUICK-START.md** (5 steps, adding people, everyday tasks).
 
@@ -110,9 +110,24 @@ each alert says how (door reports again, new batteries recorded, alarm completed
 in the menu and moves to *Seen*, still listed until fixed. Door-silence alerts can be switched off in *Settings →
 Alerts & notifications*.
 
-AES on the first page of the Visionline setup report also reads Visionline's *Known authentication information*
-list (for example *Ultralight AES signature* = AES card authentication set up). The *PMS encryption key* line is
-shown on its own: it is the key of the PMS interface, not the card encryption.
+**AES key mode (2.28)**: the first page reads the *[Security enhancement process]* section that Visionline 1.28 or
+newer writes in its System settings (ASSA ABLOY guide *Switch to AES key mode*, 66 5013 166-1B):
+
+| Key mode in Visionline | First page shows | Meaning |
+|---|---|---|
+| Not started | Legacy key mode (red) | Keycards use the legacy key mode |
+| In progress | In progress (orange) | AES site key generated; locks being updated and initialised; keycards still legacy |
+| Finished | AES (finished) (green) | Visionline makes AES keycards; when the *Disable legacy key mode* card has been made it says so (locks stop accepting old cards once it is shown to each) |
+
+*Known authentication information* (for example *Ultralight AES signature*) is listed separately as card
+authentications Visionline can read: it is not the key mode. The *PMS encryption key* line belongs to the PMS
+interface, not to the cards.
+
+Also on the first page: **Clients allowed** (from the licence lines of the report), **Mobile key licence**
+(Licensed, Demo or None, from the licensed options or a licence line that says demo / trial), **PMS interface**
+(the PMS options and settings, and, when a card list with the operator was imported, how many keycards were made
+through the PMS interface operator and when the last one was), and **DESFire EV1 enhancement**. When the report does
+not contain one of these, the page says so: Visionline → *Help → About* / *Tools → Option code* show the licence.
 
 **A shorter menu**: Overview, Reports and Alerts at the top, then four sections that open one at a time: *Doors &
 safety*, *Keycards & people*, *Locks* and *Administration*. The section of the page you are on opens by itself; a

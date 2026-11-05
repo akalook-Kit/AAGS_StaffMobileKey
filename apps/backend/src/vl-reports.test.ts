@@ -43,10 +43,32 @@ describe('Visionline setup report, first page (2.27)', () => {
     expect(c.aes.enabled).toBe(true);
     expect(visionlineGlance(parseSystemSettings('[System]\nUse AES: N\n')).aes.enabled).toBe(false);
     expect(visionlineGlance(parseSystemSettings('[Options]\n(77) AES card encryption\n')).aes.enabled).toBe(true);
-    // K Hotel Bana's report (2.27.1)
+    // K Hotel Bana's report: a card capability, not the AES key mode (2.28)
     const bana = visionlineGlance(parseSystemSettings('[Known authentication information]\nUltralight AES signature\n[PMS]\nPMS encryption key: Not set\n'));
-    expect(bana.aes).toEqual({ enabled: true, evidence: '[Known authentication information] Ultralight AES signature' });
+    expect(bana.aes.enabled).toBeNull();
+    expect(bana.knownAuth).toEqual(['Ultralight AES signature']);
     expect(bana.encryption).toBeNull();
     expect(bana.pmsEncryptionKey).toBe('Not set');
+  });
+});
+
+describe('AES key mode and licence facts (2.28, ASSA ABLOY 66 5013 166-1B)', () => {
+  const rep = (km: string, extra = '') => visionlineGlance(parseSystemSettings(['[Visionline]', 'Version: 1.34.0.17', '', '[Security enhancement process]', `Key mode: ${km}`, 'System ID last set: 2022-03-04 07:31:55', extra, '', '[Known authentication information]', 'Ultralight AES signature',
+    '[License]', 'Number of clients: 5', 'DESFire EV1 enhancement: Yes', '[PMS]', 'PMS interface: TCP/IP', 'PMS encryption key: Not set', '[Options]', '(39) Mobile Access', ''].join('\r\n')));
+  it('reads the key mode', () => {
+    expect(rep('Not started').aes.enabled).toBe(false);
+    expect(rep('Not started').keyMode?.state).toBe('not_started');
+    expect(rep('In progress').keyMode?.state).toBe('in_progress');
+    const f = rep('Finished', "A 'Disable legacy key mode' card has been created.");
+    expect(f.aes.enabled).toBe(true);
+    expect(f.keyMode).toEqual({ state: 'finished', text: 'Finished', systemIdLastSet: '2022-03-04 07:31:55', disableLegacyCardCreated: true });
+  });
+  it('reads clients, EV1, PMS and the mobile key licence', () => {
+    const g = rep('Finished');
+    expect(g.clients?.value).toBe('5');
+    expect(g.ev1?.value).toBe('Yes');
+    expect(g.pms.map((x) => x.label)).toEqual(['PMS interface', 'PMS encryption key']);
+    expect(g.mobileLicence?.state).toBe('licensed');
+    expect(visionlineGlance(parseSystemSettings('[Options]\n(39) Mobile Access demo\n')).mobileLicence?.state).toBe('demo');
   });
 });

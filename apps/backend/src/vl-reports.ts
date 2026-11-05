@@ -122,6 +122,13 @@ export interface VisionlineGlance {
   version: string | null; versionFrom: string | null;
   pmsEncryptionKey: string | null;
   aes: { enabled: boolean | null; evidence: string | null };
+  keyMode: { state: 'not_started' | 'in_progress' | 'finished' | null; text: string | null; systemIdLastSet: string | null; disableLegacyCardCreated: boolean } | null;
+  knownAuth: string[];
+  clients: { label: string; value: string; section: string } | null;
+  ev1: { label: string; value: string; section: string } | null;
+  pms: { label: string; value: string; section: string }[];
+  pmsOptions: string[];
+  mobileLicence: { state: 'licensed' | 'demo' | 'none'; evidence: string } | null;
   encryption: string | null;
   systemCode: string | null; systemId: string | null; firmwarePack: string | null;
   locksInReport: { label: string; value: string }[];
@@ -134,6 +141,7 @@ const YES = /^(y|yes|on|true|enabled?|active|activated|1|oui|ja|s[ií])\b/i;
 const NO = /^(n|no|off|false|disabled?|inactive|not (?:enabled|activated|used)|none|0|non|nein)\b/i;
 
 export function visionlineGlance(s: Pick<SystemSettings, 'sections' | 'facts' | 'options' | 'events'>): VisionlineGlance {
+  const options0 = () => s.options ?? [];
   const sections = s.sections ?? [];
   const all = sections.flatMap((sec) => sec.lines.map((l) => ({ sec: sec.name, line: l.trim() })));
   const kv = (l: string) => { const m = /^([^:=]{2,90})[:=]\s*(.*)$/.exec(l); return m ? { k: m[1]!.trim(), v: m[2]!.trim() } : null; };
@@ -164,16 +172,13 @@ export function visionlineGlance(s: Pick<SystemSettings, 'sections' | 'facts' | 
   let aes: VisionlineGlance['aes'] = { enabled: null, evidence: null };
   let encryption: string | null = null;
   for (const { sec, line } of all) {
-    if (/^\s*options\s*$/i.test(sec)) continue;
+    if (/^\s*options\s*$/i.test(sec) || /known authentication|security enhancement/i.test(sec)) continue;
     const yn = /^([YN]):\s*(?:\(\d+\)\s*)?(.+)$/.exec(line);
     const p = kv(line);
     if (/\baes\b/i.test(line)) {
       if (yn) { aes = { enabled: yn[1] === 'Y', evidence: `[${sec}] ${line}` }; break; }
       if (p && /\baes\b/i.test(p.k)) { aes = { enabled: YES.test(p.v) ? true : NO.test(p.v) ? false : p.v ? true : null, evidence: `[${sec}] ${line}` }; if (aes.enabled !== null) break; }
       if (p && /\baes\b/i.test(p.v)) { aes = { enabled: !/\b(no|not|off|disabled?)\b/i.test(p.v), evidence: `[${sec}] ${line}` }; encryption = p.v; break; }
-      // 2.27.1 A list of the card authentications Visionline knows (Bana: "[Known authentication information]
-      // Ultralight AES signature"): an AES entry there means AES card authentication is set up.
-      if (!p && !yn && /authentication|encryption|security|crypt|\bkeys?\b/i.test(sec) && !/\b(not|no|off|disabled?)\b/i.test(line)) { aes = { enabled: true, evidence: `[${sec}] ${line}` }; break; }
       if (!aes.evidence) aes = { enabled: /\b(not|no|off|disabled?)\b/i.test(line) ? false : /\b(enabled?|on|active|used|yes)\b/i.test(line) ? true : null, evidence: `[${sec}] ${line}` };
     } else if (p && /encrypt|cipher|crypt/i.test(p.k) && !/\bpms\b/i.test(p.k) && !encryption) {
       encryption = `${p.k}: ${p.v}`;
@@ -182,17 +187,48 @@ export function visionlineGlance(s: Pick<SystemSettings, 'sections' | 'facts' | 
   const aesOption = (s.options ?? []).find((o) => /\baes\b/i.test(o.name));
   if (aes.enabled === null && aesOption) aes = { enabled: true, evidence: `[Options] (${aesOption.code}) ${aesOption.name}` };
   if (aes.enabled === null && encryption && !/\baes\b/i.test(encryption) && /\b(des|mifare|crypto1|none|off|no)\b/i.test(encryption)) aes = { enabled: false, evidence: encryption };
+  // 2.28 AES key mode, as Visionline 1.28+ writes it (ASSA ABLOY 66 5013 166-1B "Switch to AES key mode"):
+  // [Security enhancement process] Key mode: Not started | In progress | Finished; System ID last set; and, once made,
+  // "A 'Disable legacy key mode' card has been created." This is the real answer; it replaces any guess above.
+  const sep = sections.find((x) => /security enhancement/i.test(x.name));
+  let keyMode: VisionlineGlance['keyMode'] = null;
+  if (sep) {
+    const km = sep.lines.map((l) => kv(l.trim())).find((q) => q && /^key mode$/i.test(q.k));
+    const last = sep.lines.map((l) => kv(l.trim())).find((q) => q && /system id last set/i.test(q.k));
+    const card = sep.lines.some((l) => /disable legacy key mode.*card has been created/i.test(l));
+    const v = km?.v ?? null;
+    const state = !v ? null : /finish|complet|done/i.test(v) ? 'finished' : /progress|started|ongoing/i.test(v) && !/not\s+started/i.test(v) ? 'in_progress' : /not\s+started|legacy/i.test(v) ? 'not_started' : null;
+    keyMode = { state, text: v, systemIdLastSet: last?.v ?? null, disableLegacyCardCreated: card };
+    if (state) aes = { enabled: state === 'finished', evidence: `[${sep.name}] Key mode: ${v}${card ? ' · a "Disable legacy key mode" card has been created' : ''}` };
+  }
+  // Card types / authentications Visionline knows (e.g. "Ultralight AES signature"): a card capability, not the key mode.
+  const knownAuth = sections.filter((x) => /known authentication/i.test(x.name)).flatMap((x) => x.lines.map((l) => l.trim())).filter(Boolean).slice(0, 30);
+  // Licence facts, wherever they are written: clients allowed, DESFire EV1 enhancement, PMS, mobile keys.
+  const pairs = all.map(({ sec, line }) => ({ sec, line, p: kv(line) }));
+  const find = (re: RegExp, valueRe?: RegExp) => { const h = pairs.find((x) => x.p && re.test(x.p.k) && (!valueRe || valueRe.test(x.p.v))); return h ? { label: h.p!.k, value: h.p!.v, section: h.sec } : null; };
+  const clients = find(/\bclients?\b|workstations?|client licen[cs]es?/i, /\d/);
+  const ev1Line = pairs.find((x) => /\bev\s?1\b/i.test(x.line));
+  const ev1Opt = options0().find((o) => /\bev\s?1\b/i.test(o.name));
+  const ev1 = ev1Line ? { label: ev1Line.p?.k ?? ev1Line.line.replace(/^[YN]:\s*/, ''), value: ev1Line.p?.v ?? (/^N:/.test(ev1Line.line) ? 'No' : /^Y:/.test(ev1Line.line) ? 'Yes' : 'Listed'), section: ev1Line.sec }
+    : ev1Opt ? { label: `(${ev1Opt.code}) ${ev1Opt.name}`, value: 'Licensed option', section: 'Options' } : null;
+  const pms = pairs.filter((x) => x.p && (/\bpms\b|interface|hotel system|property management/i.test(x.p.k) || /\bpms\b/i.test(x.sec))).slice(0, 12).map((x) => ({ label: x.p!.k, value: x.p!.v, section: x.sec }));
+  const pmsOptions = options0().filter((o) => /\bpms\b|interface/i.test(o.name)).map((o) => `(${o.code}) ${o.name}`);
+  const mobOpt = options0().filter((o) => /mobile/i.test(o.name));
+  const mobLine = pairs.find((x) => /mobile/i.test(x.line) && /demo|trial|evaluation|expir|licen[cs]e|valid/i.test(x.line));
+  const mobileLicence = mobLine ? { state: /demo|trial|evaluation/i.test(mobLine.line) ? 'demo' as const : 'licensed' as const, evidence: `[${mobLine.sec}] ${mobLine.line}` }
+    : mobOpt.length ? { state: mobOpt.some((o) => /demo|trial|evaluation/i.test(o.name)) ? 'demo' as const : 'licensed' as const, evidence: `[Options] ${mobOpt.map((o) => `(${o.code}) ${o.name}`).join(', ')}` }
+    : options0().length ? { state: 'none' as const, evidence: 'No mobile access option in the licensed options' } : null;
   // ---- locks, guest cards, firmware
   const locksInReport = all.map(({ line }) => kv(line)).filter((p): p is { k: string; v: string } => Boolean(p && /\b(locks?|doors?|rooms?|encoders?|gateways?|online|offline)\b/i.test(p.k) && /^\d[\d\s.,]*$/.test(p.v)))
     .slice(0, 20).map((p) => ({ label: p.k, value: p.v }));
   const guestCards = sections.filter((x) => /guest/i.test(x.name)).flatMap((x) => x.lines.map(kv).filter(Boolean) as { k: string; v: string }[]).slice(0, 12).map((p) => ({ label: p.k, value: p.v }));
   const fwKey = Object.keys(s.facts ?? {}).find((k) => /firmware/i.test(k));
-  const options = s.options ?? [];
+  const options = options0();
   const evTotal = (s.events ?? []).reduce((n, g) => n + g.items.length, 0);
   const evOn = (s.events ?? []).reduce((n, g) => n + g.items.filter((i) => i.on).length, 0);
   const pmsLine = all.map(({ line }) => kv(line)).find((p) => p && /\bpms\b/i.test(p.k) && /encrypt|key/i.test(p.k));
   return {
-    version, versionFrom, aes, encryption, pmsEncryptionKey: pmsLine ? pmsLine.v : null,
+    version, versionFrom, aes, encryption, pmsEncryptionKey: pmsLine ? pmsLine.v : null, keyMode, knownAuth, clients, ev1, pms, pmsOptions, mobileLicence,
     systemCode: s.facts?.['System code'] ?? null, systemId: s.facts?.['System ID'] ?? null, firmwarePack: fwKey ? s.facts[fwKey]! : null,
     locksInReport, options, mobileAccess: options.length ? options.some((o) => /mobile/i.test(o.name)) : null, guestCards, eventsOn: evOn, eventsTotal: evTotal,
   };

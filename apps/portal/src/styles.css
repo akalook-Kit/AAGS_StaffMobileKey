@@ -955,3 +955,4 @@ tr.row-warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .rail nav > div > button.group span { font-size: inherit; letter-spacing: 0; }
 .rail nav > div > button.group > span:last-child { font-size: 11px; opacity: .7; }
 .page-head + .seg { margin-bottom: 12px; }
+.ssr-glance .warn { border-color: var(--warn, #b7791f); box-shadow: inset 4px 0 0 var(--warn, #b7791f); }
