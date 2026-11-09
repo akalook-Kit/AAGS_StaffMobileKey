@@ -45,7 +45,7 @@ export function MonitoringPage() {
         </div>
       )}
       <div className="seg" role="tablist" style={{ margin: '4px 0 14px', flexWrap: 'wrap' }}>
-        {TABS.map((x) => <button key={x.id} role="tab" aria-pressed={tab === x.id} onClick={() => setSp({ tab: x.id })}>{x.l}</button>)}
+        {TABS.map((x) => <button key={x.id} role="tab" data-tip={MON_TIPS[x.id]} aria-pressed={tab === x.id} onClick={() => setSp({ tab: x.id })}>{x.l}</button>)}
       </div>
       {!d ? null : tab === 'alerts' ? <Alerts d={d} t={t} ack={ack} canAck={can('alerts.manage')} reload={() => void m.reload()} />
         : tab === 'doors' ? <Doors d={d} t={t} />
@@ -228,3 +228,11 @@ function Messages({ d, t }: { d: any; t: (v: string | null) => string }) {
     </div>
   );
 }
+
+const MON_TIPS: Record<string, string> = {
+  alerts: 'Open alerts, how each one closes, and Mark as seen.',
+  doors: 'Which doors reported recently and which are silent.',
+  vip: 'Be told when someone enters a door you choose (VIP room, cashier…).',
+  system: 'Free disk space, database size, connector and Visionline.',
+  messages: 'E-mails and SMS the portal sent about alerts.',
+};

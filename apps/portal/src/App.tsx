@@ -41,6 +41,7 @@ import { InvitePage } from './pages/Invite';
 import { DemoPage } from './pages/Demo';
 import { FeedbackButton } from './components/Feedback';
 import { ReportsPage } from './pages/Reports';
+import { TipLayer } from './components/Tips';
 import { LANGS, hasLangChoice, lang, langChoice, setLang, tr, type LangChoice } from './i18n';
 
 export interface Me {
@@ -133,44 +134,44 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const pendingCount = pending.data?.length ?? 0;
   const keycardsOk = can('keycards.request') || can('keycards.read') || can('lockout.request') || can('lockout.approve');
   const reportsOk = can('reports.read') || can('events.read') || can('keycards.read') || can('battery.read') || can('settings.manage');
-  type Item = { to: string; label: string; show: boolean; badge?: ReactNode; count?: number };
-  const NAV: { id?: string; label: string; items: Item[] }[] = [
+  type Item = { to: string; label: string; show: boolean; badge?: ReactNode; count?: number; tip?: string };
+  const NAV: { id?: string; label: string; tip?: string; items: Item[] }[] = [
     { label: '', items: [
-      { to: '/', label: 'Overview', show: can('resources.read') || can('reports.read') || !can('muster.read') },
-      { to: '/reports', label: 'Reports', show: reportsOk },
-      { to: '/monitoring', label: 'Alerts', show: can('alerts.read'), badge: critical > 0 ? <span className="count bad" title={tr('Critical alerts')}>{critical}</span> : null },
+      { to: '/', label: 'Overview', tip: 'What needs you now, shortcuts to everyday tasks, notices and the site at a glance.', show: can('resources.read') || can('reports.read') || !can('muster.read') },
+      { to: '/reports', label: 'Reports', tip: 'Daily and monthly reports: guest and staff keycards issued, who holds keycards, refused entries, batteries. Download as PDF or Excel, or have them e-mailed.', show: reportsOk },
+      { to: '/monitoring', label: 'Alerts', tip: 'Problems the portal found: doors or connector offline, lock alarms, low batteries. Each alert closes by itself once fixed; Mark as seen takes it off the count.', show: can('alerts.read'), badge: critical > 0 ? <span className="count bad" title={tr('Critical alerts')}>{critical}</span> : null },
     ] },
-    { id: 'doors', label: 'Doors & safety', items: [
-      { to: '/access', label: 'Access history', show: can('events.read') },
-      { to: '/muster', label: 'Live occupancy', show: can('muster.read'), badge: emergency.data?.open ? <span className="count bad" title={tr('Emergency')}>!</span> : null, count: emergency.data?.open ? 1 : 0 },
-      { to: '/emergency', label: 'Emergency', show: can('muster.read') },
-      { to: '/events', label: 'Event log', show: can('events.read') },
-      { to: '/room-keycards', label: 'Keycards per room', show: can('events.read') },
+    { id: 'doors', label: 'Doors & safety', tip: 'Who went where, who is in the building, emergencies and the event log.', items: [
+      { to: '/access', label: 'Access history', tip: 'Who opened which door and when. Search by person, door or card number.', show: can('events.read') },
+      { to: '/muster', label: 'Live occupancy', tip: 'Who is in the building now, from the last doors they used. Used for roll call in an emergency.', show: can('muster.read'), badge: emergency.data?.open ? <span className="count bad" title={tr('Emergency')}>!</span> : null, count: emergency.data?.open ? 1 : 0 },
+      { to: '/emergency', label: 'Emergency', tip: 'Start a fire alarm or drill: roll call, doors and messages, then close it when it is over.', show: can('muster.read') },
+      { to: '/events', label: 'Event log', tip: 'Every lock event received from Visionline, with filters. Print gives a PDF that can be checked later.', show: can('events.read') },
+      { to: '/room-keycards', label: 'Keycards per room', tip: 'For one room: which keycards opened it, whose they are and who issued them.', show: can('events.read') },
     ] },
-    { id: 'people', label: 'Keycards & people', items: [
-      { to: '/keycards', label: 'Staff keycards', show: keycardsOk },
-      { to: '/visionline', label: 'Visionline cards & people', show: can('reports.read') },
-      { to: '/idcards', label: 'Staff ID cards', show: can('idcards.manage') },
-      { to: '/staff', label: 'Staff', show: can('staff.read') },
-      { to: '/keys', label: 'Mobile keys', show: can('key.read'), badge: pendingCount > 0 ? <span className="count" title={tr('Awaiting approval')}>{pendingCount}</span> : null, count: pendingCount },
-      { to: '/attendance', label: 'Time & attendance', show: can('attendance.clock') },
-      { to: '/breakfast', label: 'Breakfast', show: can('breakfast.read') && Boolean(attention.data?.breakfast) && hotel.kind !== 'institution' },
+    { id: 'people', label: 'Keycards & people', tip: 'Staff keycards, Visionline people and cards, ID cards and mobile keys.', items: [
+      { to: '/keycards', label: 'Staff keycards', tip: 'Ask for, issue, verify and extend staff keycards; returns and cancellations; the register of who holds which card.', show: keycardsOk },
+      { to: '/visionline', label: 'Visionline cards & people', tip: 'The people and keycards in Visionline, which doors each card opens, and Card lookup by number or on the encoder.', show: can('reports.read') },
+      { to: '/idcards', label: 'Staff ID cards', tip: 'Print staff ID cards with photo, name and department.', show: can('idcards.manage') },
+      { to: '/staff', label: 'Staff', tip: 'People who use the staff app (mobile keys): invite, suspend or remove them.', show: can('staff.read') },
+      { to: '/keys', label: 'Mobile keys', tip: 'Mobile keys on staff phones: issue, approve broad access, revoke.', show: can('key.read'), badge: pendingCount > 0 ? <span className="count" title={tr('Awaiting approval')}>{pendingCount}</span> : null, count: pendingCount },
+      { to: '/attendance', label: 'Time & attendance', tip: 'Clock in and out, and attendance from the doors people used.', show: can('attendance.clock') },
+      { to: '/breakfast', label: 'Breakfast', tip: 'The in-house guest list for the restaurant: mark breakfasts served.', show: can('breakfast.read') && Boolean(attention.data?.breakfast) && hotel.kind !== 'institution' },
     ] },
-    { id: 'locks', label: 'Locks', items: [
-      { to: '/battery', label: 'Battery status', show: can('battery.read') && Boolean(attention.data?.batteryMonitoring), badge: (attention.data?.battery?.critical ?? 0) > 0 ? <span className="count" title={tr('Critical batteries')}>{attention.data.battery.critical}</span> : null, count: attention.data?.battery?.critical ?? 0 },
-      { to: '/locks-online', label: 'Online locks & gateways', show: can('resources.read'), badge: (attention.data?.offlineLocks ?? 0) > 0 ? <span className="count" title={tr('Locks offline now')}>{attention.data.offlineLocks}</span> : null, count: attention.data?.offlineLocks ?? 0 },
-      { to: '/lock-troubleshoot', label: 'Lock troubleshooting', show: can('battery.read') },
-      { to: '/maintenance', label: 'Maintenance', show: can('maintenance.read') && Boolean(attention.data?.maintenance), badge: (attention.data?.maintenance?.open ?? 0) > 0 ? <span className="count" title={tr('Open requests')}>{attention.data.maintenance.open}</span> : null, count: attention.data?.maintenance?.open ?? 0 },
+    { id: 'locks', label: 'Locks', tip: 'Batteries, online locks and gateways, troubleshooting and maintenance.', items: [
+      { to: '/battery', label: 'Battery status', tip: "Battery state of every lock, from the locks' own alarms. Record new batteries here.", show: can('battery.read') && Boolean(attention.data?.batteryMonitoring), badge: (attention.data?.battery?.critical ?? 0) > 0 ? <span className="count" title={tr('Critical batteries')}>{attention.data.battery.critical}</span> : null, count: attention.data?.battery?.critical ?? 0 },
+      { to: '/locks-online', label: 'Online locks & gateways', tip: 'Online locks and gateways that are out of contact, with their EEID, so engineering can find them.', show: can('resources.read'), badge: (attention.data?.offlineLocks ?? 0) > 0 ? <span className="count" title={tr('Locks offline now')}>{attention.data.offlineLocks}</span> : null, count: attention.data?.offlineLocks ?? 0 },
+      { to: '/lock-troubleshoot', label: 'Lock troubleshooting', tip: "Read a lock's event report to find why it drains batteries, refuses cards or misbehaves.", show: can('battery.read') },
+      { to: '/maintenance', label: 'Maintenance', tip: 'Maintenance requests for locks and doors: open, assign, solve.', show: can('maintenance.read') && Boolean(attention.data?.maintenance), badge: (attention.data?.maintenance?.open ?? 0) > 0 ? <span className="count" title={tr('Open requests')}>{attention.data.maintenance.open}</span> : null, count: attention.data?.maintenance?.open ?? 0 },
     ] },
-    { id: 'admin', label: 'Administration', items: [
-      { to: '/operators', label: 'Users', show: can('operators.manage') },
-      { to: '/settings', label: 'Settings', show: can('settings.manage') },
-      { to: '/connector', label: 'Connector health', show: can('connector.read') },
-      { to: '/setup-report', label: 'System setup reports', show: can('settings.manage') },
-      { to: '/audit', label: 'Audit trail', show: can('audit.read') },
-      { to: '/branding', label: 'Branding and logo', show: can('branding.manage') },
-      { to: '/usage', label: 'Usage', show: can('settings.manage') },
-      { to: '/demo', label: 'Demo Hotel and testers', show: me.isPlatformAdmin },
+    { id: 'admin', label: 'Administration', tip: 'Users, settings, connector, setup reports and the audit trail (administrators).', items: [
+      { to: '/operators', label: 'Users', tip: 'People who can sign in to this portal: invite, choose their role, reset passwords or two-step sign-in.', show: can('operators.manage') },
+      { to: '/settings', label: 'Settings', tip: 'Visionline account, connector, alerts and e-mail, keycard rules, modules and the licence.', show: can('settings.manage') },
+      { to: '/connector', label: 'Connector health', tip: 'The program on the Visionline server that links the portal and Visionline: version, last contact, errors.', show: can('connector.read') },
+      { to: '/setup-report', label: 'System setup reports', tip: 'The Visionline setup report (version, AES, locks, user groups…) and the portal setup report. Printable.', show: can('settings.manage') },
+      { to: '/audit', label: 'Audit trail', tip: 'Every sign-in and change, who did it and when. Cannot be altered.', show: can('audit.read') },
+      { to: '/branding', label: 'Branding and logo', tip: 'Logo, colours and the name shown on the portal, the sign-in page and printed reports.', show: can('branding.manage') },
+      { to: '/usage', label: 'Usage', tip: 'Which pages are used, and by how many people.', show: can('settings.manage') },
+      { to: '/demo', label: 'Demo Hotel and testers', tip: 'A made-up hotel for people to try the portal, and their feedback.', show: me.isPlatformAdmin },
     ] },
   ];
   const initials = hotel.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 3).toUpperCase();
@@ -214,15 +215,15 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             {NAV.map((g) => {
               const items = g.items.filter((i) => i.show && vis(i.to));
               if (!items.length) return null;
-              if (!g.id) return items.map((i) => <NavLink key={i.to} to={i.to} end={i.to === '/'}>{tr(i.label)} {i.badge}</NavLink>);
+              if (!g.id) return items.map((i) => <NavLink key={i.to} to={i.to} end={i.to === '/'} data-tip={i.tip}>{tr(i.label)} {i.badge}</NavLink>);
               const open = openGroup === g.id;
               const badges = items.reduce((n, i) => n + (i.count ?? 0), 0);
               return (
                 <div key={g.id}>
-                  <button type="button" className={`group${activeGroup === g.id ? ' here' : ''}`} aria-expanded={open} onClick={() => setOpenGroup(open ? '' : g.id!)}>
+                  <button type="button" className={`group${activeGroup === g.id ? ' here' : ''}`} data-tip={g.tip} aria-expanded={open} onClick={() => setOpenGroup(open ? '' : g.id!)}>
                     <span>{tr(g.label)}{!open && badges > 0 && <span className="count" aria-label={`${badges}`}>{badges}</span>}</span><span aria-hidden>{open ? '▾' : '▸'}</span>
                   </button>
-                  <div className="navgroup" hidden={!open}>{items.map((i) => <NavLink key={i.to} to={i.to}>{tr(i.label)} {i.badge}</NavLink>)}</div>
+                  <div className="navgroup" hidden={!open}>{items.map((i) => <NavLink key={i.to} to={i.to} data-tip={i.tip}>{tr(i.label)} {i.badge}</NavLink>)}</div>
                 </div>
               );
             })}
@@ -287,6 +288,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         </main>
       </div>
       <FeedbackButton />
+      <TipLayer />
     </HotelCtx.Provider>
   );
 }
@@ -426,7 +428,7 @@ function ThemeSwitch() {
   };
   return (
     <div className="theme-switch" role="group" aria-label="Appearance">
-      {(['system', 'light', 'dark'] as const).map((p) => <button key={p} aria-pressed={pref === p} onClick={() => choose(p)} title={p === 'system' ? 'Follow this computer' : undefined}>{tr(p === 'system' ? 'Auto' : p === 'light' ? 'Light' : 'Dark')}</button>)}
+      {(['system', 'light', 'dark'] as const).map((p) => <button key={p} aria-pressed={pref === p} onClick={() => choose(p)} data-tip={p === 'system' ? 'Light or dark like this computer' : p === 'light' ? 'Always light' : 'Always dark'}>{tr(p === 'system' ? 'Auto' : p === 'light' ? 'Light' : 'Dark')}</button>)}
     </div>
   );
 }
@@ -444,7 +446,7 @@ function LangSwitch() {
 export function LangPicker({ onPick = setLang }: { onPick?: (l: LangChoice) => void }) {
   return (
     <div className="theme-switch lang-switch" role="group" aria-label={tr('Language')}>
-      {LANGS.map((l) => <button key={l.id} lang={l.id === 'auto' ? undefined : l.id} aria-pressed={langChoice() === l.id} title={l.id === 'auto' ? tr('Follow this browser / computer language') : undefined} onClick={() => onPick(l.id)}>{l.id === 'auto' ? tr('Auto') : l.label}</button>)}
+      {LANGS.map((l) => <button key={l.id} lang={l.id === 'auto' ? undefined : l.id} aria-pressed={langChoice() === l.id} data-tip={l.id === 'auto' ? 'Follow this browser / computer language' : undefined} onClick={() => onPick(l.id)}>{l.id === 'auto' ? tr('Auto') : l.label}</button>)}
     </div>
   );
 }

@@ -26,7 +26,7 @@ export function KeycardsPage() {
     <>
       <PageHead title="Staff keycards" intro="Requests for staff keycards and their cancellation, the cards in use and who holds them. Every card is made in Visionline, the key system." />
       <div className="seg" role="tablist" style={{ marginBottom: 16 }}>
-        {tabs.filter((t) => t[2]).map(([id, l]) => <button key={id} role="tab" aria-pressed={tab === id} onClick={() => { setTab(id); try { history.replaceState(null, '', `?tab=${id}`); } catch { /* ignore */ } }}>{l}</button>)}
+        {tabs.filter((t) => t[2]).map(([id, l]) => <button key={id} role="tab" data-tip={KC_TIPS[id]} aria-pressed={tab === id} onClick={() => { setTab(id); try { history.replaceState(null, '', `?tab=${id}`); } catch { /* ignore */ } }}>{l}</button>)}
       </div>
       {tab === 'requests' && <Requests />}
       {tab === 'verify' && <KeycardCheck />}
@@ -491,3 +491,14 @@ function VlPicker({ mode, initial, onPerson, onCard, selected }: {
     </div>
   );
 }
+
+/** 2.29 Hover help for the tabs. */
+const KC_TIPS: Record<string, string> = {
+  requests: 'Requests for new, replacement or returned staff keycards: issue them, reject or cancel.',
+  verify: 'Read a keycard on an encoder: whose it is, its doors and end date; extend it or unlock it.',
+  register: 'Every staff keycard in use, who holds it and who issued it.',
+  attention: 'Keycards ending soon, in a generic name or held twice by one person.',
+  lockouts: 'Unpaid guests: block their keycard from the room, with a second person approving.',
+  departures: 'Today\'s departures: send a checkout to online locks, or use a clearance card for the others.',
+  encoders: 'The encoders the portal can use, and special cards (emergency, stand-open, clearance, one-time).',
+};

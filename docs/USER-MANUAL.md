@@ -1,4 +1,4 @@
-# Access Monitoring Tool — user manual (2.28)
+# Access Monitoring Tool — user manual (2.29)
 
 New here? Start with **QUICK-START.md** (5 steps, adding people, everyday tasks).
 
@@ -20,6 +20,9 @@ its server is off.
 - **Light or dark**: the switch at the bottom of the menu (Automatic follows Windows), or *Your account → Menu &
   appearance*. Your choice follows you to any computer.
 - **Help**: *Help and manual* at the bottom of the menu opens this manual.
+- **Help on hover (2.29)**: rest the mouse on a menu item, a tab, a shortcut or a button: a short explanation of what it
+  does appears, and goes as soon as the mouse moves away (or a key is pressed). Keyboard users get it on focus. Switch
+  it off under *My account → Menu & appearance* (on that computer).
 
 What you see depends on your role. A hotel administrator can also switch whole modules off (*Settings → Modules*), or
 set **Portal focus: Visionline only**, which hides mobile keys, attendance, breakfast, battery and maintenance from

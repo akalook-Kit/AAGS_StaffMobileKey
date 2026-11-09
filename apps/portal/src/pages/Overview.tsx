@@ -120,7 +120,20 @@ function TodoNow() {
           <Link key={i.id} to={i.to} className={`todo ${i.tone}`}><span className="todo-n">{i.n}</span><span><strong>{i.title}</strong><small>{i.detail}</small></span><span aria-hidden>→</span></Link>
         )) : <div className="todo ok"><span className="todo-n">✓</span><span><strong>{tr('Nothing waiting for you')}</strong><small>{tr('Updated')} {t.data ? fmt.rel(t.data.at) : '…'}</small></span></div>}
       </div>
-      <nav className="quick" aria-label="Shortcuts">{quick.filter((q) => q[3]).slice(0, 8).map(([to, l, d]) => <Link key={to} to={to} className="quick-task"><strong>{tr(l)}</strong><small>{tr(d)}</small></Link>)}</nav>
+      <nav className="quick" aria-label="Shortcuts">{quick.filter((q) => q[3]).slice(0, 8).map(([to, l, d]) => <Link key={to} to={to} className="quick-task" data-tip={QUICK_TIPS[to]}><strong>{tr(l)}</strong><small>{tr(d)}</small></Link>)}</nav>
     </section>
   );
 }
+
+/** 2.29 Hover help for the shortcuts. */
+const QUICK_TIPS: Record<string, string> = {
+  '/keycards?tab=verify': 'Put the keycard on an encoder: see whose it is, which doors it opens and until when, then extend it if needed.',
+  '/visionline?tab=lookup': 'Type the number printed on a card (or read it on an encoder) to find its holder and doors.',
+  '/keycards': 'Ask for a new keycard, a replacement or a return when someone leaves.',
+  '/keycards?tab=lockouts': 'Block a guest who has not paid from their room; a second person approves.',
+  '/muster': 'Everyone in the building now, from the last doors they used.',
+  '/events': 'Every door opened or refused, with who and when.',
+  '/battery': 'Locks whose batteries are low or critical, to change them before they stop.',
+  '/reports': 'Daily and monthly reports to read, download or e-mail.',
+  '/monitoring': 'Open alerts: what is wrong and how it closes.',
+};

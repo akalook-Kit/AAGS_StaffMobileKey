@@ -23,7 +23,7 @@ export function FeedbackButton() {
   const close = () => { setOpen(false); setDone(false); setError(null); };
   return (
     <>
-      <button type="button" className="fb-button no-print" onClick={() => setOpen(true)} aria-haspopup="dialog">{tr('Feedback')}</button>
+      <button type="button" className="fb-button no-print" data-tip="Tell us what works, what is confusing or what is missing on this page." onClick={() => setOpen(true)} aria-haspopup="dialog">{tr('Feedback')}</button>
       {open && (
         <div className="fb-scrim" role="presentation" onClick={close}>
           <div className="fb-dialog" role="dialog" aria-modal="true" aria-labelledby="fb-title" onClick={(e) => e.stopPropagation()}>

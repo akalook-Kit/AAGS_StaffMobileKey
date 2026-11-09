@@ -35,7 +35,7 @@ export function ReportsPage() {
             return (
               <div key={g}>
                 <h3>{tr(g)}</h3>
-                {items.map((r: any) => <button key={r.id} type="button" aria-current={r.id === id ? 'page' : undefined} onClick={() => { const n = new URLSearchParams(sp); n.set('r', r.id); setSp(n, { replace: true }); }}>{tr(r.title)}</button>)}
+                {items.map((r: any) => <button key={r.id} type="button" data-tip={r.about} aria-current={r.id === id ? 'page' : undefined} onClick={() => { const n = new URLSearchParams(sp); n.set('r', r.id); setSp(n, { replace: true }); }}>{tr(r.title)}</button>)}
               </div>
             );
           })}
@@ -104,8 +104,8 @@ function ReportView({ def, cat }: { def: any; cat: any }) {
           <p className="small" style={{ margin: '12px 0 8px' }}><strong>{periodLabel(x, period, now)}</strong> <span className="muted">({x.timezone})</span></p>
           <div className="rep-figures">{x.summary.map(([k, v]: [string, string]) => <div key={k}><strong>{v}</strong><span>{tr(k)}</span></div>)}</div>
           <div className="row" style={{ gap: 8, flexWrap: 'wrap', margin: '12px 0' }}>
-            <button className="btn primary" onClick={() => download(`${base}/reports-centre/${def.id}/pdf?${q}`, `${def.id}-${date}.pdf`)}>{tr('Download PDF')}</button>
-            <button className="btn" onClick={() => download(`${base}/reports-centre/${def.id}/csv?${q}`, `${def.id}-${date}.csv`)}>{tr('Download for Excel (CSV)')}</button>
+            <button className="btn primary" data-tip="A PDF with a fingerprint: Verify a PDF (Event log) shows whether anyone changed it." onClick={() => download(`${base}/reports-centre/${def.id}/pdf?${q}`, `${def.id}-${date}.pdf`)}>{tr('Download PDF')}</button>
+            <button className="btn" data-tip="A file that opens in Excel, with every line of the report." onClick={() => download(`${base}/reports-centre/${def.id}/csv?${q}`, `${def.id}-${date}.csv`)}>{tr('Download for Excel (CSV)')}</button>
           </div>
           <div className="table-scroll">
             {!x.rows.length ? <p className="empty">{tr('Nothing in this period.')}</p> : (

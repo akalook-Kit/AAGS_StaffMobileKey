@@ -152,3 +152,17 @@ git tag --list "v2.2*"
 ```
 
 Only the newest zip is needed if the older ones are no longer at hand (each zip is the whole project).
+
+### When the push fails ("RPC failed; HTTP 408", "curl 55 … Connection was aborted", "Could not resolve host")
+
+The internet connection was cut or too slow: nothing was lost, the commits and tags are on the PC. From 2.29 the
+script tries three times and says **NOT pushed** in red if it still fails (2.28 wrongly said "Pushed"). Check with
+`git status` ("Your branch is ahead of 'origin/main' by N commits"), then push when the line is better:
+
+```powershell
+cd C:\khb\staff-mobile-key\staff-mobile-key
+git config http.postBuffer 524288000
+git push origin main --follow-tags
+git push origin --tags
+git log --oneline --decorate -4          # origin/main must now be on the newest release
+```

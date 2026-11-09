@@ -37,7 +37,7 @@ export function CommandPalette({ pages }: { pages: { to: string; label: string }
   const pick = (n: number) => { const it = items[n]; if (it) { it.go(); setOpen(false); } };
   return (
     <>
-      <button className="rail-search" onClick={() => setOpen(true)} aria-label="Search (Ctrl+K)"><span>Search…</span><kbd>Ctrl K</kbd></button>
+      <button className="rail-search" onClick={() => setOpen(true)} aria-label="Search (Ctrl+K)" data-tip="Find a page, a person, a door or a card number. Shortcut: Ctrl K."><span>Search…</span><kbd>Ctrl K</kbd></button>
       {open && (
         <div className="palette-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}>
           <div className="palette" role="dialog" aria-label="Search">

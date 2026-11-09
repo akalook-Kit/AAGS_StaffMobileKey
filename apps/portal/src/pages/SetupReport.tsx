@@ -20,7 +20,7 @@ export function SetupReportPage() {
   const title = view === 'portal' ? 'Portal setup report' : 'Visionline setup report';
   const tabs = (
     <div className="seg no-print" role="tablist" aria-label={tr('System setup reports')}>
-      {(['visionline', 'portal'] as const).map((v) => <button key={v} type="button" role="tab" aria-selected={view === v} aria-pressed={view === v} onClick={() => setSp(v === 'portal' ? { view: 'portal' } : {}, { replace: true })}>{tr(v === 'portal' ? 'Portal setup report' : 'Visionline setup report')}</button>)}
+      {(['visionline', 'portal'] as const).map((v) => <button key={v} type="button" role="tab" data-tip={v === 'portal' ? 'This portal only: version, connector, licence, users and settings.' : 'Visionline only: version, AES key mode, locks, user groups, operators and system parameters.'} aria-selected={view === v} aria-pressed={view === v} onClick={() => setSp(v === 'portal' ? { view: 'portal' } : {}, { replace: true })}>{tr(v === 'portal' ? 'Portal setup report' : 'Visionline setup report')}</button>)}
     </div>
   );
   if (!r.data) return (

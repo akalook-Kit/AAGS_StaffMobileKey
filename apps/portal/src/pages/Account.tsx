@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, auth, sealCredential } from '../api';
 import { useHotel } from '../App';
+import { setTipsOn, tipsOn } from '../components/Tips';
 import { ErrorNote, PageHead, setThemePref, themePref, type ThemePref, Status, fmt, useApi, waitForCommand } from '../ui';
 
 type Tab = 'user' | 'menu' | 'visionline' | 'mfa';
@@ -135,11 +136,12 @@ function MenuAndLook() {
   const menuPages = pages.filter((p) => !p.to.includes('?') && p.to !== '/' && p.to !== '/account');
   const [hidden, setHidden] = useState<string[]>(me.prefs?.hiddenNav ?? []);
   const [theme, setTheme] = useState<ThemePref>(me.prefs?.theme ?? themePref());
+  const [tips, setTips] = useState(tipsOn());
   const [error, setError] = useState<unknown>(null);
   const [ok, setOk] = useState<string | null>(null);
   const save = async (h = hidden, t = theme) => {
     setError(null); setOk(null);
-    try { await api('/api/v1/me/prefs', { method: 'PUT', body: { hiddenNav: h, theme: t } }); setPrefs({ hiddenNav: h, theme: t }); setOk('Saved. Hidden pages stay reachable with Search (Ctrl K).'); } catch (e) { setError(e); }
+    try { const next = { ...me.prefs, hiddenNav: h, theme: t }; await api('/api/v1/me/prefs', { method: 'PUT', body: next }); setPrefs(next); setOk('Saved. Hidden pages stay reachable with Search (Ctrl K).'); } catch (e) { setError(e); }
   };
   const visionlineOnly = ['/visionline', '/access', '/events', '/insights', '/monitoring', '/settings', '/operators', '/audit', '/connector'];
   return (
@@ -166,6 +168,9 @@ function MenuAndLook() {
             <button key={t} role="radio" aria-pressed={theme === t} aria-checked={theme === t} onClick={() => { setTheme(t); setThemePref(t); void save(hidden, t); }}>{t === 'system' ? 'Automatic' : t === 'light' ? 'Light' : 'Dark'}</button>
           ))}
         </div>
+        <h2 style={{ marginTop: 18 }}>Help on hover</h2>
+        <p className="muted">A short explanation appears when the mouse rests on a menu item, a tab or a button, and goes as soon as the mouse moves away.</p>
+        <label className="check"><input type="checkbox" checked={tips} onChange={(e) => { setTips(e.target.checked); setTipsOn(e.target.checked); }} /> Show help on hover (on this computer)</label>
       </section>
       {(ok || error) ? <div style={{ gridColumn: '1 / -1' }}>{ok && <div className="alert ok">{ok}</div>}<ErrorNote error={error} /></div> : null}
     </div>

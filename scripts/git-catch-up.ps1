@@ -49,11 +49,28 @@ foreach ($z in $zips) {
   Write-Host "$tag committed" -ForegroundColor Green
   $done++
 }
-if ($done -and -not $NoPush) {
-  Run "git push origin $Branch --tags"
-  git push origin $Branch
-  git push origin --tags
-  Write-Host "Pushed $done version(s) to GitHub." -ForegroundColor Green
-} elseif ($done) { Write-Host "Committed $done version(s); not pushed (-NoPush). Push later with: git push origin $Branch; git push origin --tags" }
-else { Write-Host 'Nothing new to commit.' }
+# 2.29 Push for real: count what GitHub does not have yet (also commits from an earlier run whose push failed),
+# retry a slow or cut connection, and only say "pushed" when Git says so.
+$ahead = 0; try { $ahead = [int](git rev-list --count "origin/$Branch..$Branch" 2>$null) } catch { $ahead = $done }
+if ($NoPush) {
+  if ($ahead) { Write-Host "Committed; $ahead commit(s) not pushed (-NoPush). Push later with: git push origin $Branch --follow-tags" }
+  else { Write-Host 'Nothing new to commit.' }
+} elseif ($ahead -eq 0 -and -not $done) {
+  Write-Host 'Nothing new: GitHub already has everything.' -ForegroundColor Green
+} else {
+  git config http.postBuffer 524288000 | Out-Null       # large pushes on a slow line
+  $ok = $false
+  foreach ($try in 1..3) {
+    Run "git push origin $Branch --follow-tags (try $try of 3)"
+    git push origin $Branch --follow-tags
+    if ($LASTEXITCODE -eq 0) { git push origin --tags; if ($LASTEXITCODE -eq 0) { $ok = $true; break } }
+    Write-Host 'The push did not go through (network). Trying again in 20 seconds...' -ForegroundColor Yellow
+    Start-Sleep -Seconds 20
+  }
+  if ($ok) { Write-Host "Pushed to GitHub ($ahead commit(s))." -ForegroundColor Green }
+  else {
+    Write-Host 'NOT pushed: GitHub could not be reached or the connection was cut. Your commits are safe on this PC.' -ForegroundColor Red
+    Write-Host "When the internet is better, run:  git push origin $Branch --follow-tags ; git push origin --tags" -ForegroundColor Red
+  }
+}
 git log --oneline -n ([Math]::Max($done, 1) + 1)

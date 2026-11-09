@@ -956,3 +956,12 @@ tr.row-warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .rail nav > div > button.group > span:last-child { font-size: 11px; opacity: .7; }
 .page-head + .seg { margin-bottom: 12px; }
 .ssr-glance .warn { border-color: var(--warn, #b7791f); box-shadow: inset 4px 0 0 var(--warn, #b7791f); }
+
+/* 2.29 Hover help bubble */
+.tip-bubble { position: fixed; z-index: 10000; max-width: 300px; padding: 8px 11px; border-radius: 8px; background: #1d1a17; color: #f6f1ea; font-size: 12.5px; line-height: 1.45;
+  box-shadow: 0 6px 20px rgba(0,0,0,.28); pointer-events: none; animation: tip-in .12s ease-out; }
+.tip-right::before { content: ''; position: absolute; left: -5px; top: 12px; border: 5px solid transparent; border-left: 0; border-right-color: #1d1a17; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tip-bubble { background: #f6f1ea; color: #1d1a17; } :root:not([data-theme="light"]) .tip-right::before { border-right-color: #f6f1ea; } }
+:root[data-theme="dark"] .tip-bubble { background: #f6f1ea; color: #1d1a17; } :root[data-theme="dark"] .tip-right::before { border-right-color: #f6f1ea; }
+@keyframes tip-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .tip-bubble { animation: none; } }
