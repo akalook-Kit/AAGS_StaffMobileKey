@@ -590,6 +590,24 @@ from the portal at an encoder or issued from Visionline and recorded here, with 
   (minutes per item are editable). **Summary for the supplier** downloads an anonymous signed summary (counts only).
 - **Audit trail**: every change with name and time, chained so that edits or deletions show.
 
+## 12b. Light edition (La Falaise, 2.33)
+
+The light edition is for hotels with offline locks that only need the reports. Its menu has Overview, Reports,
+Alerts, Visionline cards & people and Locks (lock troubleshooting, batteries, maintenance). Pages of the full
+edition (keys, staff keycards, live occupancy, emergency, attendance, breakfast, ID cards, door event log) are not
+shown; opening their address leads back to the Overview, and the server refuses their actions.
+
+**Without signing in.** On the hotel network the portal opens directly as *Reports (no sign-in)*: everything is
+read only, and the audit trail, connector details and settings are not shown. Each opening is written in the audit
+trail (operator.open_access). From the internet entrance or the tunnel the sign-in page is shown as usual.
+
+**Administrators** press *Administrator sign-in* at the bottom of the menu, sign in with their password (and
+two-step code if switched on), and get the short Settings. *Sign out* returns to the sign-in page, which has
+*Back to the reports (no sign-in)*.
+
+The built-in account *open-access@reports.local* (Users page) is what the reports use without signing in. It is
+always read only, whatever role it is given, and cannot sign in from outside the hotel network.
+
 ## 13. Licence
 
 The portal shows a reminder before the licence ends and a window to enter the new licence when it has ended. Paste the

@@ -3,7 +3,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { AccessPage } from './pages/Access';
 import { LicenceBanner } from './components/Licence';
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import type { Permission } from '@smk/shared';
+import { LIGHT_PAGES, type Permission } from '@smk/shared';
 import { api, auth } from './api';
 import { ErrorNote, applyBrand, useApi , setThemePref, themePref, type ThemePref } from './ui';
 import { Overview } from './pages/Overview';
@@ -52,6 +52,8 @@ export interface Me {
   modules?: Record<string, string>;
   roleLabels: Record<string, string>;
   prefs?: { hiddenNav?: string[]; theme?: 'system' | 'light' | 'dark'; lang?: LangChoice };
+  /** 2.33 Edition (full / light) and open access (no sign-in on the hotel network). */
+  edition?: { id: 'full' | 'light'; openAccess: boolean; isOpenAccess: boolean };
 }
 interface Ctx { me: Me; hotel: Me['hotels'][number]; can: (p: Permission) => boolean; branding: any; reloadBranding: () => void; base: string; pages: { to: string; label: string }[]; setPrefs: (p: NonNullable<Me['prefs']>) => void }
 const HotelCtx = createContext<Ctx | null>(null);
@@ -80,6 +82,16 @@ export function App() {
     return () => window.removeEventListener('smk:signed-out', out);
   }, []);
   useEffect(() => { if (token) api<Me>('/api/v1/me').then(setMe).catch(() => setToken(null)); }, [token]);
+  // 2.33 Light edition: on the hotel network the reports open without signing in. "Administrator sign-in" (or signing
+  // out) shows the sign-in page instead, for this browser tab.
+  const [openTried, setOpenTried] = useState(false);
+  useEffect(() => {
+    if (token || openTried) return;
+    let wantSignIn = false; try { wantSignIn = sessionStorage.getItem('smk.signin') === '1'; } catch { /* ignore */ }
+    if (wantSignIn) { setOpenTried(true); return; }
+    fetch('/api/v1/auth/open').then((r) => (r.ok ? r.json() : null)).then((r) => { if (r?.token) { try { sessionStorage.setItem('smk.openAvail', '1'); } catch { /* ignore */ } auth.set(r.token); setToken(r.token); } })
+      .catch(() => undefined).finally(() => setOpenTried(true));
+  }, [token, openTried]);
   // 2.14 The keycard request page behind the QR code needs no sign-in.
   const pub = /^\/request\/([A-Za-z0-9_-]{20,64})$/.exec(location.pathname);
   if (pub) return <PublicRequestPage token={pub[1]!} />;
@@ -87,10 +99,11 @@ export function App() {
   if (invite && !inviteDone) return <InvitePage token={invite} onSignedIn={(t) => { setInviteDone(true); auth.set(t); setToken(t); }} />;
   if (setup === undefined && !token) return <div className="empty">Loading…</div>;
   if (setup?.needed) return <SetupPage info={setup} />;
-  if (!token) return <Login onSignedIn={(t) => { auth.set(t); setToken(t); }} />;
+  if (!token && !openTried) return <div className="empty">Loading…</div>;
+  if (!token) return <Login light={setup?.edition === 'light'} onSignedIn={(t) => { try { sessionStorage.removeItem('smk.signin'); } catch { /* ignore */ } auth.set(t); setToken(t); }} />;
   if (!me) return <div className="empty">Loading…</div>;
   if (!me.hotels.length) return <div className="empty">Your account is not a member of any site yet. Ask an administrator to add you.</div>;
-  return <BrowserRouter><Shell me={me} onSignOut={() => { auth.set(null); setToken(null); setMe(null); }} /></BrowserRouter>;
+  return <BrowserRouter><Shell me={me} onSignOut={() => { try { sessionStorage.setItem('smk.signin', '1'); } catch { /* ignore */ } auth.set(null); setToken(null); setMe(null); }} /></BrowserRouter>;
 }
 
 function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
@@ -100,7 +113,10 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // A person's appearance follows them to any computer (unless this computer already has a choice).
   useEffect(() => { try { if (me.prefs?.theme && !localStorage.getItem('smk.theme')) setThemePref(me.prefs.theme); } catch { /* ignore */ } }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (me.prefs?.lang && !hasLangChoice() && me.prefs.lang !== langChoice()) setLang(me.prefs.lang); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const vis = (to: string) => !(prefs.hiddenNav ?? []).includes(to);
+  // 2.33 Light edition: only its pages (reports, locks, Visionline cards, short administration).
+  const light = me.edition?.id === 'light';
+  const inEdition = (to: string) => !light || (LIGHT_PAGES as readonly string[]).includes('/' + (to.split(/[?#]/)[0]!.split('/')[1] ?? ''));
+  const vis = (to: string) => !(prefs.hiddenNav ?? []).includes(to) && inEdition(to);
   useEffect(() => setMenu(false), [loc.pathname, loc.search]);
   const [hotelId, setHotelId] = useState(() => { try { return localStorage.getItem('smk.hotel') ?? me.hotels[0]!.id; } catch { return me.hotels[0]!.id; } });
   const hotel = me.hotels.find((h) => h.id === hotelId) ?? me.hotels[0]!;
@@ -185,7 +201,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     ['/battery', 'Battery status', can('battery.read') && Boolean(attention.data?.batteryMonitoring)], ['/lock-troubleshoot', 'Lock troubleshooting', can('battery.read')], ['/locks-online', 'Online locks & gateways', can('resources.read')], ['/maintenance', 'Maintenance', can('maintenance.read') && Boolean(attention.data?.maintenance)],
     ['/operators', 'Users', can('operators.manage')], ['/connector', 'Connector health', can('connector.read')], ['/branding', 'Branding and logo', can('branding.manage')],
     ['/settings', 'Settings', can('settings.manage')], ['/settings?tab=licence', 'Licence', can('settings.manage')], ['/audit', 'Audit trail', can('audit.read')], ['/usage', 'Usage', can('settings.manage')], ['/setup-report', 'Visionline setup report', can('settings.manage')], ['/setup-report?view=portal', 'Portal setup report', can('settings.manage')], ['/demo', 'Demo Hotel and testers', me.isPlatformAdmin], ['/help', 'Help and manual', true], ['/account', 'My account', true],
-  ] as [string, string, boolean][]).filter((x) => x[2]).map(([to, label]) => ({ to, label: tr(label) }));
+  ] as [string, string, boolean][]).filter((x) => x[2] && inEdition(x[0])).map(([to, label]) => ({ to, label: tr(label) }));
 
   // 2.24 Each page has its own title (browser tabs, history, bookmarks).
   const here = `${loc.pathname}${loc.search}`;
@@ -230,12 +246,14 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             })}
           </nav>
           <div className="foot">
-            <div><NavLink to="/account" style={{ color: 'inherit' }}>{me.displayName}</NavLink></div>
+            <div>{me.edition?.isOpenAccess ? tr('Reports (no sign-in)') : <NavLink to="/account" style={{ color: 'inherit' }}>{me.displayName}</NavLink>}</div>
             <div style={{ opacity: 0.7 }}>{hotel.roles.map((r) => me.roleLabels[r] ?? r).join(', ')}</div>
             <NavLink to="/help" className="help-link">{tr('Help and manual')}</NavLink>
             <ThemeSwitch />
             <LangSwitch />
-            <button onClick={onSignOut}>{tr('Sign out')}</button>
+            {me.edition?.isOpenAccess
+              ? <button onClick={onSignOut} data-tip="Reports are open on the hotel network. Administrators sign in here to change settings.">{tr('Administrator sign-in')}</button>
+              : <button onClick={onSignOut}>{tr('Sign out')}</button>}
           </div>
         </aside>
         <main className="content" id="main" tabIndex={-1} key={hotel.id}>
@@ -246,6 +264,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           ))}
           <ErrorBoundary key={loc.pathname} label="This page">
           <div className="page-enter" key={loc.pathname}>
+          {!inEdition(loc.pathname) ? <Navigate to="/" replace /> : null}
           <Routes>
             <Route path="/" element={!can('resources.read') && can('breakfast.read') ? <Navigate to="/breakfast" replace /> : !can('resources.read') && !can('reports.read') && can('muster.read') ? <Navigate to="/muster" replace /> : <Overview />} />
             <Route path="/staff" element={<StaffPage />} />
@@ -298,7 +317,8 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
 /** Hotel shown on the sign-in page: ?hotel=<code> in the URL, else the build default, else this installation's hotel. */
 const LOGIN_HOTEL = new URLSearchParams(location.search).get('hotel') ?? (import.meta.env.VITE_DEFAULT_HOTEL as string | undefined) ?? 'default';
 
-function Login({ onSignedIn }: { onSignedIn: (t: string) => void }) {
+function Login({ onSignedIn, light }: { onSignedIn: (t: string) => void; light?: boolean }) {
+  const openAvail = (() => { try { return sessionStorage.getItem('smk.openAvail') === '1'; } catch { return false; } })();
   const [brand, setBrand] = useState<any>(null);
   useEffect(() => {
     api(`/mobile/v1/config?hotel=${encodeURIComponent(LOGIN_HOTEL)}`).then((c) => { setBrand({ ...c.branding, hotelName: c.property?.displayName ?? c.hotel?.name, kind: c.property?.kind, supportEmail: c.property?.supportEmail, supportPhone: c.property?.supportPhone }); applyBrand(c.branding); document.title = c.branding?.portalTitle ?? `${c.hotel?.name ?? 'Access Monitoring Tool'} · Sign in`; }).catch(() => {});
@@ -329,8 +349,13 @@ function Login({ onSignedIn }: { onSignedIn: (t: string) => void }) {
           <LangPicker />
         </header>
         <div className="land-copy">
+          {light ? <>
+            <h1>{name ? (lang() === 'fr' ? <>Les rapports et les serrures de {name}.</> : <>Reports and locks of {name}.</>) : tr('Reports and locks, in one place.')}</h1>
+            <p>{tr('Keycards and people from Visionline, lock batteries and troubleshooting, and the reports. On the hotel network the reports open without signing in; administrators sign in here.')}</p>
+          </> : <>
           <h1>{name ? (lang() === 'fr' ? <>Chaque porte, badge et serrure de {name}.</> : <>Every door, keycard and lock at {name}.</>) : tr('Every door, keycard and lock, in one place.')}</h1>
           <p>{tr('Who opened which door, which keycards are in use, which locks need batteries, and who is in the building in an emergency. Read from Visionline; nothing is changed without a person asking for it.')}</p>
+          </>}
         </div>
         <TapScene logo={brand?.logo} name={name} />
       </section>
@@ -349,6 +374,7 @@ function Login({ onSignedIn }: { onSignedIn: (t: string) => void }) {
           )}
           <button className="btn primary land-submit" disabled={busy}>{tr(busy ? 'Signing in…' : needTotp ? 'Verify' : 'Sign in')}</button>
           <button type="button" className="linklike" aria-expanded={help} onClick={() => setHelp(!help)}>{tr('Forgotten password or first time here?')}</button>
+          {openAvail && <button type="button" className="linklike" onClick={() => { try { sessionStorage.removeItem('smk.signin'); } catch { /* ignore */ } location.assign('/'); }}>{tr('Back to the reports (no sign-in)')}</button>}
           {help && (
             <div className="land-help">
               <p><strong>{tr('First time:')}</strong> {tr('open the invitation link from your e-mail and choose your password there.')}</p>
@@ -361,7 +387,7 @@ function Login({ onSignedIn }: { onSignedIn: (t: string) => void }) {
         <div className="land-more">
           <LoginFeed />
           <ul className="land-roles">
-            {ROLES.map(([t, d]) => <li key={t}><strong>{tr(t!)}</strong><span>{tr(d!)}</span></li>)}
+            {(light ? LIGHT_ROLES : ROLES).map(([t, d]) => <li key={t}><strong>{tr(t!)}</strong><span>{tr(d!)}</span></li>)}
           </ul>
           <p className="land-foot small muted">{tr('Access Monitoring Tool. Every sign-in and every change is kept in the audit trail.')}</p>
         </div>
@@ -398,6 +424,12 @@ const ROLES = [
   ['Engineering', 'Lock batteries, locks offline, troubleshooting reports and maintenance requests.'],
   ['Managers and HR', 'Keycard requests for their team, returns when someone leaves, reports and charts.'],
   ['Administrators', 'Users, settings, the setup report and the audit trail.'],
+];
+/** 2.33 Light edition (reports only). */
+const LIGHT_ROLES = [
+  ['Management and front office', 'Reports, Visionline keycards and people, look up any card.'],
+  ['Engineering', 'Lock batteries, lock troubleshooting and maintenance requests.'],
+  ['Administrators', 'Users, settings and the Visionline setup report.'],
 ];
 function LoginFeed() {
   const [posts, setPosts] = useState<any[]>([]);

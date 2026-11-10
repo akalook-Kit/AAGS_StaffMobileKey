@@ -18,6 +18,8 @@ import { createHotel, ensureLocalConnector, setupMode } from '../provision-lib.t
 import { genericProfile, slugify } from '../tenants/generic.ts';
 import { setStoredSecret, secretStoreEnabled } from '../secret-store.ts';
 import { PLATFORM_VERSION } from '../version.ts';
+import { tenantPreset } from '../tenants/la-falaise.ts';
+import { edition } from '../edition.ts';
 import { ApiError } from '../lib/errors.ts';
 
 const P = '/api/v1/setup';
@@ -35,7 +37,8 @@ function codeMatches(given: string) {
 export async function setupNeeded() {
   if (!setupMode()) return false;
   const h = await one(pool, 'SELECT 1 FROM hotels LIMIT 1');
-  const o = await one(pool, 'SELECT 1 FROM operators LIMIT 1');
+  // 2.33 The built-in open-access account (light edition) is not an administrator: it does not end the setup.
+  const o = await one(pool, `SELECT 1 FROM operators WHERE lower(email)<>'open-access@reports.local' LIMIT 1`);
   return !h || !o;
 }
 
@@ -70,6 +73,9 @@ export function setupRoutes(app: FastifyInstance) {
       needed,
       version: PLATFORM_VERSION,
       // Suggestions for the form: the server's own time zone. A hotel that already exists is not asked again.
+      // 2.33 An edition made for one hotel fills in its name, time zone and country.
+      ...(needed && tenantPreset() ? { suggest: { name: tenantPreset()!.name, timeZone: tenantPreset()!.timezone, country: tenantPreset()!.country } } : {}),
+      edition: edition(),
       ...(needed ? { serverTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, codeRequired: true, secretStore: secretStoreEnabled(), hotel: hotel ? { name: hotel.name } : null } : {}),
     };
   });
@@ -93,7 +99,7 @@ export function setupRoutes(app: FastifyInstance) {
     const profile = b.hotel && genericProfile({
       HOTEL_KIND: b.hotel.kind, HOTEL_NAME: b.hotel.name, PROVISION_HOTEL: b.hotel.code || slugify(b.hotel.name) || 'hotel', HOTEL_TIMEZONE: b.hotel.timeZone, HOTEL_COUNTRY: b.hotel.country,
       HOTEL_SYSTEM_ID: String(b.hotel.systemId), HOTEL_SYSTEM_NUMBER: b.hotel.systemNumber || undefined,
-      HOTEL_SUPPORT_EMAIL: b.hotel.supportEmail, HOTEL_SUPPORT_PHONE: b.hotel.supportPhone || undefined,
+      HOTEL_SUPPORT_EMAIL: b.hotel.supportEmail, HOTEL_SUPPORT_PHONE: b.hotel.supportPhone || undefined, SMK_TENANT: process.env.SMK_TENANT, SMK_BRAND_DIR: process.env.SMK_BRAND_DIR,
     });
     const result = await tx(async (c) => {
       // Two people submitting at once: only the first one wins.

@@ -7,7 +7,7 @@ import { ApiError, forbidden, notFound } from '../lib/errors.ts';
 import { buildReportPdf } from '../pdf.ts';
 import { channels } from '../monitoring/monitor.ts';
 import { sendEmail } from '../monitoring/channels.ts';
-import { REPORTS, allowedReport, buildReport, reportCsv, reportDef, reportText, siteName, siteTz, type Period, type ReportOut } from '../reports-centre.ts';
+import { REPORTS, allowedReport, editionReports, buildReport, reportCsv, reportDef, reportText, siteName, siteTz, type Period, type ReportOut } from '../reports-centre.ts';
 
 /** 2.27 Reports: list, view, PDF, CSV, e-mail now, and e-mail on a schedule. */
 const P = '/api/v1';
@@ -71,7 +71,7 @@ export function reportsCentreRoutes(app: FastifyInstance) {
     if (!op.isPlatformAdmin && !op.roles.has(hotelId)) throw forbidden('You are not a member of this site.');
     const perms = permsIn(op, hotelId);
     const tz = await siteTz(hotelId);
-    const reports = REPORTS.filter((r) => allowedReport(r, perms)).map(({ perms: _p, ...r }) => r);
+    const reports = editionReports().filter((r) => allowedReport(r, perms)).map(({ perms: _p, ...r }) => r);
     const schedules = perms.has('settings.manage') ? await many(pool, `SELECT id, report, frequency, send_time, emails, enabled, last_period, last_sent_at, last_error FROM report_schedules WHERE hotel_id=$1 ORDER BY created_at`, [hotelId]) : null;
     return { timezone: tz, today: defaultDate('day', tz), month: defaultDate('month', tz), yesterday: previous('day', tz), lastMonth: previous('month', tz), reports, schedules,
       canSchedule: perms.has('settings.manage'), emailOn: Boolean((await channels(hotelId)).email?.enabled) };

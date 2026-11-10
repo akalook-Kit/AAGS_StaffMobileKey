@@ -219,6 +219,8 @@ export function startGateway(cfg: GatewayConfig, env: NodeJS.ProcessEnv = proces
       delete headers['x-forwarded-for']; delete headers['x-real-ip']; delete headers['forwarded'];
       headers['x-forwarded-for'] = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
       headers['x-forwarded-proto'] = secure ? 'https' : 'http';
+      // 2.33 Which listener the request came in on (the platform allows open access only on "lan"); never from the client.
+      delete headers['x-smk-listener']; headers['x-smk-listener'] = l.name;
       headers.host = up.host;
       const preq = http.request({ hostname: up.hostname, port: up.port || 80, method: req.method, path: target, headers }, (pres) => {
         const h: Record<string, any> = { ...pres.headers, ...SECURITY_HEADERS };

@@ -1,7 +1,8 @@
 import { createHmac, randomBytes, scrypt, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { SignJWT, jwtVerify } from 'jose';
-import { permissionsFor, withoutModules, type Permission, type Role } from '@smk/shared';
+import { permissionsFor, withoutEdition, withoutModules, type Permission, type Role } from '@smk/shared';
+import { edition, openAccessAllowed, OPEN_ACCESS_EMAIL } from './edition.ts';
 import { config } from './config.ts';
 import { pool, many, one } from './db.ts';
 import { ApiError, forbidden } from './lib/errors.ts';
@@ -164,14 +165,21 @@ export async function requireOperator(req: FastifyRequest): Promise<OperatorCtx>
   if (!op.mfa_enabled && roles.size)
     for (const p of await many(pool, `SELECT DISTINCT ON (hotel_id) hotel_id, data->'adminSecurity'->>'requireAdminMfa' AS req FROM hotel_config_versions WHERE kind='policy' AND hotel_id = ANY($1) ORDER BY hotel_id, version DESC`, [[...roles.keys()]]))
       if (p.req === 'true') mfaRequiredIn.add(p.hotel_id);
-  const ctx: OperatorCtx = { id: op.id, email: op.email, displayName: op.display_name, isPlatformAdmin: op.is_platform_admin, roles, hidden, mfa: op.mfa_enabled, mfaRequiredIn };
+  // 2.33 Open access (light edition) works only from the hotel network, whatever token is shown.
+  if (op.email === OPEN_ACCESS_EMAIL && !openAccessAllowed(req).ok) throw new ApiError(401, 'UNAUTHENTICATED', 'Sign in: open access is only on the hotel network.');
+  const ctx: OperatorCtx = { id: op.id, email: op.email, displayName: op.display_name, isPlatformAdmin: op.is_platform_admin && op.email !== OPEN_ACCESS_EMAIL, roles, hidden, mfa: op.mfa_enabled, mfaRequiredIn };
   (req as any).operator = ctx;
   return ctx;
 }
 
 export function permsIn(op: OperatorCtx, hotelId: string): Set<Permission> {
-  if (op.isPlatformAdmin) return withoutModules(permissionsFor(['PLATFORM_ADMIN']), op.hidden?.get(hotelId) ?? []);
-  return withoutModules(permissionsFor(op.roles.get(hotelId) ?? []), op.hidden?.get(hotelId) ?? []);
+  // 2.33 The open-access account is always the read-only Auditor, whatever role someone gives it in Operators.
+  const base = op.email === OPEN_ACCESS_EMAIL ? permissionsFor(['AUDITOR']) : op.isPlatformAdmin ? withoutModules(permissionsFor(['PLATFORM_ADMIN']), op.hidden?.get(hotelId) ?? []) : withoutModules(permissionsFor(op.roles.get(hotelId) ?? []), op.hidden?.get(hotelId) ?? []);
+  // 2.33 The light edition has no mobile keys, keycard issuing, doors & safety, attendance, breakfast or ID cards.
+  const p = withoutEdition(base, edition());
+  // Open access (no sign-in, light edition): reports only, not the audit trail or the connector.
+  if (op.email === OPEN_ACCESS_EMAIL) for (const x of ['audit.read', 'audit.export', 'connector.read', 'alerts.manage', 'battery.manage', 'maintenance.work', 'maintenance.manage', 'staff.read'] as Permission[]) p.delete(x);
+  return p;
 }
 
 /** Enforces hotel membership (tenant isolation) and a permission. Returns the operator. */

@@ -33,3 +33,4 @@ export function genericCardName(name: string | null | undefined): boolean {
   if (!words.length) return true;
   return words.every((w) => GENERIC_WORDS.has(w) || /^[0-9]+$/.test(w) || /^[a-z]{1,2}[0-9]*$/.test(w) || /^[0-9]+[a-z]{0,2}$/.test(w));
 }
+export * from './edition.ts';

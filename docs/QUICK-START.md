@@ -1,4 +1,4 @@
-# Access Monitoring Tool — quick start (2.32.0)
+# Access Monitoring Tool — quick start (2.33.0)
 
 ## What it is and what you need
 
@@ -8,7 +8,7 @@ requests, watches lock batteries and supports emergencies. It works for a hotel 
 hospital, a school). Staff mobile keys are an optional module, off by default.
 
 It has two parts: the **portal** (with its database) and the **connector**, which talks to Visionline. One file
-installs either or both: `AccessMonitoringTool-Server-2.32.0.msi`.
+installs either or both: `AccessMonitoringTool-Server-2.33.0.msi`.
 
 | | A. One computer | B. Two computers |
 |---|---|---|
@@ -19,6 +19,26 @@ installs either or both: `AccessMonitoringTool-Server-2.32.0.msi`.
 You also need Windows 10/11 or Windows Server 2016+ (64-bit), a Visionline user that may use the Web API, and the
 Visionline Web API reachable over https (usually `https://localhost/api/v1` on the Visionline server). Nothing else
 is installed beforehand: the .msi carries its own runtime.
+
+## La Falaise light edition (2.33)
+
+`AccessMonitoringTool-LaFalaise-Light-2.33.0.msi` is the same program, made for **La Falaise Hotel Bonapriso**
+(offline VingCard Classic Alfa locks). It installs exactly like the standard .msi (steps below), with these differences:
+
+- **Reports only.** Reports, Visionline cards & people (read only), lock troubleshooting, lock batteries, maintenance
+  and alerts. No mobile keys, no staff keycard issuing or requests, no doors & safety (live occupancy, emergency),
+  no time & attendance, breakfast or ID cards. These are removed on the server too, not only hidden from the menu.
+- **No sign-in on the hotel network.** A computer of the hotel network opens `https://<server>:8443` and sees the
+  reports straight away, read only. From outside (internet entrance or tunnel) a password is still asked.
+- **Short administration.** *Administrator sign-in* (bottom of the menu) asks for the administrator's password and
+  shows a shorter Settings (name & details, modules, Visionline, connector, reports & sync, event log, alerts,
+  battery & maintenance, administrator protection, privacy, backups, licence).
+- **La Falaise logo and colours** (navy and gold) from the start; the setup page is filled with *La Falaise Hotel
+  Bonapriso*, *Africa/Douala* and *Cameroon*. After the setup: Settings → Modules → switch on **Battery monitoring**
+  and **Maintenance** once the connector runs.
+
+Install it on a server that has no Access Monitoring Tool yet. Later light versions install over it (same as the
+standard .msi); do not mix the light and standard .msi of the same version on one server.
 
 ## First setup in 5 steps
 

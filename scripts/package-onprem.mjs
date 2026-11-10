@@ -59,6 +59,18 @@ for (const f of ['Install.cmd', 'Uninstall.cmd', 'install-onprem.ps1', 'install-
   writeFileSync(join(out, f), /\.(cmd|ps1|txt)$/.test(f) ? crlf(readFileSync(join(op, f), 'utf8')) : readFileSync(join(op, f)));
 cpSync(connectorDir, join(out, 'connector'), { recursive: true });
 writeFileSync(join(out, 'VERSION'), `${version}\r\n`);
+// 2.33 Edition packages: SMK_PACKAGE_EDITION=la-falaise-light writes edition.json, read by install-onprem.ps1.
+const EDITIONS = {
+  'la-falaise-light': { title: 'La Falaise Hotel Bonapriso - Light (reports)', msiName: 'AccessMonitoringTool-LaFalaise-Light',
+    env: { SMK_EDITION: 'light', SMK_OPEN_ACCESS: 'lan', SMK_TENANT: 'la-falaise' } },
+};
+const pe = process.env.SMK_PACKAGE_EDITION;
+rmSync(join(out, 'edition.json'), { force: true });
+if (pe) {
+  if (!EDITIONS[pe]) throw new Error(`Unknown SMK_PACKAGE_EDITION ${pe}; known: ${Object.keys(EDITIONS).join(', ')}`);
+  writeFileSync(join(out, 'edition.json'), JSON.stringify({ id: pe, ...EDITIONS[pe] }, null, 2) + '\r\n');
+  console.log(`Edition package: ${EDITIONS[pe].title}`);
+}
 const rt = buildWindowsRuntime(join(out, 'runtime'));
 console.log(`Windows runtime: ${rt.files} program files checked and included.`);
 

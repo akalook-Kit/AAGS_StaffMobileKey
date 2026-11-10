@@ -6,6 +6,12 @@ import { NoData } from '../components/charts';
 import { GettingStarted } from '../components/GettingStarted';
 import { PinnedReports } from '../components/ReportBuilder';
 import { Notices } from '../components/Notices';
+import { LIGHT_PAGES } from '@smk/shared';
+
+/** 2.33 In the light edition only its pages are linked. */
+export function inLight(light: boolean, to: string): boolean {
+  return !light || (LIGHT_PAGES as readonly string[]).includes('/' + (to.split(/[?#]/)[0]!.split('/')[1] ?? ''));
+}
 
 export function Overview() {
   const { base, hotel, me, can } = useHotel();
@@ -19,7 +25,7 @@ export function Overview() {
   const hour = new Date().getHours();
   return (
     <>
-      <PageHead title={`${tr(hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening')}, ${me.displayName.split(' ')[0]}`} intro={trf('What is happening at {site} right now: doors, keycards and locks.', { site: hotel.name })}>
+      <PageHead title={`${tr(hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening')}${me.edition?.isOpenAccess ? '' : `, ${me.displayName.split(' ')[0]}`}`} intro={me.edition?.id === 'light' ? trf('Reports and lock batteries of {site}.', { site: hotel.name }) : trf('What is happening at {site} right now: doors, keycards and locks.', { site: hotel.name })}>
         {can('key.issue') && <Link className="btn primary" to="/keys">{tr('Issue a key')}</Link>}
       </PageHead>
       <ErrorNote error={s.error} />
@@ -29,13 +35,13 @@ export function Overview() {
       {(mon || att?.battery || att?.maintenance) && (
         <div className="attn">
           {mon && <><Link to="/monitoring" className={mon.alerts.critical ? 'bad' : mon.alerts.warning ? 'warn' : 'ok'}><strong>{mon.alerts.critical + mon.alerts.warning}</strong><span>{mon.alerts.critical + mon.alerts.warning ? `open alerts${mon.alerts.critical ? ` (${mon.alerts.critical} critical)` : ''}${mon.top[0] ? ` · ${mon.top[0].title}` : ''}` : 'open alerts - all quiet'}</span></Link>
-          <Link to="/monitoring?tab=doors" className={mon.doors.offline ? 'bad' : 'ok'}><strong>{mon.doors.total ? `${mon.doors.online}/${mon.doors.total}` : '—'}</strong><span>{mon.doors.total ? `doors in contact${mon.doors.offline ? ` · ${mon.doors.offline} offline` : ''}` : 'no lock has reported yet - still looking'}</span></Link>
+          {me.edition?.id !== 'light' && <Link to="/monitoring?tab=doors" className={mon.doors.offline ? 'bad' : 'ok'}><strong>{mon.doors.total ? `${mon.doors.online}/${mon.doors.total}` : '—'}</strong><span>{mon.doors.total ? `doors in contact${mon.doors.offline ? ` · ${mon.doors.offline} offline` : ''}` : 'no lock has reported yet - still looking'}</span></Link>}
           {mon.watched.length > 0 && <Link to="/monitoring?tab=vip" className="ok"><strong>★ {mon.watched.length}</strong><span>watched doors{mon.watched[0]?.last_entrance_at ? ` · last entrance ${mon.watched[0].label} ${fmt.dt(mon.watched[0].last_entrance_at)}` : ' · no entrance yet'}</span></Link>}</>}
           {att?.battery && <Link to="/battery" className={att.battery.critical ? 'bad' : att.battery.low ? 'warn' : 'ok'}><strong>{att.battery.critical + att.battery.low}</strong><span>lock batteries low or critical{att.battery.critical ? ` (${att.battery.critical} critical)` : ''}{att.battery.unacknowledged ? ` · ${att.battery.unacknowledged} not acknowledged` : ''}</span></Link>}
           {att?.maintenance && <Link to="/maintenance" className={att.maintenance.overdue || att.maintenance.urgent ? 'bad' : att.maintenance.unassigned ? 'warn' : 'ok'}><strong>{att.maintenance.open}</strong><span>open maintenance requests{att.maintenance.unassigned ? ` · ${att.maintenance.unassigned} unassigned` : ''}{att.maintenance.overdue ? ` · ${att.maintenance.overdue} overdue` : ''}</span></Link>}
         </div>
       )}
-      {hl && hl.length > 0 && (
+      {hl && hl.length > 0 && me.edition?.id !== 'light' && (
         <section className="worth" aria-label="Worth a look">
           <h2>Worth a look</h2>
           <div className="worth-row">
@@ -99,7 +105,8 @@ function OverviewCharts() {
 
 /** 2.14 "To do now": the few things waiting for this person, refreshed every 20 seconds, with quick actions. */
 function TodoNow() {
-  const { base, can, hotel } = useHotel();
+  const { base, can, hotel, me } = useHotel();
+  const light = me.edition?.id === 'light';
   const t = useApi<any>(`${base}/today`, [], 20_000);
   const items = t.data?.items ?? [];
   // 2.24 The everyday tasks, one tap away (only those this person may do).
@@ -116,11 +123,11 @@ function TodoNow() {
   return (
     <section className="todo-now" aria-label="To do now">
       <div className="todo-list">
-        {items.length ? items.map((i: any) => (
+        {items.filter((i: any) => inLight(light, i.to)).length ? items.filter((i: any) => inLight(light, i.to)).map((i: any) => (
           <Link key={i.id} to={i.to} className={`todo ${i.tone}`}><span className="todo-n">{i.n}</span><span><strong>{i.title}</strong><small>{i.detail}</small></span><span aria-hidden>→</span></Link>
         )) : <div className="todo ok"><span className="todo-n">✓</span><span><strong>{tr('Nothing waiting for you')}</strong><small>{tr('Updated')} {t.data ? fmt.rel(t.data.at) : '…'}</small></span></div>}
       </div>
-      <nav className="quick" aria-label="Shortcuts">{quick.filter((q) => q[3]).slice(0, 8).map(([to, l, d]) => <Link key={to} to={to} className="quick-task" data-tip={QUICK_TIPS[to]}><strong>{tr(l)}</strong><small>{tr(d)}</small></Link>)}</nav>
+      <nav className="quick" aria-label="Shortcuts">{quick.filter((q) => q[3] && inLight(light, q[0])).slice(0, 8).map(([to, l, d]) => <Link key={to} to={to} className="quick-task" data-tip={QUICK_TIPS[to]}><strong>{tr(l)}</strong><small>{tr(d)}</small></Link>)}</nav>
     </section>
   );
 }

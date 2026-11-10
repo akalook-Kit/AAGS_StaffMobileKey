@@ -95,13 +95,16 @@ const KEYWORDS: Record<string, string> = {
 
 /** Settings tabs that belong to the mobile keys module (hidden with it). */
 const KEY_TABS = new Set(['visionline', 'templates', 'policy', 'credential_services']);
+/** 2.33 Light edition (offline hotels, reports only): the short administration. */
+const LIGHT_TABS = new Set(['property', 'features', 'visionline', 'connector', 'reports', 'eventlog', 'alerts', 'thresholds', 'battery', 'security', 'privacy', 'backups', 'licence']);
 
 export function SettingsPage() {
-  const { hotel } = useHotel();
+  const { hotel, me } = useHotel();
+  const light = me.edition?.id === 'light';
   const keysHidden = (hotel.hiddenModules ?? []).includes('mobileKeys');
   const inst = hotel.kind === 'institution';
   // 2.16 The Accounts daily report (guests in house) is for hotels only.
-  const tabs = TABS.filter((x) => !(keysHidden && KEY_TABS.has(x.id)) && !(inst && x.id === 'accounts'));
+  const tabs = TABS.filter((x) => !(keysHidden && KEY_TABS.has(x.id)) && !(inst && x.id === 'accounts') && (!light || LIGHT_TABS.has(x.id)));
   const [tab0, setTab] = useState(() => new URLSearchParams(location.search).get('tab') ?? 'property');
   const tab = tabs.some((x) => x.id === tab0) ? tab0 : 'property';
   const [find, setFind] = useState('');

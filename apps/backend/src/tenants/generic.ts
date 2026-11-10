@@ -13,6 +13,8 @@
  *   HOTEL_MA_UUID         Visionline Mobile Access UUID (optional)
  *   CS_BASE_URL           Credential Services URL (default: ASSA ABLOY hospitality production)
  */
+import { tenantPreset } from './la-falaise.ts';
+
 export const CS_PRODUCTION_URL = 'https://hospitality.credential-services.api.assaabloy.com';
 
 export function slugify(name: string) {
@@ -34,11 +36,14 @@ export function genericProfile(env: NodeJS.ProcessEnv = process.env): HotelProfi
   const systemId = Number(env.HOTEL_SYSTEM_ID ?? 0);
   if (!Number.isInteger(systemId) || systemId < 0) throw new Error('HOTEL_SYSTEM_ID must be a whole number (0 = set later in the portal).');
   const uuid = env.HOTEL_MA_UUID ? Number(env.HOTEL_MA_UUID) : null;
+  const preset = tenantPreset(env);
   const short = name.length <= 20 ? name : name.split(/\s+/).slice(0, 2).join(' ').slice(0, 20);
   const branding = {
     appName: `${short} Staff Key`.slice(0, 30), portalTitle: `${name} · Access Monitoring`.slice(0, 60),
     primaryColor: '#1F2933', secondaryColor: '#C9A86A', backgroundColor: '#F7F5F0', textOnPrimary: '#FFFFFF', fontFamily: 'system', logo: null,
     logoSize: { portal: 'medium', app: 'medium', reports: 'medium' },
+    // 2.33 An edition made for one hotel starts with its logo and colours.
+    ...(preset ? { ...preset.branding, logo: preset.logo() } : {}),
   };
   return {
     slug, name, timezone,
@@ -50,7 +55,7 @@ export function genericProfile(env: NodeJS.ProcessEnv = process.env): HotelProfi
         country, timezone, homepage: null, address: null, systemNumber: env.HOTEL_SYSTEM_NUMBER?.trim() || (systemId ? String(systemId) : null),
       },
       branding,
-      features: { staffMobileKeys: false }, // 2.17 mobile keys are off until switched on (Settings -> Modules)
+      features: preset ? preset.features : { staffMobileKeys: false }, // 2.17 mobile keys are off until switched on (Settings -> Modules)
       visionline: {
         defaultUserGroup: 'Housekeeping', userGroups: ['Housekeeping', 'Maintenance', 'Security', 'Management', 'Front Office'],
         accountName: env.HOTEL_VL_ACCOUNT?.trim() || null, keyLabel: null, mobileAccessUuid: Number.isInteger(uuid) ? uuid : null,

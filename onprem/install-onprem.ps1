@@ -402,6 +402,19 @@ $envLines = @(
   '# The hotel is entered in the portal (first-run setup); older installations kept it here.'
 )
 foreach ($k in $hotel.Keys) { $envLines += "$k=$($hotel[$k])" }
+# 2.33 Edition package (for example La Falaise light): edition.json next to this script sets the edition, the hotel
+# preset and the reports without sign-in on the hotel network. Only known names and values are accepted.
+$editionFile = Join-Path $here 'edition.json'
+if (Test-Path $editionFile) {
+  $ed = Get-Content $editionFile -Raw | ConvertFrom-Json
+  $allowed = @{ 'SMK_EDITION' = '^(full|light)$'; 'SMK_OPEN_ACCESS' = '^(off|lan)$'; 'SMK_TENANT' = '^[a-z0-9-]{1,40}$' }
+  $envLines += '# Edition of this installation (from edition.json of the installer).'
+  foreach ($p in $ed.env.PSObject.Properties) {
+    if ($allowed.ContainsKey($p.Name) -and ([string]$p.Value) -match $allowed[$p.Name]) { $envLines += "$($p.Name)=$($p.Value)" }
+    else { Write-Warning "edition.json: $($p.Name) ignored (unknown name or value)." }
+  }
+  Write-Host "Edition: $($ed.title)"
+}
 Write-Utf8NoBom (Join-Path $DataDir 'platform.env') ($envLines -join "`r`n")
 Write-Protected $secretsFile $secrets
 

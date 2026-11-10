@@ -95,7 +95,7 @@ describe('gateway: connector on another computer of the hotel network (2.16)', (
   let upstream: http.Server; let gw: Awaited<ReturnType<typeof startGateway>>;
   const ports: number[] = [];
   beforeAll(async () => {
-    upstream = http.createServer((req, res) => { res.writeHead(200); res.end(`up:${req.url}`); });
+    upstream = http.createServer((req, res) => { res.writeHead(200); res.end(req.url === '/listener' ? `listener:${req.headers['x-smk-listener']}` : `up:${req.url}`); });
     await new Promise<void>((r) => upstream.listen(0, '127.0.0.1', () => r()));
     const up = (upstream.address() as AddressInfo).port;
     gw = startGateway({ upstream: `http://127.0.0.1:${up}`, secretPath: '/k-test-secret-path-123456789', listeners: [
@@ -109,6 +109,10 @@ describe('gateway: connector on another computer of the hotel network (2.16)', (
   it('the listed computer reaches the connector API; Credential Services callbacks stay closed', async () => {
     expect(await (await fetch(`http://127.0.0.1:${ports[0]}/connector/v1/hello`, { method: 'POST' })).text()).toBe('up:/connector/v1/hello');
     expect((await fetch(`http://127.0.0.1:${ports[0]}/integrations/credential-services/callback/x`)).status).toBe(404);
+  });
+  it('2.33 tells the backend which listener a request came through; a header sent by the browser is replaced', async () => {
+    expect(await (await fetch(`http://127.0.0.1:${ports[1]}/listener`, { headers: { 'x-smk-listener': 'lan' } })).text()).toBe('listener:lan2');
+    expect(await (await fetch(`http://127.0.0.1:${ports[0]}/listener`)).text()).toBe('listener:lan');
   });
   it('any other address of the hotel network does not', async () => {
     expect((await fetch(`http://127.0.0.1:${ports[1]}/connector/v1/hello`, { method: 'POST' })).status).toBe(404);

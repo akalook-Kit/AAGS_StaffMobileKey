@@ -153,6 +153,41 @@ git tag --list "v2.2*"
 
 Only the newest zip is needed if the older ones are no longer at hand (each zip is the whole project).
 
+## 2.29 → 2.33 and the La Falaise light edition (10 Nov 2026)
+
+The La Falaise light edition is **not a separate project**: it is the same code, version 2.33.0, built with one
+setting (`SMK_PACKAGE_EDITION=la-falaise-light`). One push to GitHub brings both. Download
+`access-monitoring-tool-project-2.33.0.zip` into **Downloads** (plus 2.30.0 … 2.32.0 if you want one commit per
+version), then in PowerShell:
+
+```powershell
+$v = '2.33.0'
+Expand-Archive "$env:USERPROFILE\Downloads\access-monitoring-tool-project-$v.zip" "$env:TEMP\amt-$v" -Force
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\amt-$v\access-monitoring-tool-project-$v\scripts\git-catch-up.ps1" `
+  -Repo C:\khb\staff-mobile-key\staff-mobile-key -From "$env:USERPROFILE\Downloads"
+cd C:\khb\staff-mobile-key\staff-mobile-key
+git log --oneline --decorate -6        # origin/main must be on v2.33.0
+```
+
+The .msi files are not put in Git (they are built). To keep them on GitHub, attach them to a release:
+GitHub → the repository → **Releases** → **Draft a new release** → tag `v2.33.0` → drag
+`AccessMonitoringTool-Server-2.33.0.msi`, `AccessMonitoringTool-LaFalaise-Light-2.33.0.msi` and
+`SHA256SUMS-2.33.0.txt` → **Publish release**. With the GitHub CLI instead:
+
+```powershell
+gh release create v2.33.0 "$env:USERPROFILE\Downloads\AccessMonitoringTool-Server-2.33.0.msi" `
+  "$env:USERPROFILE\Downloads\AccessMonitoringTool-LaFalaise-Light-2.33.0.msi" "$env:USERPROFILE\Downloads\SHA256SUMS-2.33.0.txt" `
+  --repo akalook-Kit/AAGS_StaffMobileKey --title "2.33.0 (with La Falaise light edition)" --notes "See docs/QUICK-START.md"
+```
+
+Building the light .msi from the code (Linux/WSL with wixl): 
+
+```bash
+npm ci && npm run build:portal && npm run package:connector
+SMK_PACKAGE_EDITION=la-falaise-light npm run package:onprem && npm run package:msi
+# -> dist/msi/AccessMonitoringTool-LaFalaise-Light-<version>.msi
+```
+
 ### When the push fails ("RPC failed; HTTP 408", "curl 55 … Connection was aborted", "Could not resolve host")
 
 The internet connection was cut or too slow: nothing was lost, the commits and tags are on the PC. From 2.29 the

@@ -18,7 +18,9 @@ import { config } from '../config.ts';
 import { hashToken } from './connector.ts';
 import { TemplateBody } from './portal-admin.ts';
 import { requestDiscovery } from '../visionline-sync.ts';
+import { edition, openAccessAllowed, openAccessOn, openAccessOperator, OPEN_ACCESS_EMAIL } from '../edition.ts';
 import { ApiError, badRequest, conflict, forbidden, notFound } from '../lib/errors.ts';
+import { setupNeeded } from './setup.ts';
 
 const P = '/api/v1';
 const hid = (req: FastifyRequest) => {
@@ -55,8 +57,22 @@ export function portalRoutes(app: FastifyInstance) {
     return { token: await operatorToken(op.id, op.mfa_enabled), mfaEnabled: op.mfa_enabled };
   });
 
+  /** 2.33 Light edition: open the reports without signing in, on the hotel's own network. */
+  app.get(`${P}/auth/open`, async (req) => {
+    const ok = openAccessAllowed(req);
+    if (!ok.ok) throw new ApiError(403, 'OPEN_ACCESS_OFF', ok.why);
+    checkIpThrottle(req.ip);
+    // Not before the first-run setup: the administrator is created there first.
+    if (await setupNeeded()) throw new ApiError(409, 'SETUP_NEEDED', 'This installation is not set up yet. Open the first-run setup page.');
+    const id = await openAccessOperator();
+    await pool.query('UPDATE operators SET last_sign_in_at=now() WHERE id=$1', [id]);
+    await audit(null, { hotelId: null, actorType: 'operator', actorId: id, action: 'operator.open_access', details: { ip: req.ip } });
+    return { token: await signToken({ typ: 'op', sub: id, mfa: false, ver: (await one(pool, 'SELECT token_version FROM operators WHERE id=$1', [id]))?.token_version ?? 0 }, '12h'), openAccess: true };
+  });
+
   app.post(`${P}/auth/mfa/setup`, async (req) => {
     const op = await requireOperator(req);
+    if (op.email === OPEN_ACCESS_EMAIL) throw forbidden('Open access has no account to protect: sign in as yourself to set up two-step sign-in.');
     // 2.13 (security review): a session alone must not be able to switch two-step sign-in off by starting again.
     const cur = await one(pool, 'SELECT mfa_enabled FROM operators WHERE id=$1', [op.id]);
     if (cur?.mfa_enabled) throw new ApiError(409, 'MFA_ALREADY_ON', 'Two-step sign-in is already on for this account. If the phone was lost, a platform administrator resets it.');
@@ -94,6 +110,7 @@ export function portalRoutes(app: FastifyInstance) {
         return { ...h, kind: kinds.get(h.id) ?? 'hotel', demo: Boolean(is_demo), roles, permissions: perms, hiddenModules: op.hidden?.get(h.id) ?? [], mfaRequired };
       }),
       roleLabels: ROLE_LABELS,
+      edition: { id: edition(), openAccess: openAccessOn(), isOpenAccess: op.email === OPEN_ACCESS_EMAIL },
       modules: Object.fromEntries(MODULE_IDS.map((m) => [m, MODULES[m].label])),
     };
   });

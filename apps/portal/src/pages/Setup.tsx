@@ -16,7 +16,7 @@ const TZ_COUNTRY: Record<string, string> = {
 };
 const slugify = (s: string) => s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
 
-export function SetupPage({ info }: { info: { version: string; serverTimeZone?: string; secretStore?: boolean; hotel?: { name: string } | null } }) {
+export function SetupPage({ info }: { info: { version: string; serverTimeZone?: string; secretStore?: boolean; hotel?: { name: string } | null; suggest?: { name?: string; timeZone?: string; country?: string } } }) {
   const zones = useMemo(() => { try { return (Intl as any).supportedValuesOf('timeZone') as string[]; } catch { return [info.serverTimeZone ?? 'UTC']; } }, [info.serverTimeZone]);
   const countries = useMemo(() => {
     let names: Intl.DisplayNames | null = null;
@@ -24,8 +24,10 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
     return COUNTRIES.map((c) => ({ code: c, name: names?.of(c) ?? c })).sort((a, b) => a.name.localeCompare(b.name));
   }, []);
   const [code, setCode] = useState(() => new URLSearchParams(location.hash.slice(1)).get('code') ?? '');
-  const tz0 = info.serverTimeZone && zones.includes(info.serverTimeZone) ? info.serverTimeZone : 'Africa/Nairobi';
-  const [h, setH] = useState({ kind: 'hotel' as 'hotel' | 'institution', name: '', code: '', timeZone: tz0, country: TZ_COUNTRY[tz0] ?? '', systemId: '', systemNumber: '', supportEmail: '', supportPhone: '' });
+  // 2.33 An edition installer (La Falaise) suggests the hotel's name, time zone and country.
+  const sg = info.suggest;
+  const tz0 = sg?.timeZone && zones.includes(sg.timeZone) ? sg.timeZone : info.serverTimeZone && zones.includes(info.serverTimeZone) ? info.serverTimeZone : 'Africa/Nairobi';
+  const [h, setH] = useState({ kind: 'hotel' as 'hotel' | 'institution', name: sg?.name ?? '', code: '', timeZone: tz0, country: sg?.country ?? TZ_COUNTRY[tz0] ?? '', systemId: '', systemNumber: '', supportEmail: '', supportPhone: '' });
   const [codeTouched, setCodeTouched] = useState(false);
   const [a, setA] = useState({ name: '', email: '', password: '', again: '' });
   const [cs, setCs] = useState({ user: '', password: '' });

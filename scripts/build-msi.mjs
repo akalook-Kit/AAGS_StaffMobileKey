@@ -54,7 +54,10 @@ walk(pkg);
 const frag = execFileSync('wixl-heat', ['--directory-ref', 'INSTALLDIR', '--component-group', 'PackageFiles', '--var', 'var.SourceDir', '-p', `${pkg}/`, '--win64'],
   { cwd: pkg, input: files.map((f) => join(pkg, f)).join('\n') + '\n', maxBuffer: 64 * 1024 * 1024 }).toString();
 writeFileSync(join(out, 'files.wxs'), frag);
-const msi = join(out, `AccessMonitoringTool-Server-${version}.msi`);
+// 2.33 An edition package (edition.json) gets its own file name, e.g. AccessMonitoringTool-LaFalaise-Light-2.33.0.msi.
+const edition = existsSync(join(pkg, 'edition.json')) ? JSON.parse(readFileSync(join(pkg, 'edition.json'), 'utf8')) : null;
+const msiBase = `${edition?.msiName ?? 'AccessMonitoringTool-Server'}-${version}.msi`;
+const msi = join(out, msiBase);
 execFileSync('wixl', ['-a', 'x64', '-o', msi,
   '-D', `Version=${version}`, '-D', 'Win64=yes', '-D', `SourceDir=${pkg}`, '-D', `ToolsDir=${tools}`,
   '-D', `Manufacturer=${process.env.SMK_MSI_MANUFACTURER ?? 'Access Monitoring Tool'}`, '-D', `HelpLink=${process.env.SMK_MSI_HELP ?? 'https://github.com/akalook-Kit/AAGS_StaffMobileKey'}`,
@@ -77,5 +80,5 @@ execFileSync('msibuild', [msi, '-q', "INSERT INTO `CustomAction` (`Action`, `Typ
   console.log(`MSI sequence OK: installer ${seq.RunServerInstaller}, uninstaller ${seq.RunServerUninstaller} (between ${seq.InstallInitialize} and ${seq.InstallFinalize})`);
 }
 const sha = createHash('sha256').update(readFileSync(msi)).digest('hex');
-writeFileSync(`${msi}.sha256`, `${sha}  AccessMonitoringTool-Server-${version}.msi\n`);
+writeFileSync(`${msi}.sha256`, `${sha}  ${msiBase}\n`);
 console.log(`MSI: ${msi} (${files.length} files, ${(statSync(msi).size / 1048576).toFixed(1)} MB) sha256 ${sha}`);

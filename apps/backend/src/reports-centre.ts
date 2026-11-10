@@ -3,6 +3,8 @@ import type { Permission } from '@smk/shared';
 import { pool, many, one } from './db.ts';
 import { getConfig } from './hotel-config.ts';
 import { genericCards } from './generic-cards.ts';
+import { LIGHT_HIDDEN_REPORTS } from '@smk/shared';
+import { edition } from './edition.ts';
 import type { Column, Tone } from './pdf.ts';
 
 /**
@@ -41,7 +43,10 @@ export const REPORTS: ReportDef[] = [
     about: 'Battery alarms and battery changes in the period, the battery state of each lock now, how long its batteries have been in, and locks offline.' },
 ];
 
-export const reportDef = (id: string) => REPORTS.find((r) => r.id === id) ?? null;
+/** 2.33 The light edition (offline hotel) leaves out the reports that need door events of online locks. */
+const inEdition = (r: ReportDef) => edition() !== 'light' || !(LIGHT_HIDDEN_REPORTS as readonly string[]).includes(r.id);
+export const reportDef = (id: string) => REPORTS.find((r) => r.id === id && inEdition(r)) ?? null;
+export const editionReports = () => REPORTS.filter(inEdition);
 export const allowedReport = (def: ReportDef, perms: Set<Permission>) => def.perms.some((p) => perms.has(p));
 
 /** Day "YYYY-MM-DD" or month "YYYY-MM" in the site's time zone → [from, to) in UTC. */
