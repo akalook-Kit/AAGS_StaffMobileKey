@@ -1396,7 +1396,7 @@ async function main() {
     r('10/9/2026 9:00 AM', 'Battery level below 4.0 volts (1077)');
     const data = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(L.join('\r\n'), 'utf16le')]).toString('base64');
     const pv = (await call('POST', `${H}/lock-reports/preview`, maint19, { fileName: '205-new.xls', data })).json;
-    ok(pv.lockModels?.length === 5 && pv.suggestedDoor?.name === '205', 'preview offers the 5 lock models and suggests the door from the "Door" column');
+    ok(pv.lockModels?.length === 8 && pv.suggestedDoor?.name === '205', 'preview offers the 8 lock models (Novel 2.30, Classic Alfa 2.31) and suggests the door from the "Door" column');
     ok((await call('POST', `${H}/lock-reports`, maint19, { fileName: '205-new.xls', data, doorId: pv.suggestedDoor.id })).json.error?.code === 'LOCK_MODEL', 'the lock model must be chosen');
     const sv = (await call('POST', `${H}/lock-reports`, maint19, { fileName: '205-new.xls', data, doorId: pv.suggestedDoor.id, lockModel: 'signature-rfid' })).json;
     const rep = (await call('GET', `${H}/lock-reports/${sv.id}`, tech19)).json;
@@ -1647,6 +1647,67 @@ async function main() {
     ok((await call('GET', `${API}/api/v1/me`, tina)).status === 401, 'ending a tester\'s access signs them out at once');
     ok((await call('POST', `${API}/api/v1/auth/login`, undefined, { email: 'tina.tester@example.org', password: 'Testing-the-demo-2026' })).json.error?.code === 'ACCESS_ENDED', 'and they cannot sign in again');
     ok((await call('POST', `${H}/feedback`, admin, { text: 'Feedback from the real site works too', rating: 5 })).status === 200, 'staff of a real site can send feedback too');
+  }
+
+  console.log('\n2.30: lock history: battery changes, parts changed, elimination judged from the lock report after the work');
+  {
+    const maint30 = await login('maint@khb.test'); const tech30 = await login('tech@khb.test');
+    const cat30 = (await call('GET', `${H}/lock-history/catalogue`, tech30)).json;
+    ok(cat30.recommended === 'industrial-alkaline' && cat30.parts.some((p: any) => p.novel) && cat30.models.some((m: any) => m.id === 'novel'), 'catalogue: parts (Novel ones included), battery types, industrial alkaline recommended');
+    const doors30 = (await call('GET', `${H}/resources?kind=door`, admin)).json;
+    const d108 = doors30.find((d: any) => d.name === '108');
+    ok(Boolean(d108), 'door 108 exists');
+    const W = `${H}/lock-history/${encodeURIComponent(d108.external_id)}`;
+    ok((await call('POST', `${W}/work`, rest, { doneOn: '2026-10-01', parts: ['batteries'], batteryType: 'industrial-alkaline' })).status === 403, 'only maintenance can record work on a lock');
+    ok((await call('POST', `${W}/work`, tech30, { doneOn: '2026-10-01', parts: ['batteries', 'battery-cable'] })).json.error?.code === 'BATTERY_TYPE', 'the type of the batteries fitted must be given');
+    const w1 = await call('POST', `${W}/work`, tech30, { doneOn: '2026-10-01', parts: ['batteries', 'battery-cable'], batteryType: 'industrial-alkaline', batteryBrand: 'Procell', doneBy: 'e2e technician', notes: 'cable pinched behind the escutcheon', lockModel: 'signature-rfid' });
+    ok(w1.status === 200 && w1.json.id, 'the technician records new batteries (industrial alkaline) and a new battery cable');
+    let h30 = (await call('GET', W, tech30)).json;
+    ok(h30.work[0]?.verdict === 'waiting' && h30.lockModel === 'signature-rfid', `before a report covers the time after it: "${h30.work[0]?.title}"`);
+    // The lock report: a set that drained in September (4.8 → 4.0 V in 4 weeks), then the swap on 1 Oct, then slow.
+    const L: string[] = ['User group\tCard name\tRegistration No.\tTime\tEvent\tMain guest room\tUser ID\tLast name\tFirst name\tIssued by'];
+    const r = (t: string, ev: string, card = 'Door Unit Internal') => L.push(`n/a\t${card}\tn/a\t${t}\t${ev}\t108\t\t\t\t`);
+    r('11/5/2026 9:00 AM', 'Battery level below 4.8 volts (1081)');
+    r('10/20/2026 9:00 AM', 'Battery level below 4.8 volts (1081)');
+    r('10/1/2026 11:00 AM', 'Battery level below 4.8 volts (1081)');
+    r('10/1/2026 10:00 AM', 'Battery exchanged (0528)');
+    r('9/29/2026 9:00 AM', 'Battery level below 4.0 volts (1077)');
+    r('9/20/2026 9:00 AM', 'Battery level below 4.2 volts (1078)');
+    r('9/10/2026 9:00 AM', 'Battery level below 4.4 volts (1079)');
+    r('9/1/2026 8:00 AM', 'Battery level below 4.8 volts (1081)');
+    r('9/1/2026 7:00 AM', 'Battery exchanged (0528)');
+    for (let d = 2; d <= 28; d += 2) { r(`9/${d}/2026 8:10 AM`, 'The door is opened (0912)'); r(`9/${d}/2026 8:09 AM`, 'Staff card accepted (0064)', 'Staff'); }
+    const data30 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(L.join('\r\n'), 'utf16le')]).toString('base64');
+    const up30 = await call('POST', `${H}/lock-reports`, maint30, { fileName: '108.xls', data: data30, doorId: d108.external_id, lockModel: 'signature-rfid' });
+    ok(up30.status === 200, 'the lock report of 108 is uploaded');
+    h30 = (await call('GET', W, tech30)).json;
+    const j = h30.work[0];
+    ok(j?.verdict === 'fixed' && j.before?.per30Days > 0.5 && j.after?.per30Days === 0, `judged from the report: "${j?.title}" (${j?.before?.per30Days} → ${j?.after?.per30Days} V / 30 days)`, j);
+    ok(h30.batteries.count >= 2 && h30.batteries.changes.some((c: any) => c.batteryTypeName?.startsWith('Industrial')), `battery changes counted: ${h30.batteries.count}, with the type fitted`);
+    ok(h30.elimination.state === 'solved' && h30.elimination.next === null, 'the lock is marked solved; nothing more to check');
+    const set1001 = h30.sets?.find((t: any) => t.from.startsWith('2026-10-01'));
+    ok(h30.sets?.length >= 2 && set1001?.work?.[0]?.parts?.includes('Battery cable replaced') && set1001.openingsPerDay !== undefined, `battery sets from the report, with the work done when each was fitted (${h30.sets?.length} sets)`);
+    // 2.31 VingCard Classic Alfa (offline): LCU, LCA, lockcase and battery holder; no door sensor, openings from cards.
+    ok(cat30.models.some((m: any) => m.id === 'classic-alfa') && ['lcu', 'lca', 'classic-lockcase'].every((id) => cat30.parts.some((p: any) => p.id === id && p.only?.includes('classic-alfa'))), 'Classic Alfa has its parts: LCU, LCA, lockcase (and battery holder)');
+    const d106 = doors30.find((d: any) => d.name === '106');
+    const W3 = `${H}/lock-history/${encodeURIComponent(d106.external_id)}`;
+    ok((await call('POST', `${W3}/work`, tech30, { doneOn: '2026-07-22', parts: ['lcu'], lockModel: 'classic-alfa', notes: 'From the paper log: 22/07/2026 LCO' })).status === 200, 'an LCU change on a Classic Alfa lock is recorded (from its paper log)');
+    const h3 = (await call('GET', W3, tech30)).json;
+    ok(h3.lockModelName === 'VingCard Classic Alfa (offline)' && !h3.elimination.remaining.includes('Bluetooth (mobile keys)') && !h3.elimination.remaining.includes('Online radio and gateway'), `elimination for Classic Alfa skips Bluetooth and online radio: ${h3.elimination.remaining.join(', ')}`);
+    // A second lock: batteries needed again 30 days after a reader swap = still draining; next step suggested.
+    const d107 = doors30.find((d: any) => d.name === '107');
+    const W2 = `${H}/lock-history/${encodeURIComponent(d107.external_id)}`;
+    await call('POST', `${W2}/work`, tech30, { doneOn: '2026-09-01', parts: ['batteries', 'reader'], batteryType: 'alkaline' });
+    await call('POST', `${W2}/work`, tech30, { doneOn: '2026-10-01', parts: ['batteries'], batteryType: 'industrial-alkaline' });
+    const h2 = (await call('GET', W2, tech30)).json;
+    ok(h2.work[0].verdict === 'draining' && h2.work[0].againInDays === 30, `reader swap: "${h2.work[0].title}"`);
+    ok(h2.batteries.notRecommended.length === 1, 'consumer alkaline batteries are flagged (industrial alkaline recommended)');
+    ok(h2.elimination.next?.group === 'power', `next to check: ${h2.elimination.next?.name}`);
+    const list30 = (await call('GET', `${H}/lock-history`, tech30)).json;
+    ok(list30.locks.some((x: any) => x.doorName === '108' && x.state === 'solved') && list30.locks.some((x: any) => x.doorName === '107'), 'both locks listed with their state');
+    ok(Array.isArray(list30.years) && list30.years.some((y: any) => y.year === '2026'), `days a set by year, all locks: ${list30.years.map((y: any) => `${y.year} ${y.medianDays} d`).join(', ')}`);
+    ok((await call('DELETE', `${W2}/work/${h2.work[1].id}`, tech30)).status === 403 && (await call('DELETE', `${W2}/work/${h2.work[1].id}`, maint30)).status === 200, 'only battery managers remove a record of work');
+    ok((await call('GET', W, lakeAdmin)).status === 403, 'another hotel cannot see it');
   }
 
   console.log('\n2.27: Reports (daily and monthly, PDF, CSV, e-mail), Visionline and portal setup reports, languages');

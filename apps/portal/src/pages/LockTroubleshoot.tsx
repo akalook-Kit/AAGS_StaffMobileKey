@@ -4,6 +4,7 @@ import { api } from '../api';
 import { useHotel } from '../App';
 import { Columns, DataTable, Kpi, NoData, VizCard, useWidth } from '../components/charts';
 import { Drawer, ErrorNote, PageHead, fmt, useApi } from '../ui';
+import { LockHistoryList } from './LockHistory';
 
 /**
  * 2.18 Lock troubleshooting, mainly for offline locks: the event report of one lock (exported from Visionline) is
@@ -19,7 +20,7 @@ interface Analysis {
   period: { from: string | null; to: string | null; days: number }; window: { from: string | null; to: string | null; days: number; earlier: number };
   events: number; clockLost: number; verdict?: 'attention' | 'check' | 'ok'; actions?: { level: Finding['level']; text: string }[];
   quality?: { duplicates: number; invalidTimes: number; clockLost: number; future: number; dateOrder: string | null; ignoredReadings: number };
-  usage: { openings: number; openedFromOutside: number; openedFromInside: number; mechanicalKey: number; staffCards: number; guestCards: number; refused: number; leftOpen: number; deadbolt: number; deadboltReleased?: number; perDay: number;
+  usage: { openings: number; openedFromOutside: number; openedFromInside: number; mechanicalKey: number; staffCards: number; guestCards: number; refused: number; leftOpen: number; deadbolt: number; deadboltReleased?: number; perDay: number; openingsFrom?: 'door sensor' | 'cards accepted';
     byCardType?: { card: string; n: number }[]; hourly?: number[]; weekday?: number[]; busiestHours?: { h: number; n: number }[]; nightOpenings?: number };
   refusedBy?: { code: number; name: string; n: number; recent: number; meaning?: string | null; expected?: boolean }[];
   door?: { leftOpenRecent: number; longestOpenMinutes: number | null; medianOpenMinutes: number | null; openedWithoutCredential: string[] };
@@ -68,10 +69,12 @@ function ReportList() {
   const rows = list.data ?? [];
   return (
     <>
-      <PageHead title="Lock troubleshooting" intro={<>Mainly for locks that are not online. Upload the event report of one lock to see how often it is used, how fast its batteries go down, which faults it reports and what to do. Names and card numbers in the file are not kept.</>}>
+      <PageHead title="Lock troubleshooting" intro={<>Find why a lock drains its batteries. Record each battery change and part changed (elimination method), and upload the lock's event report: the portal shows how often it is used, how fast its batteries go down, its faults, and whether the batteries are fine since the last swap. Names and card numbers in the files are not kept.</>}>
         {att.data?.batteryMonitoring && <Link className="btn" to="/battery">Battery status</Link>}
         {can('battery.manage') && <button className="btn primary" onClick={() => setUpload(true)}>Upload a lock report</button>}
       </PageHead>
+      <LockHistoryList />
+      <h2 className="section-title">Lock reports</h2>
       <ErrorNote error={list.error} />
       {!rows.length && !list.loading && (
         <div className="panel">
@@ -205,6 +208,7 @@ function ReportView({ id }: { id: string }) {
     <div className="lock-report">
       <PageHead title={`Lock ${r.data.doorName}`} intro={<><strong>{r.data.lockModelName ?? 'Lock model not given'}</strong> · door {r.data.doorName}. Events from {lt(x.period.from, false)} to {lt(x.period.to, false)} ({x.events.toLocaleString()} events, file {r.data.fileName}). Uploaded {fmt.dt(r.data.uploadedAt)}{r.data.uploadedBy ? ` by ${r.data.uploadedBy}` : ''}.{x.window.earlier > 0 && <> Rates use the last {Math.round(x.window.days)} days ({lt(x.window.from, false)} onwards); {x.window.earlier} older events are counted in the totals only.</>}</>}>
         <Link className="btn no-print" to="/lock-troubleshoot">All lock reports</Link>
+        <Link className="btn no-print" to={`/lock-troubleshoot/door/${encodeURIComponent(r.data.doorId)}`} data-tip="Battery changes, work done on this lock and whether the batteries are fine since.">Lock history</Link>
         <button className="btn no-print" onClick={() => window.print()}>Print</button>
         {can('maintenance.work') && att.data?.maintenance && act.length > 0 && (ticket
           ? <Link className="btn no-print" to={`/maintenance/${ticket.id}`}>Request #{ticket.number}</Link>
@@ -226,7 +230,7 @@ function ReportView({ id }: { id: string }) {
         </section>
       )}
       <div className="kpis">
-        <Kpi label="Openings a day" value={String(x.usage.perDay)} sub={`${x.usage.staffCards} staff · ${x.usage.guestCards} guest card · ${x.usage.openedFromInside} from inside`} />
+        <Kpi label="Openings a day" value={String(x.usage.perDay)} sub={x.usage.openingsFrom === 'cards accepted' ? `${x.usage.staffCards} staff · ${x.usage.guestCards} guest card (no door sensor: counted from cards accepted)` : `${x.usage.staffCards} staff · ${x.usage.guestCards} guest card · ${x.usage.openedFromInside} from inside`} />
         <Kpi label="Battery use" value={b.avgDropPer30Days != null ? `${b.avgDropPer30Days.toFixed(2)} V` : '—'} sub={b.avgDropPer30Days != null ? 'per 30 days (average of the battery periods)' : 'not enough readings in the report'} tone={b.estimatedDaysPerSet != null && b.estimatedDaysPerSet < 90 ? 'bad' : undefined} />
         {b.lasted && (b.lasted.sets.length > 0 || b.lasted.currentDays != null)
           ? <Kpi label={b.lasted.sets.length ? 'Sets lasted' : 'Batteries in for'} value={b.lasted.sets.length ? `${b.lasted.sets.map((x) => Math.round(x.days)).join(' · ')} days` : `${Math.round(b.lasted.currentDays!)} days`}

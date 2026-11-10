@@ -41,6 +41,7 @@ import { InvitePage } from './pages/Invite';
 import { DemoPage } from './pages/Demo';
 import { FeedbackButton } from './components/Feedback';
 import { ReportsPage } from './pages/Reports';
+import { DoorHistoryPage } from './pages/LockHistory';
 import { TipLayer } from './components/Tips';
 import { LANGS, hasLangChoice, lang, langChoice, setLang, tr, type LangChoice } from './i18n';
 
@@ -160,7 +161,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     { id: 'locks', label: 'Locks', tip: 'Batteries, online locks and gateways, troubleshooting and maintenance.', items: [
       { to: '/battery', label: 'Battery status', tip: "Battery state of every lock, from the locks' own alarms. Record new batteries here.", show: can('battery.read') && Boolean(attention.data?.batteryMonitoring), badge: (attention.data?.battery?.critical ?? 0) > 0 ? <span className="count" title={tr('Critical batteries')}>{attention.data.battery.critical}</span> : null, count: attention.data?.battery?.critical ?? 0 },
       { to: '/locks-online', label: 'Online locks & gateways', tip: 'Online locks and gateways that are out of contact, with their EEID, so engineering can find them.', show: can('resources.read'), badge: (attention.data?.offlineLocks ?? 0) > 0 ? <span className="count" title={tr('Locks offline now')}>{attention.data.offlineLocks}</span> : null, count: attention.data?.offlineLocks ?? 0 },
-      { to: '/lock-troubleshoot', label: 'Lock troubleshooting', tip: "Read a lock's event report to find why it drains batteries, refuses cards or misbehaves.", show: can('battery.read') },
+      { to: '/lock-troubleshoot', label: 'Lock troubleshooting', tip: "Find why a lock drains its batteries: battery changes, parts changed (elimination method) and the lock's event reports.", show: can('battery.read') },
       { to: '/maintenance', label: 'Maintenance', tip: 'Maintenance requests for locks and doors: open, assign, solve.', show: can('maintenance.read') && Boolean(attention.data?.maintenance), badge: (attention.data?.maintenance?.open ?? 0) > 0 ? <span className="count" title={tr('Open requests')}>{attention.data.maintenance.open}</span> : null, count: attention.data?.maintenance?.open ?? 0 },
     ] },
     { id: 'admin', label: 'Administration', tip: 'Users, settings, connector, setup reports and the audit trail (administrators).', items: [
@@ -266,6 +267,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <Route path="/battery/:doorId" element={<BatteryPage />} />
             <Route path="/locks-online" element={<OnlineLocksPage />} />
             <Route path="/lock-troubleshoot" element={<LockTroubleshootPage />} />
+            <Route path="/lock-troubleshoot/door/:doorId" element={<DoorHistoryPage />} />
             <Route path="/lock-troubleshoot/:reportId" element={<LockTroubleshootPage />} />
             <Route path="/maintenance" element={<MaintenancePage />} />
             <Route path="/maintenance/:ticketId" element={<MaintenancePage />} />

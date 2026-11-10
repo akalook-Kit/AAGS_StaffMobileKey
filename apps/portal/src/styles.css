@@ -965,3 +965,9 @@ tr.row-warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 :root[data-theme="dark"] .tip-bubble { background: #f6f1ea; color: #1d1a17; } :root[data-theme="dark"] .tip-right::before { border-right-color: #f6f1ea; }
 @keyframes tip-in { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .tip-bubble { animation: none; } }
+/* 2.30 Lock history */
+.rw-group { border: 1px solid var(--line, #ddd); border-radius: 8px; padding: 6px 10px 8px; margin: 0 0 8px; }
+.rw-group legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
+.rw-group .check { display: block; margin: 3px 0; }
+.elim-next { border-left: 3px solid var(--brass, #b08d57); padding-left: 10px; margin-top: 6px; }
+.warn-text { color: var(--warn, #b7791f); }

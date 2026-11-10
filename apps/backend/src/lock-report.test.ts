@@ -80,3 +80,26 @@ describe('lock event report (2.18 troubleshooting)', () => {
     expect(() => parseLockReport(Buffer.from('Name,Group\nA,B\n'))).toThrow(/lock event report/);
   });
 });
+
+describe('VingCard Classic report without a door sensor (2.31)', () => {
+  it('counts openings from cards accepted, and gives each battery set its use and errors', () => {
+    const L = ['User group\tCard name\tRegistration No.\tTime\tEvent\tMain guest room\tUser ID\tLast name\tFirst name\tIssued by'];
+    const r = (t: string, ev: string, card = 'Door Unit Internal') => L.push(`n/a\t${card}\tn/a\t${t}\t${ev}\t804\t\t\t\t`);
+    for (let d = 2; d <= 28; d++) { r(`${String(d).padStart(2, '0')}/09/2026 08:00`, 'Guest Card accepted (0067)', 'Guest (MC)'); r(`${String(d).padStart(2, '0')}/09/2026 09:00`, 'Staff card accepted (0064) (*)', 'Staff (SC)'); }
+    r('20/09/2026 10:00', 'Door unit reset, nothing changed (0576)');
+    r('15/09/2026 10:00', 'Battery level below 4.0 volts (1077)');
+    r('05/09/2026 10:00', 'Battery level below 4.4 volts (1079)');
+    r('01/09/2026 10:05', 'Battery level below 4.8 volts (1081)');
+    r('01/09/2026 10:00', 'Battery exchanged (0528)');
+    r('29/09/2026 10:00', 'Battery exchanged (0528)');
+    r('30/09/2026 10:00', 'Guest Card accepted (0067)', 'Guest (MC)');
+    const buf = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(L.join('\r\n'), 'utf16le')]);
+    const a = analyseLockReport(parseLockReport(buf), Date.parse('2026-10-01T00:00:00Z'));
+    expect(a.usage.openingsFrom).toBe('cards accepted');
+    expect(a.usage.openings).toBe(55);
+    const set = a.battery.periods.find((p) => p.from.startsWith('2026-09-01'))!;
+    expect(set.openingsPerDay).toBe(1.9);
+    expect(set.restarts).toBe(1);
+    expect(set.reached.find((x) => x.volts === 4.0)?.days).toBe(14);
+  });
+});

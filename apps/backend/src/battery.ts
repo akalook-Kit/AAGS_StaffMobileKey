@@ -156,7 +156,7 @@ export async function applyBatteryEvent(c: pg.PoolClient, hotelId: string, ctx: 
 }
 
 /** Remember the newest battery change of a door (and forget the "program the lock" request of an older change). */
-async function noteChange(c: pg.PoolClient, hotelId: string, doorId: string, at: Date, source: 'event' | 'inferred' | 'maintenance', detail: string) {
+export async function noteChange(c: pg.PoolClient, hotelId: string, doorId: string, at: Date, source: 'event' | 'inferred' | 'maintenance', detail: string) {
   // 2.20 Every change is kept, so the portal can say how long each set lasted.
   await c.query(`INSERT INTO battery_changes (hotel_id, door_id, at, source, detail) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, [hotelId, doorId, at, source, detail]);
   const r = await c.query(`UPDATE battery_status SET last_change_at=$3, last_change_source=$4, last_change_detail=$5, reprogram_ticket_id=NULL, reprogram_at=NULL

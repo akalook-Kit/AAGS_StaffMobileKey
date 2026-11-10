@@ -203,3 +203,8 @@ Object.assign(FR, {
  "A PDF with a fingerprint: Verify a PDF (Event log) shows whether anyone changed it.": "Un PDF avec empreinte : « Vérifier un PDF » (Journal des événements) montre s'il a été modifié.",
  "A file that opens in Excel, with every line of the report.": "Un fichier qui s'ouvre dans Excel, avec toutes les lignes du rapport."
 } satisfies Record<string, string>);
+Object.assign(FR, {
+  "Find why a lock drains its batteries: battery changes, parts changed (elimination method) and the lock's event reports.": "Trouver pourquoi une serrure use ses piles : changements de piles, pièces changées (méthode d'élimination) et rapports d'événements de la serrure.",
+  'Record batteries or parts changed on a lock, and what was checked. The portal then tells from the next lock report whether it worked.': "Enregistrer les piles ou pièces changées sur une serrure et ce qui a été vérifié. Le portail dit ensuite, d'après le rapport suivant, si cela a réglé le problème.",
+  'Battery changes, work done on this lock and whether the batteries are fine since.': 'Changements de piles, travaux faits sur cette serrure et si les piles tiennent depuis.',
+} satisfies Record<string, string>);

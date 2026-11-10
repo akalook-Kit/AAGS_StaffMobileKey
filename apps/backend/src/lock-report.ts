@@ -16,7 +16,10 @@ export const LOCK_MODELS = [
   { id: 'signature-rfid', name: 'VingCard Signature RFID' },
   { id: 'essence', name: 'VingCard Essence' },
   { id: 'classic-rfid', name: 'VingCard Classic RFID' },
+  { id: 'classic-alfa', name: 'VingCard Classic Alfa (offline)' },
   { id: 'allure', name: 'VingCard Allure' },
+  { id: 'novel', name: 'VingCard Novel' },
+  { id: 'novel-battery-free', name: 'VingCard Novel battery-free' },
   { id: 'other', name: 'Other / not sure' },
 ] as const;
 export const lockModelName = (id: string | null | undefined) => LOCK_MODELS.find((m) => m.id === id)?.name ?? null;
@@ -184,6 +187,8 @@ export interface BatteryPeriod {
   lowestAt: string | null; days: number; dropPer30Days: number | null; openings: number; dropPer1000Openings: number | null; alarms: number;
   /** 2.18 Days from the start of the period to the first reading at or below each level (null = not reached). */
   reached: { volts: number; days: number | null }[]; firmwareAlarms: number;
+  /** 2.31 Per set: use, deadbolt, restarts, card and internal errors, days to the first battery alarm. */
+  openingsPerDay?: number | null; deadbolt?: number; restarts?: number; cardErrors?: number; internalErrors?: number; firstAlarmDays?: number | null;
 }
 
 /** 2.19 One step of the elimination method. */
@@ -204,6 +209,11 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   const clockLost = all.filter((e) => e.t && e.t < '2000').length;
   const future = all.filter((e) => e.t && ms(e.t) > now + 2 * DAY).length;
   const count = (list: readonly number[], src: LockEvent[] = all) => src.filter((e) => isIn(e.code, list)).length;
+  // 2.31 Locks without a door sensor (VingCard Classic: no "The door is opened" event) count an opening for each card
+  // accepted, power open or metal key, so use per day and battery use per 1,000 openings work for them too.
+  const sensor = all.some((e) => isIn(e.code, OPENING));
+  const isOpening = (e: LockEvent): boolean => (sensor ? isIn(e.code, OPENING) : isIn(e.code, [...C.staffAccepted, ...C.guestAccepted, ...C.mechanicalKey, 76]) || (/accepted|power open/i.test(e.name) && !/^error/i.test(e.name)));
+  const countOpen = (src: LockEvent[] = all) => src.filter(isOpening).length;
   const from = ev[0]?.t ?? null, to = ev[ev.length - 1]?.t ?? null;
   // Rates (a day, a week) use the recent stretch without long gaps: a lock's memory can also hold events from months
   // or years before, when it was hardly used or its clock was wrong.
@@ -216,17 +226,17 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   const perDay = (n: number) => r1(n / spanDays);
 
   // ---- Use ----------------------------------------------------------------------------------------------------------
-  const openings = count(OPENING);
+  const openings = countOpen();
   const byCard = new Map<string, number>();
   for (const e of all) if (isIn(e.code, [...C.staffAccepted, ...C.guestAccepted]) || /accepted/i.test(e.name)) { const k = e.card || '(card type not given)'; byCard.set(k, (byCard.get(k) ?? 0) + 1); }
   const hourly = Array.from({ length: 24 }, () => 0), weekday = Array.from({ length: 7 }, () => 0);
-  for (const e of recent) if (isIn(e.code, OPENING)) { hourly[Number(e.t!.slice(11, 13))]!++; weekday[new Date(ms(e.t!)).getUTCDay()]!++; }
+  for (const e of recent) if (isOpening(e)) { hourly[Number(e.t!.slice(11, 13))]!++; weekday[new Date(ms(e.t!)).getUTCDay()]!++; }
   const busiest = hourly.map((n, h) => ({ h, n })).sort((a, b) => b.n - a.n).slice(0, 3).filter((x) => x.n > 0);
   const night = hourly.slice(0, 6).reduce((s, x) => s + x, 0);
   const usage = {
-    openings, openedFromOutside: count(C.opened), openedFromInside: count(C.openedInside), mechanicalKey: count(C.mechanicalKey),
+    openings, openingsFrom: sensor ? 'door sensor' as const : 'cards accepted' as const, openedFromOutside: count(C.opened), openedFromInside: count(C.openedInside), mechanicalKey: count(C.mechanicalKey),
     staffCards: count(C.staffAccepted), guestCards: count(C.guestAccepted), refused: 0, leftOpen: count(C.ajar), deadbolt: count(C.deadbolt), deadboltReleased: count(C.deadboltReleased),
-    perDay: perDay(count(OPENING, recent)), byCardType: [...byCard.entries()].map(([card, n]) => ({ card, n })).sort((a, b) => b.n - a.n).slice(0, 12),
+    perDay: perDay(countOpen(recent)), byCardType: [...byCard.entries()].map(([card, n]) => ({ card, n })).sort((a, b) => b.n - a.n).slice(0, 12),
     hourly, weekday, busiestHours: busiest, nightOpenings: night,
   };
 
@@ -308,20 +318,24 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
     const first = rs[0] ?? null;
     const lowest = rs.reduce<{ t: string; volts: number } | null>((m, r) => (!m || r.volts < m.volts ? r : m), null);
     const d = Math.max(0, (ms(b) - ms(a)) / DAY);
-    const op = recent.filter((e) => e.t! >= a && e.t! < end && isIn(e.code, OPENING)).length;
+    const op = recent.filter((e) => e.t! >= a && e.t! < end && isOpening(e)).length;
     // Consumption: from the first reading to the moment the lowest level was first reached.
     let drop: number | null = null, per1000: number | null = null;
     const dd = first && lowest ? (ms(lowest.t) - ms(first.t)) / DAY : 0;
     if (first && lowest && lowest.volts < first.volts && dd >= 1) {
       drop = r2(((first.volts - lowest.volts) / dd) * 30);
-      const opBetween = recent.filter((e) => e.t! >= first.t && e.t! <= lowest.t && isIn(e.code, OPENING)).length;
+      const opBetween = recent.filter((e) => e.t! >= first.t && e.t! <= lowest.t && isOpening(e)).length;
       per1000 = opBetween >= 20 ? r2(((first.volts - lowest.volts) / opBetween) * 1000) : null;
     }
     const startedBy: BatteryPeriod['startedBy'] = i === 0 ? 'report' : exchanges[i - 1]!.how.startsWith('Battery') ? 'exchange' : 'reading';
     periods.push({ from: a, to: b, startedBy, firstVolts: first?.volts ?? null, lowestVolts: lowest?.volts ?? null, lowestAt: lowest?.t ?? null, days: r1(d),
       dropPer30Days: drop, openings: op, dropPer1000Openings: per1000, alarms: alarms.filter((x) => x.t >= a && x.t < end).length,
       reached: levels.map((v) => { const h = rs.find((r) => r.volts <= v + 1e-6); return { volts: v, days: h && startedBy !== 'report' ? r1((ms(h.t) - ms(a)) / DAY) : null }; }),
-      firmwareAlarms: firmwareAlarms.filter((x) => x.t >= a && x.t < end).length });
+      firmwareAlarms: firmwareAlarms.filter((x) => x.t >= a && x.t < end).length,
+      ...(() => { const inP = all.filter((e) => e.t && !bogus(e.t) && e.t >= a && e.t < end); const n = (l: readonly number[]) => inP.filter((e) => isIn(e.code, l)).length;
+        const firstAlarm = [...alarms, ...firmwareAlarms].filter((x) => x.t >= a && x.t < end).map((x) => x.t).sort()[0];
+        return { openingsPerDay: d >= 1 ? r1(op / d) : null, deadbolt: n(C.deadbolt), restarts: n(C.restart), cardErrors: n(C.cardRead) + n(C.data), internalErrors: n(C.internal),
+          firstAlarmDays: firstAlarm && startedBy !== 'report' ? r1((ms(firstAlarm) - ms(a)) / DAY) : null }; })() });
   }
   const rates = periods.map((x) => x.dropPer30Days).filter((x): x is number => x != null && x > 0);
   const avgDrop = rates.length ? r2(rates.reduce((s, x) => s + x, 0) / rates.length) : null;
@@ -364,7 +378,7 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   const wk = (t: string) => { const k = weekOf(t); let x = weeks.get(k); if (!x) { x = { week: k, openings: 0, refused: 0, leftOpen: 0, internal: 0, cardReading: 0, restarts: 0, batteryAlarms: 0, lowest: null }; weeks.set(k, x); } return x; };
   for (const e of recent) {
     const x = wk(e.t!);
-    if (isIn(e.code, OPENING)) x.openings++;
+    if (isOpening(e)) x.openings++;
     else if (isIn(e.code, C.ajar)) x.leftOpen++;
     else if (isIn(e.code, C.internal)) x.internal++;
     else if (isIn(e.code, C.cardRead)) x.cardReading++;
@@ -377,7 +391,7 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
 
   // Openings per day (lock time).
   const daily = new Map<string, number>();
-  for (const e of recent) if (isIn(e.code, OPENING)) daily.set(e.t!.slice(0, 10), (daily.get(e.t!.slice(0, 10)) ?? 0) + 1);
+  for (const e of recent) if (isOpening(e)) daily.set(e.t!.slice(0, 10), (daily.get(e.t!.slice(0, 10)) ?? 0) + 1);
   const days: { day: string; openings: number }[] = [];
   if (wFrom && to) for (let d = ms(wFrom.slice(0, 10) + 'T00:00'); d <= ms(to.slice(0, 10) + 'T00:00') && days.length < 800; d += DAY) {
     const k = new Date(d).toISOString().slice(0, 10);

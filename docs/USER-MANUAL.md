@@ -1,4 +1,4 @@
-# Access Monitoring Tool — user manual (2.29)
+# Access Monitoring Tool — user manual (2.31)
 
 New here? Start with **QUICK-START.md** (5 steps, adding people, everyday tasks).
 
@@ -270,6 +270,43 @@ Visionline cannot be verified by its holder: read it on an encoder (Card lookup)
   ("Battery level below 4.8 volts", or 9.0 V for 6–9 V packs). That reading now closes the battery alarm and resolves
   its maintenance request, and counts as a battery change. Settings → Battery & maintenance can switch this off.
 - *(2.19 changed how battery alarms after new batteries and the "stale" wording are handled; see 5c.)*
+- **Lock history and the elimination method (2.30)**, on *Locks → Lock troubleshooting*, for every hotel. The
+  first table lists each lock with a history: its state (*Draining*, *Waiting for a report*, *Solved*), how many
+  times its batteries were changed, how many days a set lasts, the last work and the **next part to check**.
+  1. After each visit, **Record work on a lock**: the date, the lock model, the technician and everything changed or
+     checked, grouped in the order of the elimination method (simplest first): *Batteries* → *Battery holder,
+     contacts and cable* → *Door and lock mechanics* (strike, alignment, screws and spindle, handle springs,
+     lockcase, closer) → *Card reader* → *Bluetooth* → *Online radio and gateway* → *Door unit electronics and
+     firmware*. **Novel** locks show their own parts (reader unit, inside unit / battery pack, lockcase, power module
+     of the battery-free model). When batteries are fitted, their **type** is required: **industrial alkaline AA is
+     recommended**; others are flagged.
+  2. About 3 weeks later, read the lock and upload its report as usual. The lock's page (click the door) compares
+     battery use **before and after** each piece of work and says: *Fixed* (use fell by half or more: that part was
+     the cause), *Better*, *No change* (that part was not the cause), *Worse*, *Still draining* (batteries needed
+     again within 4 months, or alarms since), *Batteries fine*, or *Waiting for a report* (with the date to read
+     the lock).
+  3. While the lock still drains, the page names the **next part to check**: the first one not yet changed or
+     found OK, starting with what the lock report points to (*likely*).
+
+  **2.31:**
+  - **VingCard Classic Alfa (offline)** is a lock model with its own parts: **LCU** (lock control unit, inside),
+    **LCA** (outside unit with the card reader), **lockcase** and **battery holder** (and the batteries). Bluetooth
+    and online radio are left out of its elimination steps.
+  - **Add from the paper log** (on the lock's page): type the battery card kept in the lock, one line per entry —
+    `14/04/2026 LCA + piles Serge`, `22/07/2026 LCU`, `04/09/2026 porte batterie Augustin`, `02/10/2026 Augustin`.
+    *Piles*, *LCU* (also written LCO / LGU), *LCA*, *porte batterie*, *lock case*, *câble*, *Varta industriel* are
+    recognised; a line with only a date and a name is a battery change. The lines are shown for checking before
+    they are saved; lines already recorded are left out.
+  - **Battery sets in the lock reports**: every set from one battery change to the next, with what was changed when
+    it was fitted, how long it lasted, openings a day, days to 4.4 / 4.2 / 4.0 V, the first battery alarm, restarts
+    and card errors. Sets shorter than 4 months are in red. If the sets keep lasting the same after a part was
+    changed, that part was not the cause.
+  - Locks without a door sensor (Classic) count an opening for each card accepted, power open or metal key.
+  - The locks table shows **days a set lasted, by year, over all locks**: a drop on many locks at once points to a
+    common cause (battery supply, a setting, firmware).
+  The lock's page also lists every battery change (from Visionline, the lock reports and the work recorded) with
+  how long each set lasted and the batteries fitted, the battery level from all its reports with the work marked,
+  and its reports. Records of work can be removed by battery managers; technicians can record work.
 - **Lock troubleshooting** (Building → Lock troubleshooting, or *Troubleshoot a lock* on Battery status), mainly for
   offline locks. It works whether or not battery monitoring is switched on.
   1. Read the lock with the service device and upload its events to Visionline as usual.

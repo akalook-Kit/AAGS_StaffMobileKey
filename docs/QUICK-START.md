@@ -1,4 +1,4 @@
-# Access Monitoring Tool — quick start (2.29.0)
+# Access Monitoring Tool — quick start (2.31.0)
 
 ## What it is and what you need
 
@@ -8,7 +8,7 @@ requests, watches lock batteries and supports emergencies. It works for a hotel 
 hospital, a school). Staff mobile keys are an optional module, off by default.
 
 It has two parts: the **portal** (with its database) and the **connector**, which talks to Visionline. One file
-installs either or both: `AccessMonitoringTool-Server-2.29.0.msi`.
+installs either or both: `AccessMonitoringTool-Server-2.31.0.msi`.
 
 | | A. One computer | B. Two computers |
 |---|---|---|
@@ -59,6 +59,7 @@ leaves.
 | I want to… | Go to |
 |---|---|
 | See who opened a door | Event log (Print = verifiable PDF) |
+| Find why a lock drains its batteries | Locks → Lock troubleshooting: Record work on a lock (batteries with their type, parts changed), then upload its report 3 weeks later |
 | Daily or monthly figures: guest keycards issued, staff keycards issued, who holds staff keycards, refused entries, batteries | Reports (PDF, Excel, e-mail now, or e-mailed every day / month) |
 | Visionline version, AES, number of locks on one page | Administration → System setup reports → Visionline setup report |
 | Use the portal in French | Automatic when the computer / browser is in French; or Français at the bottom of the menu (also on the sign-in page) |
