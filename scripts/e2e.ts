@@ -1707,6 +1707,18 @@ async function main() {
     ok(list30.locks.some((x: any) => x.doorName === '108' && x.state === 'solved') && list30.locks.some((x: any) => x.doorName === '107'), 'both locks listed with their state');
     ok(Array.isArray(list30.years) && list30.years.some((y: any) => y.year === '2026'), `days a set by year, all locks: ${list30.years.map((y: any) => `${y.year} ${y.medianDays} d`).join(', ')}`);
     ok((await call('DELETE', `${W2}/work/${h2.work[1].id}`, tech30)).status === 403 && (await call('DELETE', `${W2}/work/${h2.work[1].id}`, maint30)).status === 200, 'only battery managers remove a record of work');
+    // 2.32 To do list, measured pack voltage, firmware upgrades before / after.
+    const w4 = await call('POST', `${W2}/work`, tech30, { doneOn: '2026-10-20', parts: ['batteries'], batteryType: 'industrial-alkaline', batteryBatch: 'LOT 2511', voltsBefore: 3.8, voltsAfter: 4.4 });
+    const h4 = (await call('GET', W2, tech30)).json;
+    ok(w4.status === 200 && h4.weakPacks?.[0]?.volts === 4.4 && h4.work.some((w: any) => w.batteryBatch === 'LOT 2511' && w.voltsBefore === 3.8), 'measured pack voltage and batch kept; a new pack at 4.4 V is flagged as old or weak stock');
+    ok(Array.isArray(h4.plan) && h4.plan.length > 0, `what to do on 107: ${h4.plan.map((p: any) => p.title).join(' / ')}`);
+    ok((await call('POST', `${H}/lock-history/firmware`, tech30, { doneOn: '2025-12-10' })).status === 403, 'only battery managers record a firmware upgrade');
+    const fw = await call('POST', `${H}/lock-history/firmware`, maint30, { doneOn: '2026-09-15', versionTo: 'test-1.2', doors: [d107.external_id], notes: 'e2e' });
+    const l4 = (await call('GET', `${H}/lock-history`, tech30)).json;
+    const f4 = l4.firmware?.find((f: any) => f.id === fw.json.id);
+    ok(fw.status === 200 && f4?.scope === '1 lock(s)' && f4.beforeSets >= 1, `firmware upgrade: sets ${f4?.beforeMedian} d before → ${f4?.afterMedian ?? '—'} d after`);
+    ok(l4.counts && typeof l4.total === 'number' && l4.locks.every((x: any) => Array.isArray(x.plan)), `locks counted by state: ${JSON.stringify(l4.counts)}`);
+    ok((await call('DELETE', `${H}/lock-history/firmware/${fw.json.id}`, maint30)).status === 200, 'a firmware upgrade can be removed');
     ok((await call('GET', W, lakeAdmin)).status === 403, 'another hotel cannot see it');
   }
 

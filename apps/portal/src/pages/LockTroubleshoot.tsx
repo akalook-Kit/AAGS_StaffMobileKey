@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useHotel } from '../App';
 import { Columns, DataTable, Kpi, NoData, VizCard, useWidth } from '../components/charts';
 import { Drawer, ErrorNote, PageHead, fmt, useApi } from '../ui';
-import { LockHistoryList } from './LockHistory';
+import { LockTodo, LockTrend, LocksTable, RecordWorkButton, type LockList } from './LockHistory';
 
 /**
  * 2.18 Lock troubleshooting, mainly for offline locks: the event report of one lock (exported from Visionline) is
@@ -61,49 +61,93 @@ function Steps() {
   );
 }
 
+/**
+ * 2.32 Lock troubleshooting for a whole hotel (Armel, 9 Nov: "review the size of the page … expect other locks"): one
+ * short page with the figures on top and tabs: To do (the technicians' round), Locks, Lock reports, How it works.
+ */
 function ReportList() {
   const { base, can } = useHotel();
-  const list = useApi<ReportRow[]>(`${base}/lock-reports`, []);
+  const [sp, setSp] = useSearchParams();
+  const tab = (['todo', 'locks', 'reports', 'how'] as const).find((t) => t === sp.get('tab')) ?? 'todo';
+  const hist = useApi<LockList>(`${base}/lock-history`, []);
+  const list = useApi<ReportRow[]>(tab === 'reports' ? `${base}/lock-reports` : null, [tab]);
   const att = useApi<any>(`${base}/attention`, []);
   const [upload, setUpload] = useState(false);
-  const rows = list.data ?? [];
+  const [q, setQ] = useState('');
+  const [page, setPage] = useState(0);
+  const rows = (list.data ?? []).filter((r) => !q || `${r.doorName} ${r.fileName}`.toLowerCase().includes(q.toLowerCase()));
+  const per = 25, pages = Math.max(1, Math.ceil(rows.length / per)), pg = Math.min(page, pages - 1);
+  const TABS: [typeof tab, string, string][] = [
+    ['todo', `To do${hist.data ? ` (${hist.data.locks.reduce((n, l) => n + l.plan.filter((p) => p.priority <= 5).length, 0)})` : ''}`, 'What to do on which lock, in order: the technicians\' round. Printable.'],
+    ['locks', `Locks${hist.data ? ` (${hist.data.total})` : ''}`, 'Every lock with a history: state, battery changes, last set, last work.'],
+    ['reports', 'Lock reports', 'The event reports uploaded, newest first.'],
+    ['how', 'How it works', 'The method, step by step.'],
+  ];
   return (
     <>
-      <PageHead title="Lock troubleshooting" intro={<>Find why a lock drains its batteries. Record each battery change and part changed (elimination method), and upload the lock's event report: the portal shows how often it is used, how fast its batteries go down, its faults, and whether the batteries are fine since the last swap. Names and card numbers in the files are not kept.</>}>
-        {att.data?.batteryMonitoring && <Link className="btn" to="/battery">Battery status</Link>}
-        {can('battery.manage') && <button className="btn primary" onClick={() => setUpload(true)}>Upload a lock report</button>}
+      <PageHead title="Lock troubleshooting" intro="Why locks drain their batteries, lock by lock, and what to do next.">
+        {att.data?.batteryMonitoring && <Link className="btn no-print" to="/battery">Battery status</Link>}
+        <span className="no-print"><RecordWorkButton onDone={() => void hist.reload()} /></span>
+        {can('battery.manage') && <button className="btn primary no-print" onClick={() => setUpload(true)}>Upload a lock report</button>}
       </PageHead>
-      <LockHistoryList />
-      <h2 className="section-title">Lock reports</h2>
-      <ErrorNote error={list.error} />
-      {!rows.length && !list.loading && (
-        <div className="panel">
-          <NoData text="No lock report yet" hint="Upload the events of a lock that drains its batteries or misbehaves." />
-          <Steps />
-        </div>
-      )}
-      {rows.length > 0 && (
-        <div className="panel" style={{ padding: 0 }}>
-          <table className="grid">
-            <thead><tr><th>Door and lock</th><th>Events from – to</th><th>Findings</th><th>Causes left</th><th className="num">Openings a day</th><th className="num">Battery use (V / 30 days)</th><th>Uploaded</th></tr></thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td><Link to={`/lock-troubleshoot/${r.id}`}><strong>{r.doorName}</strong></Link><div className="small muted">{r.lockModel ?? 'model not given'} · {r.fileName}</div></td>
-                  <td className="small">{lt(r.from, false)} – {lt(r.to, false)}</td>
-                  <td><div className="badges">{r.high > 0 && <span className="badge bad">{r.high} act now</span>}{r.medium > 0 && <span className="badge warn">{r.medium} to check</span>}{!r.high && !r.medium && <span className="badge ok">nothing found</span>}</div>{r.top && <div className="small muted" style={{ marginTop: 3 }}>{r.top}</div>}</td>
-                  <td className="small">{r.problemsFound ? <span className="badge bad">{r.problemsFound} found</span> : null} {r.stepsLeft != null ? `${r.stepsLeft} to check` : '—'}</td>
-                  <td className="num">{r.perDay ?? '—'}</td>
-                  <td className="num">{r.avgDropPer30Days != null ? Number(r.avgDropPer30Days).toFixed(2) : '—'}</td>
-                  <td className="small">{fmt.dt(r.uploadedAt)}{r.uploadedBy ? <div className="muted">{r.uploadedBy}</div> : null}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <ErrorNote error={hist.error} />
+      {hist.data && <LockTrend data={hist.data} onChange={() => void hist.reload()} />}
+      <div className="seg no-print" role="tablist" aria-label="Lock troubleshooting" style={{ margin: '12px 0' }}>
+        {TABS.map(([id, label, tip]) => <button key={id} type="button" role="tab" aria-selected={tab === id} aria-pressed={tab === id} data-tip={tip} onClick={() => setSp(id === 'todo' ? {} : { tab: id }, { replace: true })}>{label}</button>)}
+        {tab === 'todo' && <button type="button" className="btn small" style={{ marginLeft: 8 }} onClick={() => window.print()}>Print the round sheet</button>}
+      </div>
+      {tab === 'todo' && hist.data && <LockTodo data={hist.data} />}
+      {tab === 'locks' && hist.data && <LocksTable data={hist.data} />}
+      {tab === 'how' && <HowItWorks />}
+      {tab === 'reports' && <>
+        <ErrorNote error={list.error} />
+        {!rows.length && !list.loading && !q && (
+          <div className="panel">
+            <NoData text="No lock report yet" hint="Upload the events of a lock that drains its batteries or misbehaves." />
+            <Steps />
+          </div>
+        )}
+        {(rows.length > 0 || q) && (
+          <div className="panel" style={{ padding: 0 }}>
+            <div className="row lh-filters"><input className="search" placeholder="Door or file…" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} aria-label="Search the reports" /><span className="small muted">{rows.length} report(s)</span></div>
+            <div className="table-scroll"><table className="grid">
+              <thead><tr><th>Door and lock</th><th>Events from – to</th><th>Findings</th><th>Causes left</th><th className="num">Openings a day</th><th className="num">Battery use (V / 30 days)</th><th>Uploaded</th></tr></thead>
+              <tbody>
+                {rows.slice(pg * per, pg * per + per).map((r) => (
+                  <tr key={r.id}>
+                    <td><Link to={`/lock-troubleshoot/${r.id}`}><strong>{r.doorName}</strong></Link><div className="small muted">{r.lockModel ?? 'model not given'} · {r.fileName}</div></td>
+                    <td className="small">{lt(r.from, false)} – {lt(r.to, false)}</td>
+                    <td><div className="badges">{r.high > 0 && <span className="badge bad">{r.high} act now</span>}{r.medium > 0 && <span className="badge warn">{r.medium} to check</span>}{!r.high && !r.medium && <span className="badge ok">nothing found</span>}</div>{r.top && <div className="small muted" style={{ marginTop: 3 }}>{r.top}</div>}</td>
+                    <td className="small">{r.problemsFound ? <span className="badge bad">{r.problemsFound} found</span> : null} {r.stepsLeft != null ? `${r.stepsLeft} to check` : '—'}</td>
+                    <td className="num">{r.perDay ?? '—'}</td>
+                    <td className="num">{r.avgDropPer30Days != null ? Number(r.avgDropPer30Days).toFixed(2) : '—'}</td>
+                    <td className="small">{fmt.dt(r.uploadedAt)}{r.uploadedBy ? <div className="muted">{r.uploadedBy}</div> : null}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+            {pages > 1 && <div className="row lh-pager"><button className="btn small" disabled={pg === 0} onClick={() => setPage(pg - 1)}>‹ Previous</button><span className="small">Page {pg + 1} of {pages}</span><button className="btn small" disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>Next ›</button></div>}
+          </div>
+        )}
+      </>}
       {upload && <UploadDrawer onClose={() => setUpload(false)} />}
     </>
+  );
+}
+
+/** The method, for anyone new: the same steps for every lock. */
+function HowItWorks() {
+  return (
+    <div className="panel lh-how">
+      <ol>
+        <li><strong>Each time batteries are changed or a part is swapped, record it</strong> on the lock (Record work, or Add from the paper log): the date, who, the parts, the battery type (industrial alkaline AA recommended), its brand and batch, and the pack voltage measured before and after.</li>
+        <li><strong>Read the lock</strong> with the service device, save its events from Visionline as a report (.xls) and <strong>upload it</strong>. The portal shows each set of batteries: how long it lasted, use, days to each voltage, alarms, restarts, card errors.</li>
+        <li><strong>Read it again about 3 weeks after any work.</strong> The portal compares the battery use before and after: <em>Fixed</em> (that part was the cause), <em>No change</em> (it was not), <em>Still draining</em>.</li>
+        <li><strong>While a lock still drains, follow the next part to check</strong>, simplest and cheapest first: batteries (industrial alkaline, measured) → battery holder, contacts and cable → door and lock mechanics (alignment, strike, screws, spindle, handle springs, lockcase) → card reader / LCA → Bluetooth → online radio → electronics / LCU and firmware.</li>
+        <li><strong>Work through the To do tab</strong> on each round: it lists the locks to read, those that need industrial alkaline batteries, the next part to check, the reports to refresh and the battery changes not yet recorded. Print it as the round sheet.</li>
+        <li><strong>Watch the trend</strong>: if the days a set lasts drop on many locks at once, look for a common cause (a new battery supply or batch, a setting, firmware) before changing parts.</li>
+      </ol>
+    </div>
   );
 }
 

@@ -1,4 +1,4 @@
-# Access Monitoring Tool — quick start (2.31.0)
+# Access Monitoring Tool — quick start (2.32.0)
 
 ## What it is and what you need
 
@@ -8,7 +8,7 @@ requests, watches lock batteries and supports emergencies. It works for a hotel 
 hospital, a school). Staff mobile keys are an optional module, off by default.
 
 It has two parts: the **portal** (with its database) and the **connector**, which talks to Visionline. One file
-installs either or both: `AccessMonitoringTool-Server-2.31.0.msi`.
+installs either or both: `AccessMonitoringTool-Server-2.32.0.msi`.
 
 | | A. One computer | B. Two computers |
 |---|---|---|
@@ -35,6 +35,8 @@ is installed beforehand: the .msi carries its own runtime.
 4. **Visionline reports.** **Administration → System setup reports → Import a Visionline report**: the *System
    settings* report as Visionline saves it, and if you have them the operator list and a card list with the operator.
 5. **Checklist.** The **Overview** shows *Getting started* until everything is green.
+6. **Your hotel's look.** **Administration → Branding and logo**: the hotel's logo (PNG or SVG), its name as shown
+   (e.g. *La Falaise Hotel Bonapriso*) and colours. They appear on the sign-in page, the menu and every printed report.
 
 ## Adding people
 

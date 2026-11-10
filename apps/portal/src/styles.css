@@ -971,3 +971,35 @@ tr.row-warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .rw-group .check { display: block; margin: 3px 0; }
 .elim-next { border-left: 3px solid var(--brass, #b08d57); padding-left: 10px; margin-top: 6px; }
 .warn-text { color: var(--warn, #b7791f); }
+
+/* 2.32 Lock troubleshooting, compact */
+.lh-kpis { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 6px; }
+.lh-kpi { border: 1px solid var(--line, #ddd); border-radius: 10px; padding: 8px 12px; min-width: 110px; display: flex; flex-direction: column; gap: 2px; background: var(--card, transparent); }
+.lh-kpi strong { font-size: 22px; line-height: 1.1; }
+.lh-kpi > span { font-size: 12px; opacity: .75; }
+.lh-kpi.bad strong { color: var(--bad, #b3261e); }
+.lh-kpi.ok strong { color: var(--ok, #2e7d4f); }
+.lh-kpi.wide { flex: 1 1 280px; }
+.lh-years { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.lh-filters { gap: 8px; padding: 10px 12px; flex-wrap: wrap; align-items: center; }
+.lh-filters .search { max-width: 220px; }
+.lh-pager { gap: 10px; padding: 8px 12px; align-items: center; justify-content: flex-end; }
+.lh-todo { display: grid; gap: 12px; }
+.lh-todo-h { margin: 0; padding: 10px 14px; font-size: 15px; border-bottom: 1px solid var(--line, #ddd); }
+.lh-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: start; }
+.lh-head-figs { display: grid; grid-template-columns: repeat(2, minmax(96px, 1fr)); gap: 8px; }
+.lh-head-figs > div { border: 1px solid var(--line, #ddd); border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; }
+.lh-head-figs strong { font-size: 20px; }
+.lh-head-figs span { font-size: 11.5px; opacity: .75; }
+.lh-plan { margin: 8px 0 0; padding-left: 20px; }
+.lh-plan li { margin: 4px 0; }
+.lh-batt-note { margin: 8px 0; }
+.lh-tabs { margin: 10px 0; flex-wrap: wrap; }
+.lh-how ol { margin: 0; padding-left: 20px; } .lh-how li { margin: 8px 0; }
+.print-only { display: none; }
+@media (max-width: 760px) { .lh-head { grid-template-columns: 1fr; } }
+@media print {
+  .lh-tab[hidden] { display: block !important; }
+  .print-only { display: table-cell; }
+}
+.lh-kpi.wide .small strong { font-size: 14px; }

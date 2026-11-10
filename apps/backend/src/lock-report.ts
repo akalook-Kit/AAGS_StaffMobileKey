@@ -429,6 +429,16 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   const intRecent = count(C.internal, recent);
   if (faults.internal >= 5) f.push({ area: 'lock', level: intRecent / spanDays >= 0.2 || faults.internal >= 20 ? 'high' : 'medium', title: `Internal lock error ${faults.internal} times`, detail: `"Error, Internal (1975)": ${intRecent} in the last ${Math.round(spanDays)} days (${(intRecent / spanDays * 7).toFixed(1)} a week).`,
     action: 'Program the lock and upload its firmware. If the error continues, have the door unit (electronics) checked or replaced.' });
+  // 2.32 Firmware signs (Armel: "the locks were working fine before I upgraded the firmware in December 2025"):
+  // program downloads, events this Visionline has no name for, and "Unknown command" answered to the service device.
+  {
+    const prog = all.filter((e) => e.t && !bogus(e.t) && isIn(e.code, C.program)).map((e) => e.t!.slice(0, 10));
+    const unnamed = [...new Set(all.filter((e) => !e.name.replace(/\(\d+\)|\(\*\)/g, '').trim()).map((e) => e.code))];
+    const unknownCmd = all.filter((e) => e.code === 1121).length;
+    if (unnamed.length || unknownCmd) f.push({ area: 'lock', level: 'medium', title: 'Signs of a firmware / software mismatch',
+      detail: `${unnamed.length ? `Events with no name in this Visionline: ${unnamed.slice(0, 6).map((c) => `(${String(c).padStart(4, '0')})`).join(', ')} (logged by a newer firmware than Visionline knows). ` : ''}${unknownCmd ? `"Error, Unknown command (1121)" ${unknownCmd} time(s): the lock did not understand the service device. ` : ''}${prog.length ? `Program loaded on ${[...new Set(prog)].slice(-4).join(', ')}. ` : ''}Compare the lock firmware with the firmware pack of Visionline and the service device; if battery life fell after a firmware upgrade, give ASSA ABLOY these dates and the battery sets.`,
+      action: 'Check the firmware version of the lock (service device: read lock information) and of Visionline/the service device; ask ASSA ABLOY whether the version is known to drain batteries on this lock model.' });
+  }
   if (clockLost) f.push({ area: 'lock', level: 'medium', title: 'The lock lost its clock', detail: `${clockLost} event(s) are dated before 2000: the lock restarted without its time, which happens when the batteries run flat or are removed.`,
     action: 'Set the time with the service device after every battery change.' });
   if (faults.restarts >= 5) f.push({ area: 'lock', level: 'medium', title: `The lock restarted ${faults.restarts} times`, detail: `${faults.coldStarts} cold start(s) included; ${faults.restartsAfterBatteryChange} restart(s) right after a battery change are normal and not counted. Frequent restarts point to loose battery contacts or weak batteries.`, action: 'Check the battery holder, its springs and contacts, and the cable to the door unit.' });

@@ -22,6 +22,8 @@ interface History {
   readings: { t: string; volts: number }[]; work: WorkRow[];
   sets: { from: string; to: string; days: number; finished: boolean; openingsPerDay: number | null; perThousand: number | null; per30: number | null; reached: { volts: number; days: number | null }[];
     firstAlarmDays: number | null; alarms: number; firmwareAlarms: number; restarts: number | null; cardErrors: number | null; internalErrors: number | null; deadbolt: number | null; work: { id: string; on: string; parts: string[] }[] }[]; reports: { id: string; fileName: string; from: string | null; to: string | null; uploadedAt: string }[];
+  plan: PlanItem[]; weakPacks: { on: string; volts: number }[];
+  firmware: { id: string; day: string; from: string | null; to: string | null; beforeMedian: number | null; beforeSets: number; afterMedian: number | null; afterSets: number }[]; firmwareSeen: { on: string; version: string }[];
   elimination: { state: 'draining' | 'waiting' | 'solved' | 'unknown'; next: { group: string; name: string; why: string; parts: string[]; suggestedByReport: string | null } | null; tried: string[]; remaining: string[] };
 }
 export const WORK_VERDICT: Record<WorkRow['verdict'], { cls: string; label: string }> = {
@@ -34,47 +36,114 @@ export const STATE: Record<History['elimination']['state'], { cls: string; label
 const day = (d: string | null | undefined) => (d ? new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString(undefined, { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 const rate = (r: Rate | null) => (r ? `${r.per30Days.toFixed(2)} V/30 d${r.lifeDays != null ? ` · ~${r.lifeDays} d a set` : ' · no drop'}` : '—');
 
-/** The locks with a history, for the Lock troubleshooting page. */
-export function LockHistoryList() {
-  const { base, can } = useHotel();
-  const list = useApi<{ locks: any[]; years: { year: string; sets: number; medianDays: number; shortest: number; longest: number }[] }>(`${base}/lock-history`, []);
-  const [record, setRecord] = useState(false);
-  const nav = useNavigate();
-  const rows = list.data?.locks ?? [];
-  const years = list.data?.years ?? [];
+/** 2.32 The hotel's locks: one load for the To do list, the locks table and the trend. */
+export interface PlanItem { kind: 'read' | 'batteries' | 'check' | 'report' | 'record' | 'firmware'; priority: number; title: string; detail: string; due: string | null }
+export interface LockRow { doorId: string; doorName: string; group: string | null; online: boolean | null; lockModel: string | null; batteryChanges: number; avgDays: number | null; lastSetDays: number | null; daysSinceLast: number | null; reports: number; work: number;
+  lastWork: { on: string; parts: string[]; verdict: WorkRow['verdict']; title: string } | null; state: History['elimination']['state']; next: string | null; notRecommended: number; plan: PlanItem[] }
+export interface FirmwareRow { id: string; day: string; from: string | null; to: string | null; scope: string; notes: string | null; beforeMedian: number | null; beforeSets: number; afterMedian: number | null; afterSets: number; drop: number | null }
+export interface LockList { locks: LockRow[]; years: { year: string; sets: number; medianDays: number; shortest: number; longest: number }[]; counts: Record<string, number>; total: number; firmware: FirmwareRow[] }
+
+const PLAN_GROUPS: { id: string; title: string; test: (p: PlanItem) => boolean }[] = [
+  { id: 'read-now', title: 'Read these locks and upload their report', test: (p) => p.kind === 'read' && p.priority === 1 },
+  { id: 'firmware', title: 'Battery life fell after a firmware upgrade: ask ASSA ABLOY', test: (p) => p.kind === 'firmware' },
+  { id: 'batteries', title: 'Fit industrial alkaline AA batteries', test: (p) => p.kind === 'batteries' },
+  { id: 'check', title: 'Next part to check (elimination method)', test: (p) => p.kind === 'check' },
+  { id: 'report', title: 'Upload a recent report', test: (p) => p.kind === 'report' },
+  { id: 'record', title: 'Record what was done (from the paper log)', test: (p) => p.kind === 'record' },
+  { id: 'soon', title: 'Coming up: read after the date', test: (p) => p.kind === 'read' && p.priority !== 1 },
+];
+
+export function LockTrend({ data, onChange }: { data: LockList; onChange?: () => void }) {
+  const c = data.counts;
   return (
-    <section className="panel" style={{ padding: 0 }}>
-      <div className="row" style={{ justifyContent: 'space-between', padding: '14px 16px 6px', gap: 8, flexWrap: 'wrap' }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Locks: batteries, work done and the cause</h2>
-          <p className="small muted" style={{ margin: '4px 0 0' }}>How many times each lock had new batteries, what was changed, and whether the batteries are fine since. Recommended batteries: <strong>industrial alkaline AA</strong>.</p>
-        </div>
-        {(can('maintenance.work') || can('battery.manage')) && <button className="btn primary" data-tip="Record batteries or parts changed on a lock, and what was checked. The portal then tells from the next lock report whether it worked." onClick={() => setRecord(true)}>Record work on a lock</button>}
-      </div>
-      <ErrorNote error={list.error} />
-      {years.length > 1 && (
-        <div className="lh-years" style={{ padding: '0 16px 10px' }} data-tip="How long sets of batteries lasted, by the year they were fitted, over all the locks with a history. A sudden drop on many locks at once points to a common cause: a new battery supply, a setting, a firmware.">
-          <span className="small muted">Days a set lasted (median, all locks):</span>
-          {years.map((y) => <span key={y.year} className={`badge ${y.medianDays < 120 ? 'bad' : y.medianDays < 300 ? 'warn' : 'ok'}`}>{y.year}: {y.medianDays} d <span className="muted">({y.sets} sets)</span></span>)}
+    <div className="lh-kpis">
+      <div className="lh-kpi bad"><strong>{c.draining ?? 0}</strong><span>draining</span></div>
+      <div className="lh-kpi"><strong>{c.waiting ?? 0}</strong><span>waiting for a report</span></div>
+      <div className="lh-kpi ok"><strong>{c.solved ?? 0}</strong><span>solved</span></div>
+      <div className="lh-kpi"><strong>{c.unknown ?? 0}</strong><span>not enough data</span></div>
+      <FirmwareKpi data={data} onChange={onChange} />
+      {data.years.length > 0 && (
+        <div className="lh-kpi wide" data-tip="How long sets of batteries lasted, by the year they were fitted, over all the locks with a history. A drop on many locks at once points to a common cause: battery supply, a setting, firmware.">
+          <span>Days a set lasted (median, all locks)</span>
+          <div className="lh-years">{data.years.slice(-5).map((y) => <span key={y.year} className={`badge ${y.medianDays < 120 ? 'bad' : y.medianDays < 300 ? 'warn' : 'ok'}`}>{y.year}: {y.medianDays} d <span className="muted">({y.sets})</span></span>)}</div>
         </div>
       )}
-      {!rows.length && !list.loading ? <p className="empty" style={{ padding: '0 16px 16px' }}>No history yet. Record the work done on a lock (batteries, parts) or upload a lock report.</p> : (
+    </div>
+  );
+}
+
+/** Everything to do, all locks, by kind of action: the technicians' round. */
+export function LockTodo({ data }: { data: LockList }) {
+  const items = data.locks.flatMap((l) => l.plan.map((p) => ({ ...p, lock: l })));
+  if (!items.length) return <div className="panel"><p className="empty">Nothing to do. Locks appear here once their work is recorded or their report uploaded.</p></div>;
+  return (
+    <div className="lh-todo">
+      {PLAN_GROUPS.map((g) => {
+        const rows = items.filter((x) => g.test(x)).sort((a, b) => (a.due ?? '').localeCompare(b.due ?? '') || a.lock.doorName.localeCompare(b.lock.doorName, undefined, { numeric: true }));
+        if (!rows.length) return null;
+        return (
+          <section key={g.id} className="panel" style={{ padding: 0 }}>
+            <h3 className="lh-todo-h">{g.title} <span className="badge">{rows.length}</span></h3>
+            <table className="grid"><tbody>{rows.map((r, i) => (
+              <tr key={`${r.lock.doorId}-${i}`}>
+                <td className="nowrap" style={{ width: 120 }}><Link to={`/lock-troubleshoot/door/${encodeURIComponent(r.lock.doorId)}`}><strong>{r.lock.doorName}</strong></Link><div className="small muted">{r.lock.group ?? ''}</div></td>
+                <td className="small"><strong>{r.title}</strong><div className="muted">{r.detail}</div></td>
+                <td className="small nowrap" style={{ width: 150 }}>{r.lock.lastSetDays != null ? `last set ${r.lock.lastSetDays} d` : ''}{r.lock.batteryChanges ? <div className="muted">{r.lock.batteryChanges} battery changes</div> : null}</td>
+                <td className="print-only" style={{ width: 90 }}>Done ☐</td>
+              </tr>))}</tbody></table>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The locks with a history: search, filter by state and floor, a page at a time. */
+export function LocksTable({ data }: { data: LockList }) {
+  const [q, setQ] = useState('');
+  const [state, setState] = useState('');
+  const [grp, setGrp] = useState('');
+  const [page, setPage] = useState(0);
+  const groups = [...new Set(data.locks.map((l) => l.group).filter(Boolean))].sort((a, b) => a!.localeCompare(b!, undefined, { numeric: true })) as string[];
+  const rows = data.locks.filter((l) => (!state || l.state === state) && (!grp || l.group === grp) && (!q || `${l.doorName} ${l.lockModel ?? ''}`.toLowerCase().includes(q.toLowerCase())));
+  const per = 25, pages = Math.max(1, Math.ceil(rows.length / per)), pg = Math.min(page, pages - 1);
+  return (
+    <section className="panel" style={{ padding: 0 }}>
+      <div className="row lh-filters">
+        <input className="search" placeholder="Door…" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} aria-label="Search a door" />
+        <select value={state} onChange={(e) => { setState(e.target.value); setPage(0); }} aria-label="State"><option value="">All states</option>{Object.entries(STATE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
+        {groups.length > 1 && <select value={grp} onChange={(e) => { setGrp(e.target.value); setPage(0); }} aria-label="Floor or door group"><option value="">All floors</option>{groups.map((g) => <option key={g}>{g}</option>)}</select>}
+        <span className="small muted">{rows.length} lock(s)</span>
+      </div>
+      {!rows.length ? <p className="empty" style={{ padding: '0 16px 16px' }}>No lock matches.</p> : (
         <div className="table-scroll"><table className="grid">
-          <thead><tr><th>Door and lock</th><th>State</th><th className="num">Battery changes</th><th className="num">Days a set (avg)</th><th>Last work</th><th>Next to check</th></tr></thead>
-          <tbody>{rows.map((r) => (
+          <thead><tr><th>Door and lock</th><th>State</th><th className="num">Battery changes</th><th className="num">Last set</th><th>Last work</th><th>What to do</th></tr></thead>
+          <tbody>{rows.slice(pg * per, pg * per + per).map((r) => (
             <tr key={r.doorId}>
-              <td><Link to={`/lock-troubleshoot/door/${encodeURIComponent(r.doorId)}`}><strong>{r.doorName}</strong></Link><div className="small muted">{r.lockModel ?? 'model not given'}{r.group ? ` · ${r.group}` : ''} · {r.reports} report(s)</div></td>
-              <td><span className={`badge ${STATE[r.state as History['elimination']['state']]?.cls ?? ''}`}>{STATE[r.state as History['elimination']['state']]?.label ?? r.state}</span>{r.notRecommended > 0 && <div className="small warn-text">batteries not recommended</div>}</td>
-              <td className="num">{r.batteryChanges}{r.daysSinceLast != null && <div className="small muted">last {r.daysSinceLast} d ago</div>}</td>
-              <td className="num">{r.avgDays ?? '—'}</td>
-              <td className="small">{r.lastWork ? <>{day(r.lastWork.on)}: {r.lastWork.parts.join(', ')}<div><span className={`badge ${WORK_VERDICT[r.lastWork.verdict as WorkRow['verdict']]?.cls ?? ''}`}>{WORK_VERDICT[r.lastWork.verdict as WorkRow['verdict']]?.label}</span></div></> : '—'}</td>
-              <td className="small">{r.next ?? '—'}</td>
+              <td><Link to={`/lock-troubleshoot/door/${encodeURIComponent(r.doorId)}`}><strong>{r.doorName}</strong></Link><div className="small muted">{r.lockModel ?? 'model not given'}{r.group ? ` · ${r.group}` : ''}</div></td>
+              <td><span className={`badge ${STATE[r.state]?.cls ?? ''}`}>{STATE[r.state]?.label ?? r.state}</span>{r.notRecommended > 0 && <div className="small warn-text">batteries not recommended</div>}</td>
+              <td className="num">{r.batteryChanges}</td>
+              <td className="num">{r.lastSetDays != null ? `${r.lastSetDays} d` : '—'}{r.avgDays != null && <div className="small muted">avg {r.avgDays} d</div>}</td>
+              <td className="small">{r.lastWork ? <>{day(r.lastWork.on)}: {r.lastWork.parts.join(', ')} <span className={`badge ${WORK_VERDICT[r.lastWork.verdict]?.cls ?? ''}`}>{WORK_VERDICT[r.lastWork.verdict]?.label}</span></> : '—'}</td>
+              <td className="small">{r.plan[0]?.title ?? '—'}</td>
             </tr>))}</tbody>
         </table></div>
       )}
-      {record && <RecordWork onClose={() => setRecord(false)} onDone={(doorId) => { setRecord(false); void list.reload(); nav(`/lock-troubleshoot/door/${encodeURIComponent(doorId)}`); }} />}
+      {pages > 1 && <div className="row lh-pager"><button className="btn small" disabled={pg === 0} onClick={() => setPage(pg - 1)}>‹ Previous</button><span className="small">Page {pg + 1} of {pages}</span><button className="btn small" disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>Next ›</button></div>}
     </section>
   );
+}
+
+/** Record work on any lock (door picked in the form). */
+export function RecordWorkButton({ onDone }: { onDone?: () => void }) {
+  const { can } = useHotel();
+  const [open, setOpen] = useState(false);
+  const nav = useNavigate();
+  if (!(can('maintenance.work') || can('battery.manage'))) return null;
+  return (<>
+    <button className="btn" data-tip="Record batteries or parts changed on a lock, and what was checked. The portal then tells from the next lock report whether it worked." onClick={() => setOpen(true)}>Record work on a lock</button>
+    {open && <RecordWork onClose={() => setOpen(false)} onDone={(doorId) => { setOpen(false); onDone?.(); nav(`/lock-troubleshoot/door/${encodeURIComponent(doorId)}`); }} />}
+  </>);
 }
 
 export function DoorHistoryPage() {
@@ -83,6 +152,7 @@ export function DoorHistoryPage() {
   const h = useApi<History>(`${base}/lock-history/${encodeURIComponent(doorId)}`, [doorId]);
   const [record, setRecord] = useState(false);
   const [paper, setPaper] = useState(false);
+  const [tab, setTab] = useState('sets');
   const [error, setError] = useState<unknown>(null);
   const x = h.data;
   if (!x) return <><PageHead title="Lock history" /><ErrorNote error={h.error} />{h.loading && <p className="muted">Loading…</p>}</>;
@@ -99,30 +169,38 @@ export function DoorHistoryPage() {
       </PageHead>
       <ErrorNote error={error} />
 
-      <section className={`panel verdict v-${e.state === 'draining' ? 'attention' : e.state === 'solved' ? 'ok' : 'check'}`}>
-        <h2 style={{ margin: 0 }}><span className={`badge ${STATE[e.state].cls}`}>{STATE[e.state].label}</span></h2>
-        {e.state === 'solved' && <p>The last work fixed it: the batteries last since. Keep uploading a report at each battery check to confirm.</p>}
-        {e.state === 'waiting' && <p>Read the lock and upload its report after <strong>{day(x.work[x.work.length - 1]?.waitUntil)}</strong>: the portal then compares battery use before and after the last work.</p>}
-        {e.next && e.state !== 'solved' && (
-          <div className="elim-next">
-            <p style={{ margin: '6px 0 4px' }}><strong>Next to check: {e.next.name}</strong>{e.next.suggestedByReport === 'likely' && <span className="badge bad" style={{ marginLeft: 6 }}>likely from the lock report</span>}</p>
-            <p className="small muted" style={{ margin: 0 }}>{e.next.why}</p>
-            <p className="small" style={{ margin: '4px 0 0' }}>{e.next.parts.join(' · ')}</p>
-          </div>
-        )}
-        {(e.tried.length > 0 || e.remaining.length > 0) && <p className="small muted" style={{ marginBottom: 0 }}>{e.tried.length > 0 && <>Already changed or checked: {e.tried.join(', ')}. </>}{e.remaining.length > 1 && <>Left after that: {e.remaining.slice(1).join(', ')}.</>}</p>}
+      <section className={`panel verdict lh-head v-${e.state === 'draining' ? 'attention' : e.state === 'solved' ? 'ok' : 'check'}`}>
+        <div className="lh-head-main">
+          <h2 style={{ margin: 0 }}><span className={`badge ${STATE[e.state].cls}`}>{STATE[e.state].label}</span></h2>
+          {e.state === 'solved' && <p style={{ margin: '6px 0' }}>The last work fixed it: the batteries last since. Keep uploading a report at each battery check to confirm.</p>}
+          {x.plan.length > 0 && (
+            <ol className="lh-plan">{x.plan.map((p, i) => <li key={i}><strong>{p.title}</strong><div className="small muted">{p.detail}</div></li>)}</ol>
+          )}
+          {e.next && e.state === 'draining' && e.next.group !== 'batteries' && !x.plan.some((p) => p.kind === 'check') && (
+            <p className="small" style={{ margin: '6px 0 0' }}><strong>Next to check: {e.next.name}</strong> — {e.next.parts.join(' · ')}</p>
+          )}
+          {e.next && <p className="small muted" style={{ margin: '6px 0 0' }}>{e.next.suggestedByReport === 'likely' && <span className="badge bad" style={{ marginRight: 6 }}>likely from the lock report</span>}{e.next.why}</p>}
+          {(e.tried.length > 0 || e.remaining.length > 1) && <p className="small muted" style={{ margin: '6px 0 0' }}>{e.tried.length > 0 && <>Already changed or checked: {e.tried.join(', ')}. </>}{e.remaining.length > 1 && <>Left after that: {e.remaining.slice(1).join(', ')}.</>}</p>}
+        </div>
+        <div className="lh-head-figs">
+          <div><strong>{x.batteries.count}</strong><span>battery changes</span></div>
+          <div><strong>{x.batteries.lastedDays.length ? x.batteries.lastedDays[x.batteries.lastedDays.length - 1] : '—'}</strong><span>days the last set lasted</span></div>
+          <div><strong>{x.batteries.avgDays ?? '—'}</strong><span>days a set, average</span></div>
+          <div><strong>{x.batteries.daysSinceLast ?? '—'}</strong><span>days since the last change</span></div>
+        </div>
       </section>
+      <p className="small lh-batt-note">Recommended batteries: <strong>{x.batteries.recommended}</strong>.
+        {x.batteries.notRecommended.length > 0 && <span className="warn-text"> Fitted here: {x.batteries.notRecommended.map((n) => `${n.type}${n.brand ? ` (${n.brand})` : ''} on ${day(n.on)}`).join('; ')}.</span>}
+        {x.firmware.map((f) => <span key={f.id}> Firmware upgrade of <strong>{day(f.day)}</strong>{f.to ? ` (${f.to})` : ''}: sets {f.beforeMedian ?? '—'} d before → <strong className={f.beforeMedian && f.afterMedian != null && f.afterMedian <= f.beforeMedian / 2 ? 'bad-text' : ''}>{f.afterMedian ?? '—'} d after</strong>.</span>)}
+        {x.firmwareSeen.length > 0 && <span> Firmware seen on this lock: {x.firmwareSeen.map((v) => `${v.version} (${day(v.on)})`).join(', ')}.</span>}
+        {x.weakPacks.length > 0 && <span className="warn-text"> New pack already weak when measured: {x.weakPacks.map((w) => `${w.volts.toFixed(2)} V on ${day(w.on)}`).join('; ')} (old or weak stock).</span>}</p>
 
-      <div className="rep-figures" style={{ margin: '12px 0' }}>
-        <div><strong>{x.batteries.count}</strong><span>battery changes</span></div>
-        <div><strong>{x.batteries.avgDays ?? '—'}</strong><span>days a set, on average</span></div>
-        <div><strong>{x.batteries.daysSinceLast ?? '—'}</strong><span>days since the last change</span></div>
-        <div><strong>{x.batteries.estimatedDaysPerSet ?? '—'}</strong><span>days a set at the current rate</span></div>
-        <div><strong>{x.work.length}</strong><span>pieces of work recorded</span></div>
+      <div className="seg no-print lh-tabs" role="tablist" aria-label="Lock history">
+        {([['sets', `Battery sets (${x.sets.length})`], ['work', `Work done (${x.work.length})`], ['changes', `Battery changes (${x.batteries.count})`], ['level', 'Battery level'], ['reports', `Reports (${x.reports.length})`]] as [string, string][])
+          .map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</button>)}
       </div>
-      <div className="alert" role="note"><strong>Recommended batteries: {x.batteries.recommended}.</strong> Consumer alkaline, mixed packs or rechargeable batteries do not last in VingCard locks and can raise false alarms.
-        {x.batteries.notRecommended.length > 0 && <div className="warn-text" style={{ marginTop: 4 }}>Fitted here: {x.batteries.notRecommended.map((n) => `${n.type}${n.brand ? ` (${n.brand})` : ''} on ${day(n.on)}`).join('; ')}.</div>}</div>
 
+      <div className="lh-tab" hidden={tab !== 'work'}>
       <h2 className="section-title">Work done and what it changed</h2>
       {!x.work.length ? <div className="panel"><p className="empty">No work recorded on this lock yet.{canRecord && ' Use "Record work" after each visit: batteries (with their type) and every part changed or checked.'}</p></div> : (
         <div className="panel" style={{ padding: 0 }}><div className="table-scroll"><table className="grid">
@@ -130,7 +208,7 @@ export function DoorHistoryPage() {
           <tbody>{[...x.work].reverse().map((w) => (
             <tr key={w.id}>
               <td className="nowrap">{day(w.on)}{w.by && <div className="small muted">{w.by}</div>}</td>
-              <td className="small">{w.partNames.join(', ')}{w.batteryTypeName && <div className={w.batteryTypeName.startsWith('Industrial') ? 'muted' : 'warn-text'}>Batteries: {w.batteryTypeName}{w.batteryBrand ? `, ${w.batteryBrand}` : ''}</div>}{w.notes && <div className="muted">{w.notes}</div>}</td>
+              <td className="small">{w.partNames.join(', ')}{w.batteryTypeName && <div className={w.batteryTypeName.startsWith('Industrial') ? 'muted' : 'warn-text'}>Batteries: {w.batteryTypeName}{w.batteryBrand ? `, ${w.batteryBrand}` : ''}</div>}{(w as any).voltsBefore != null || (w as any).voltsAfter != null ? <div className="muted">Pack: {(w as any).voltsBefore ?? '—'} V → {(w as any).voltsAfter ?? '—'} V</div> : null}{(w as any).batteryBatch && <div className="muted">Batch {(w as any).batteryBatch}</div>}{w.notes && <div className="muted">{w.notes}</div>}</td>
               <td className="small"><span className={`badge ${WORK_VERDICT[w.verdict].cls}`}>{WORK_VERDICT[w.verdict].label}</span> <strong>{w.title}</strong><div className="muted">{w.detail}</div></td>
               <td className="small nowrap">{rate(w.before)}<br />→ {rate(w.after)}{w.againInDays != null && <div className="muted">new batteries again after {w.againInDays} d</div>}</td>
               <td>{can('battery.manage') && <button className="btn small ghost no-print" onClick={() => void del(w.id)}>Remove</button>}</td>
@@ -138,6 +216,9 @@ export function DoorHistoryPage() {
         </table></div></div>
       )}
 
+      </div>
+      <div className="lh-tab" hidden={tab !== 'sets'}>
+      {!x.sets.length && <div className="panel"><p className="empty">No battery set yet: upload a report of this lock (Lock reports tab of Lock troubleshooting).</p></div>}
       {x.sets.length > 0 && <>
         <h2 className="section-title">Battery sets in the lock reports ({x.sets.length})</h2>
         <p className="small muted" style={{ marginTop: -4 }}>Each set from one battery change to the next, with what was changed when it was fitted. If the sets keep lasting the same after a part was changed, that part was not the cause.</p>
@@ -160,6 +241,8 @@ export function DoorHistoryPage() {
         </table></div></div>
       </>}
 
+      </div>
+      <div className="lh-tab" hidden={tab !== 'changes'}>
       <h2 className="section-title">Battery changes ({x.batteries.count})</h2>
       <div className="panel" style={{ padding: 0 }}>
         {!x.batteries.changes.length ? <p className="empty" style={{ padding: 14 }}>No battery change known yet.</p> : (
@@ -172,12 +255,18 @@ export function DoorHistoryPage() {
         )}
       </div>
 
+      </div>
+      <div className="lh-tab" hidden={tab !== 'level'}>
+      {x.readings.length < 2 && <div className="panel"><p className="empty">No battery readings yet: they come from the lock reports.</p></div>}
       {x.readings.length > 1 && <><h2 className="section-title">Battery level from the lock reports</h2><div className="panel"><VoltLine h={x} /></div></>}
 
+      </div>
+      <div className="lh-tab" hidden={tab !== 'reports'}>
       <h2 className="section-title">Lock reports of this door ({x.reports.length})</h2>
       <div className="panel">
         {!x.reports.length ? <p className="empty">None yet. Read the lock with the service device, save its events from Visionline and upload them on Lock troubleshooting.</p>
           : <ul className="plain">{x.reports.map((r) => <li key={r.id}><Link to={`/lock-troubleshoot/${r.id}`}>{r.fileName}</Link> <span className="small muted">events {day(r.from)} – {day(r.to)}, uploaded {fmt.dt(r.uploadedAt)}</span></li>)}</ul>}
+      </div>
       </div>
       {paper && <PaperLog doorId={x.door.id} doorName={x.door.name} model={x.lockModel} existing={x.work} onClose={() => setPaper(false)} onDone={() => { setPaper(false); void h.reload(); }} />}
       {record && <RecordWork doorId={x.door.id} doorName={x.door.name} model={x.lockModel} onClose={() => setRecord(false)} onDone={() => { setRecord(false); void h.reload(); }} />}
@@ -198,6 +287,7 @@ function VoltLine({ h }: { h: History }) {
       <line x1={P} x2={W - 10} y1={Y(h.batteries.scale.alarmLevel)} y2={Y(h.batteries.scale.alarmLevel)} stroke="currentColor" strokeOpacity=".35" strokeDasharray="4 4" />
       <text x={P - 4} y={Y(h.batteries.scale.alarmLevel) + 4} fontSize="10" textAnchor="end" fill="currentColor">{h.batteries.scale.alarmLevel.toFixed(1)}</text>
       <text x={P - 4} y={Y(top) + 4} fontSize="10" textAnchor="end" fill="currentColor">{top.toFixed(1)} V</text>
+      {h.firmware.map((f) => { const t = Date.parse(`${f.day}T12:00:00Z`); if (t < x0 || t > x1) return null; return <g key={f.id}><line x1={X(t)} x2={X(t)} y1={6} y2={H - 26} stroke="var(--bad, #b3261e)" strokeWidth="2" strokeDasharray="5 3" /><text x={X(t) + 3} y={H - 30} fontSize="10" fill="currentColor">firmware</text></g>; })}
       {h.work.map((w) => { const t = Date.parse(`${w.on}T12:00:00Z`); if (t < x0 || t > x1) return null; return <g key={w.id}><line x1={X(t)} x2={X(t)} y1={6} y2={H - 26} stroke="var(--brass, #b08d57)" strokeWidth="2" /><text x={X(t) + 3} y={14} fontSize="10" fill="currentColor">{w.partNames[0]?.split(' ')[0]}</text></g>; })}
       <path d={d} fill="none" stroke="currentColor" strokeWidth="2" />
       {pts.map((p, i) => <circle key={i} cx={X(p.x)} cy={Y(p.y)} r="2.5" fill="currentColor"><title>{`${new Date(p.x).toISOString().slice(0, 16).replace('T', ' ')}: below ${p.y.toFixed(1)} V`}</title></circle>)}
@@ -220,6 +310,10 @@ function RecordWork({ doorId, doorName, model, onClose, onDone }: { doorId?: str
   const [btype, setBtype] = useState('industrial-alkaline');
   const [brand, setBrand] = useState('');
   const [by, setBy] = useState('');
+  const [batch, setBatch] = useState('');
+  const [vb, setVb] = useState('');
+  const [va, setVa] = useState('');
+  const [fwv, setFwv] = useState('');
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -231,7 +325,7 @@ function RecordWork({ doorId, doorName, model, onClose, onDone }: { doorId?: str
   const save = async () => {
     setBusy(true); setError(null);
     try {
-      await api(`${base}/lock-history/${encodeURIComponent(door)}/work`, { body: { doneOn: on, parts, otherPart: other || undefined, batteryType: parts.includes('batteries') ? btype : undefined, batteryBrand: brand || undefined, doneBy: by || undefined, notes: notes || undefined, lockModel: lockModel || undefined } });
+      await api(`${base}/lock-history/${encodeURIComponent(door)}/work`, { body: { doneOn: on, parts, otherPart: other || undefined, batteryType: parts.includes('batteries') ? btype : undefined, batteryBrand: brand || undefined, batteryBatch: batch || undefined, voltsBefore: vb ? Number(vb.replace(',', '.')) : undefined, voltsAfter: va ? Number(va.replace(',', '.')) : undefined, firmwareVersion: fwv || undefined, doneBy: by || undefined, notes: notes || undefined, lockModel: lockModel || undefined } });
       onDone(door);
     } catch (e) { setError(e); } finally { setBusy(false); }
   };
@@ -260,6 +354,13 @@ function RecordWork({ doorId, doorName, model, onClose, onDone }: { doorId?: str
           <div className="field"><label htmlFor="rw-brand">Brand (optional)</label><input id="rw-brand" value={brand} maxLength={60} onChange={(e) => setBrand(e.target.value)} /></div>
         </div>
       )}
+      {parts.includes('batteries') && <div className="field"><label htmlFor="rw-batch">Batch / expiry on the pack (optional)</label><input id="rw-batch" value={batch} maxLength={60} onChange={(e) => setBatch(e.target.value)} /></div>}
+      <div className="field-row">
+        <div className="field"><label htmlFor="rw-vb">Pack voltage before (V, multimeter)</label><input id="rw-vb" inputMode="decimal" value={vb} onChange={(e) => setVb(e.target.value)} placeholder="e.g. 3.8" /></div>
+        <div className="field"><label htmlFor="rw-va">Pack voltage after (V)</label><input id="rw-va" inputMode="decimal" value={va} onChange={(e) => setVa(e.target.value)} placeholder="e.g. 4.8" />
+          {parts.includes('batteries') && va && Number(va.replace(',', '.')) < 4.6 && Number(va.replace(',', '.')) > 3 && <span className="hint warn-text">A new pack of 3 alkaline cells reads about 4.8 V: under 4.6 V is old or weak stock.</span>}</div>
+      </div>
+      {parts.includes('firmware') && <div className="field"><label htmlFor="rw-fw">Firmware version now on the lock</label><input id="rw-fw" value={fwv} maxLength={40} onChange={(e) => setFwv(e.target.value)} /></div>}
       <div className="field"><label htmlFor="rw-by">Done by (technician)</label><input id="rw-by" value={by} maxLength={80} onChange={(e) => setBy(e.target.value)} /></div>
       <div className="field"><label htmlFor="rw-notes">Notes (what you saw: moisture, pinched cable, door rubbing…)</label><textarea id="rw-notes" rows={3} value={notes} maxLength={1000} onChange={(e) => setNotes(e.target.value)} /></div>
       <ErrorNote error={error} />
@@ -318,5 +419,50 @@ function PaperLog({ doorId, doorName, model, existing, onClose, onDone }: { door
       </div>
       {rows.some((r) => r.error) && <p className="small muted">Lines in red are left out: correct their date to include them.</p>}
     </Drawer>
+  );
+}
+
+/** 2.32 Firmware upgrades of the site's locks, with how long battery sets lasted before and after each one. */
+function FirmwareKpi({ data, onChange }: { data: LockList; onChange?: () => void }) {
+  const { base, can } = useHotel();
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ doneOn: '', versionFrom: '', versionTo: '', doors: '', notes: '' });
+  const [error, setError] = useState<unknown>(null);
+  const save = async () => {
+    setError(null);
+    try {
+      const doors = f.doors.split(/[\s,;]+/).filter(Boolean);
+      const ids = doors.length ? doors.map((n) => data.locks.find((l) => l.doorName === n)?.doorId ?? n) : undefined;
+      await api(`${base}/lock-history/firmware`, { body: { doneOn: f.doneOn, versionFrom: f.versionFrom || undefined, versionTo: f.versionTo || undefined, doors: ids, notes: f.notes || undefined } });
+      setOpen(false); onChange?.();
+    } catch (e) { setError(e); }
+  };
+  const del = async (id: string) => { if (!confirm('Remove this firmware upgrade?')) return; try { await api(`${base}/lock-history/firmware/${id}`, { method: 'DELETE' }); onChange?.(); } catch (e) { setError(e); } };
+  return (
+    <div className="lh-kpi wide" data-tip="When the lock firmware was upgraded, and how long battery sets lasted before and after, over the locks concerned. A big drop after an upgrade points to the firmware.">
+      <span>Firmware upgrades</span>
+      {!data.firmware.length ? <div className="small muted">None recorded.</div> : data.firmware.map((x) => (
+        <div key={x.id} className="small">
+          <strong>{day(x.day)}</strong>{x.to ? ` → ${x.to}` : ''} <span className="muted">({x.scope})</span>:{' '}
+          {x.beforeMedian != null || x.afterMedian != null ? <>sets {x.beforeMedian ?? '—'} d before → <strong className={x.drop != null && x.drop >= 50 ? 'bad-text' : ''}>{x.afterMedian ?? '—'} d after</strong>{x.drop != null && x.drop > 0 && <> (−{x.drop}%)</>}</> : <span className="muted">no battery sets yet</span>}
+          {can('battery.manage') && <button className="linklike no-print" style={{ marginLeft: 6 }} onClick={() => void del(x.id)}>remove</button>}
+        </div>
+      ))}
+      {can('battery.manage') && <button className="btn small no-print" style={{ marginTop: 6 }} onClick={() => setOpen(true)}>Record a firmware upgrade</button>}
+      {open && (
+        <Drawer title="Record a firmware upgrade" onClose={() => setOpen(false)}>
+          <div className="field"><label htmlFor="fw-on">Date of the upgrade</label><input id="fw-on" type="date" value={f.doneOn} onChange={(e) => setF({ ...f, doneOn: e.target.value })} /></div>
+          <div className="field-row">
+            <div className="field"><label htmlFor="fw-from">Version before (if known)</label><input id="fw-from" value={f.versionFrom} maxLength={40} onChange={(e) => setF({ ...f, versionFrom: e.target.value })} /></div>
+            <div className="field"><label htmlFor="fw-to">Version after</label><input id="fw-to" value={f.versionTo} maxLength={40} onChange={(e) => setF({ ...f, versionTo: e.target.value })} /></div>
+          </div>
+          <div className="field"><label htmlFor="fw-doors">Locks (door numbers, e.g. 804 809 404); empty = all locks</label><input id="fw-doors" value={f.doors} onChange={(e) => setF({ ...f, doors: e.target.value })} /></div>
+          <div className="field"><label htmlFor="fw-notes">Notes (who did it, firmware pack, with which tool)</label><textarea id="fw-notes" rows={3} value={f.notes} maxLength={1000} onChange={(e) => setF({ ...f, notes: e.target.value })} /></div>
+          <ErrorNote error={error} />
+          <button className="btn primary" disabled={!f.doneOn} onClick={save}>Save</button>
+          <p className="small muted">The portal then compares, for the locks concerned, how long battery sets lasted before and after this date, using the paper logs and the lock reports.</p>
+        </Drawer>
+      )}
+    </div>
   );
 }

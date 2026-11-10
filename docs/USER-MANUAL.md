@@ -1,4 +1,4 @@
-# Access Monitoring Tool — user manual (2.31)
+# Access Monitoring Tool — user manual (2.32)
 
 New here? Start with **QUICK-START.md** (5 steps, adding people, everyday tasks).
 
@@ -304,6 +304,24 @@ Visionline cannot be verified by its holder: read it on an encoder (Card lookup)
   - Locks without a door sensor (Classic) count an opening for each card accepted, power open or metal key.
   - The locks table shows **days a set lasted, by year, over all locks**: a drop on many locks at once points to a
     common cause (battery supply, a setting, firmware).
+  **2.32 — one short page for a whole hotel:**
+  - Lock troubleshooting opens with the figures (locks draining / waiting for a report / solved), the **firmware
+    upgrades** with how long battery sets lasted before and after each, and the days a set lasted by year; then
+    tabs: **To do** (the technicians' round, printable with a *Done* box), **Locks** (search, state, floor, 25 a
+    page), **Lock reports** (search, 25 a page) and **How it works**.
+  - **To do** lists, for every lock: locks to read now, *battery life fell after a firmware upgrade: ask ASSA
+    ABLOY*, *fit industrial alkaline AA*, the next part to check, reports to refresh, battery changes seen but not
+    recorded (add them from the paper log), and readings coming up.
+  - **Record a firmware upgrade** (battery managers): the date, the versions before and after if known, all locks
+    or a list of doors. For the locks concerned the portal compares how long battery sets lasted before and after
+    (paper logs and lock reports); when they last half as long or less, the lock's To do says so first and the
+    electronics/firmware step becomes *likely*. Lock reports also show *Signs of a firmware / software mismatch*
+    (events with no name in Visionline, "Unknown command" answered to the service device, program loads).
+  - The lock's page: the state and **what to do, in order**, with the key figures beside; then tabs **Battery
+    sets**, **Work done**, **Battery changes**, **Battery level**, **Reports** (Print prints them all).
+  - Record work also takes the **pack voltage before and after** (multimeter), the **batch** of the batteries, and
+    the **firmware version** when the firmware is updated. A new pack under 4.6 V (3 alkaline cells) is flagged as
+    old or weak stock.
   The lock's page also lists every battery change (from Visionline, the lock reports and the work recorded) with
   how long each set lasted and the batteries fitted, the battery level from all its reports with the work marked,
   and its reports. Records of work can be removed by battery managers; technicians can record work.
