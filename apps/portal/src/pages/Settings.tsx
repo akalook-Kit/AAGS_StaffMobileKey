@@ -39,7 +39,7 @@ const GENERIC: Record<string, { intro: string; fields: Field[] }> = {
     { k: 'wrongDoorLimit', label: 'Cancel the card after more than this many wrong-door attempts', type: 'number', hint: 'Visionline lock events 320 “No access to this room” and 323 “Common rooms only”, reported by the connector. 0 switches it off. Usual value: 5.' },
   ] },
   credential_services: { intro: 'ASSA ABLOY Credential Services (SEOS) tenant used for phone set-up. Use the same URL, user and System ID as the Mobile Access account in Visionline (Options → Mobile Access → account → Server). The user and password are entered under Passwords and keys (stored encrypted, never shown again).', fields: [
-    { k: 'baseUrl', label: 'URL', hint: 'Visionline accounts use https://hospitality.credential-services.api.assaabloy.com. The test setup uses the simulator.' },
+    { k: 'baseUrl', label: 'URL', hint: 'Visionline accounts use https://hospitality.credential-services.api.assaabloy.com.' },
     { k: 'systemId', label: 'System ID', type: 'number', hint: 'Must match the Visionline Mobile Access account (checked on Connector health).' },
   ] },
   features: { intro: 'Modules can be switched on only when they are released, licensed and supported by the connector.', fields: [

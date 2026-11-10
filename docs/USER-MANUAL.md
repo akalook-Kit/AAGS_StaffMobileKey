@@ -1,4 +1,4 @@
-# Access Monitoring Tool — user manual (2.32)
+# Access Monitoring Tool — user manual (2.33.1)
 
 New here? Start with **QUICK-START.md** (5 steps, adding people, everyday tasks).
 
@@ -61,6 +61,18 @@ online reader or when the lock is read.
 Every lock event received from Visionline (entrances, refused entries, alarms, battery), every mobile-key event and
 system events, with filters (period, type, door, person, known/unknown card). **Print** makes a PDF with a
 fingerprint (SHA-256) that can be checked later under *Verify a PDF*: any change to the file shows.
+
+### 5l. New in 2.33.1: French everywhere, clean Connector health, setup code
+
+- **French everywhere.** With Auto (a French computer) or Français, every page is in French, including error messages
+  from the server ("E-mail ou mot de passe incorrect."), alerts, dates and the manual.
+- **Connector health** shows only what concerns this installation: the readiness checks (the mobile-key checks only
+  when mobile keys are switched on) and the doors and groups read from Visionline. The notes about another site's
+  answers from ASSA ABLOY are no longer shown.
+- **Setup code.** The setup page says where the code is. On the server: Start menu → **Access Monitoring Tool - setup
+  code**; Windows asks for administrator permission, then shows the code and copies it to the clipboard. The file
+  `setup-code.txt` stays readable by administrators only.
+- **Clean installation**: see QUICK-START.md, *Clean installation*.
 
 ### 5k. New in 2.27: Reports, the two setup reports, a shorter menu and French
 
@@ -139,8 +151,9 @@ closed section shows a number when something inside needs attention (critical ba
 **Languages**: **Auto**, English or Français, at the bottom of the menu and on the sign-in page. **Auto** (the
 default, 2.27.1) follows the language of the browser, which normally follows Windows (*Settings → Time & language →
 Language*; in Chrome or Edge, *Settings → Languages*): a computer set to French opens the portal in French. Choosing
-English or Français keeps that language on this computer and with your account. The menu, sign-in page, overview, reports and feedback are translated; some detailed
-pages are still in English and will follow.
+English or Français keeps that language on this computer and with your account. Since 2.33.1 the whole portal is in
+French: every page, button, tooltip and message, the errors that come back from the server, dates and numbers, and
+this manual (written in French). A word that is not translated yet stays in English rather than breaking the page.
 
 ### 5j. New in 2.26: reading a card at the encoder
 

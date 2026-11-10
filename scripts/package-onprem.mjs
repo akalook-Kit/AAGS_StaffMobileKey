@@ -55,7 +55,7 @@ const op = join(root, 'onprem');
 cpSync(join(op, 'service'), join(out, 'service'), { recursive: true });
 // Windows tools: CRLF line endings (cmd.exe needs them; Notepad shows them right).
 const crlf = (t) => t.replace(/\r?\n/g, '\r\n');
-for (const f of ['Install.cmd', 'Uninstall.cmd', 'install-onprem.ps1', 'install-auto.ps1', 'database-tools.ps1', 'set-platform-secrets.ps1', 'set-external-access.ps1', 'set-tunnel-access.ps1', 'set-connector-access.ps1', 'rollback-onprem.ps1', 'uninstall-onprem.ps1', 'README.txt', 'gateway.config.template.json', 'Open-StaffMobileKey.cmd', 'open-portal.ps1'])
+for (const f of ['Install.cmd', 'Uninstall.cmd', 'install-onprem.ps1', 'install-auto.ps1', 'database-tools.ps1', 'set-platform-secrets.ps1', 'set-external-access.ps1', 'set-tunnel-access.ps1', 'set-connector-access.ps1', 'rollback-onprem.ps1', 'uninstall-onprem.ps1', 'README.txt', 'gateway.config.template.json', 'Open-StaffMobileKey.cmd', 'open-portal.ps1', 'Show-SetupCode.cmd', 'show-setup-code.ps1'])
   writeFileSync(join(out, f), /\.(cmd|ps1|txt)$/.test(f) ? crlf(readFileSync(join(op, f), 'utf8')) : readFileSync(join(op, f)));
 cpSync(connectorDir, join(out, 'connector'), { recursive: true });
 writeFileSync(join(out, 'VERSION'), `${version}\r\n`);

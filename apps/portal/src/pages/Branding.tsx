@@ -75,7 +75,7 @@ export function BrandingPage() {
               <div className="report-head-preview" aria-label="Report header preview">
                 <img src={b.logo} alt="" style={{ height: REPORT_LOGO_PX[ls.reports] }} />
                 <div><strong>{hotel.name}</strong><span>Event log · page 1 of 3</span></div>
-                <div className="rh-meta"><span>System no. 3460</span><span>Access Monitoring Tool version</span></div>
+                <div className="rh-meta"><span>System no. …</span><span>Access Monitoring Tool version</span></div>
               </div>
             ) : <p className="small muted">Upload a logo above to see the report header.</p>}
           </div>

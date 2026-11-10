@@ -115,7 +115,7 @@ function StaffForm({ person, onClose, onSaved }: { person?: any; onClose: () => 
       </div>
       <h3 style={{ marginTop: 6 }}>Staff app sign-in</h3>
       <div className="field"><label htmlFor="ap">{person ? 'Set a new temporary password' : 'Temporary password'}</label><input id="ap" type="password" autoComplete="new-password" value={f.appPassword} onChange={set('appPassword')} placeholder="At least 8 characters" />
-        <span className="hint">Development sign-in. In production staff sign in with the organisation's identity provider.</span></div>
+        <span className="hint">The person signs in to the staff app with their e-mail and this password.</span></div>
       {person && (
         <div className="panel" style={{ marginTop: 10 }}>
           <h3>Phone and access</h3>

@@ -1,4 +1,4 @@
-# Access Monitoring Tool — quick start (2.33.0)
+# Access Monitoring Tool — quick start (2.33.1)
 
 ## What it is and what you need
 
@@ -8,7 +8,7 @@ requests, watches lock batteries and supports emergencies. It works for a hotel 
 hospital, a school). Staff mobile keys are an optional module, off by default.
 
 It has two parts: the **portal** (with its database) and the **connector**, which talks to Visionline. One file
-installs either or both: `AccessMonitoringTool-Server-2.33.0.msi`.
+installs either or both: `AccessMonitoringTool-Server-2.33.1.msi`.
 
 | | A. One computer | B. Two computers |
 |---|---|---|
@@ -20,9 +20,9 @@ You also need Windows 10/11 or Windows Server 2016+ (64-bit), a Visionline user 
 Visionline Web API reachable over https (usually `https://localhost/api/v1` on the Visionline server). Nothing else
 is installed beforehand: the .msi carries its own runtime.
 
-## La Falaise light edition (2.33)
+## La Falaise light edition (2.33.1)
 
-`AccessMonitoringTool-LaFalaise-Light-2.33.0.msi` is the same program, made for **La Falaise Hotel Bonapriso**
+`AccessMonitoringTool-LaFalaise-Light-2.33.1.msi` is the same program, made for **La Falaise Hotel Bonapriso**
 (offline VingCard Classic Alfa locks). It installs exactly like the standard .msi (steps below), with these differences:
 
 - **Reports only.** Reports, Visionline cards & people (read only), lock troubleshooting, lock batteries, maintenance
@@ -47,8 +47,11 @@ standard .msi); do not mix the light and standard .msi of the same version on on
    wants to follow the log. For *Connector only*, first make a connector token in the portal (Settings → Connector)
    and run `set-connector-access.ps1 -Allow <connector computer IP>` on the portal server; the window shows the
    portal's certificate fingerprint to compare with the one that script printed.
-2. **Setup page.** The browser opens it at the end. Choose **Hotel** or **Institution**, the name, time zone and
-   country, and create the first administrator (for a demo: your own e-mail and a password you choose).
+2. **Setup page.** The browser opens it at the end, with the **setup code** already filled in. If the page asks for
+   the code: Start menu → **Access Monitoring Tool - setup code** (Windows asks for administrator permission; the
+   code is shown and copied to the clipboard). The file `setup-code.txt` is readable by administrators only, so
+   opening it with Notepad from a normal window fails on purpose. Choose **Hotel** or **Institution**, the name, time
+   zone and country, and create the first administrator (for a demo: your own e-mail and a password you choose).
 3. **Visionline account.** **Settings → Visionline**: the Visionline user and password (encrypted for the
    connector). Use a named Visionline operator, not the PMS / interface user, so Visionline's own log shows who
    made each card.
@@ -57,6 +60,17 @@ standard .msi); do not mix the light and standard .msi of the same version on on
 5. **Checklist.** The **Overview** shows *Getting started* until everything is green.
 6. **Your hotel's look.** **Administration → Branding and logo**: the hotel's logo (PNG or SVG), its name as shown
    (e.g. *La Falaise Hotel Bonapriso*) and colours. They appear on the sign-in page, the menu and every printed report.
+
+## Clean installation (a server used for tests before)
+
+The .msi keeps the data of an earlier installation (database, settings, setup code) so that an update never loses
+anything. To start from nothing, for example a server where another hotel was installed for a test:
+
+1. **Settings → Apps → Access Monitoring Tool Server → Uninstall** (the services are removed, the data is kept).
+2. In PowerShell **as administrator**, after copying anything you want to keep from
+   `C:\ProgramData\StaffMobileKey\Platform\backups`:
+   `Remove-Item C:\ProgramData\StaffMobileKey -Recurse -Force`
+3. Run the new .msi. The setup page opens with a new setup code and the hotel is created from scratch.
 
 ## Adding people
 

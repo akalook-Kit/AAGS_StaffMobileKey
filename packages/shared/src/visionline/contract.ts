@@ -2,8 +2,7 @@
  * Visionline Web API wire contract — the SINGLE place for vendor-specific names.
  *
  * Source: ASSA ABLOY Global Solutions "Web API", DocNo 61 1100 080, revision 74 (valid from 2022-08-15).
- * Section numbers are given as [§x.y]. Items the document leaves open for STAFF mobile keys are listed
- * in VENDOR_CONFIRMATION_REQUIRED and are surfaced in the portal readiness checklist.
+ * Section numbers are given as [§x.y].
  */
 export const VL_DOC = 'ASSA ABLOY Web API 61 1100 080 rev 74';
 
@@ -121,34 +120,8 @@ export const VL = {
 /** Error object returned with 4xx/5xx [§4.4]. Unknown properties must be ignored [§4.7]. */
 export interface VisionlineError { status?: number; code?: number; message?: string; developerMessage?: string; resource?: string; properties?: string[] }
 
-/**
- * Behaviour the document does not settle for STAFF mobile keys. Each needs written ASSA ABLOY
- * confirmation for the installed K Hotel Bana version before production (spec §9 step 4 "Validate").
+/*
+ * 2.33.1 The site-specific answers from ASSA ABLOY and the hotel (staff key start time, revocation, wrong doors,
+ * registration numbers…) are recorded in docs/ and in the release notes, not in the product: they were shown on the
+ * Connector health page of every hotel. What the platform does is described in the user manual.
  */
-export const VENDOR_CONFIRMATION_REQUIRED = [
-  {
-    id: 'staff-start-time',
-    question: 'May a staff mobile key be created with a future startTime in K Hotel Bana\'s Visionline version?',
-    documented: 'For staff cards startTime "should not be in the future" [§7.6.2]; for mobile keys startTime defaults to the current time [§7.5.2].',
-    decided: 'Answer received 13 Oct: the API has startTime, but staff keys are expected to start immediately; treat future start as not supported unless validated on the installed build.',
-    implemented: 'Start and end are set per key; the platform holds a future key and creates it at its start time (default). "Send future start time" stays available for a validation test only.',
-  },
-  {
-    id: 'cs-tenant',
-    question: 'Credential Services password for the K Hotel Bana account, and the mobile SDK configuration for UUID 9.',
-    documented: 'Base URL is not in AAH Credential Services API V2.5.1; the account is set in Visionline Options → Mobile Access.',
-    decided: 'Received 13 Oct: URL https://hospitality.credential-services.api.assaabloy.com, user k_-_hotel_bana-…, System ID 3460, account hma-cs-92a0dc3e-…, UUID 9. The password is entered only into the platform secret store.',
-    implemented: 'System ID 3460 and the account name are configured and checked against Visionline. Run scripts/windows/cs-check.ps1 to test the user and password read-only. The SDK setup arrives with the licensed ASSA ABLOY mobile SDK.',
-  },
-] as const;
-
-/** Points the hotel or ASSA ABLOY have settled; shown in the portal for reference. */
-export const VENDOR_DECISIONS = [
-  { id: 'staff-revocation', decision: 'Cancelling or checking out a mobile staff key in Visionline revokes it from the phone through Credential Services (answer received 13 Oct). The platform also revokes it in the app as soon as the connector reports the cancellation.' },
-  { id: 'wrong-doors', decision: 'More than 5 wrong-door attempts (events 320/323) cancel the card automatically (hotel, 13 Oct).' },
-  { id: 'staff-time-schedule', decision: 'timeSchedule is honoured on staff mobile keys (answer received 13 Oct); used only when the access template sets one (hotel).' },
-  { id: 'reg-number', decision: 'credentialID is NOT the card registration number (answer received 13 Oct). The connector looks up the reg. no. with GET /cards?cardHolder=… after creating the key; callbacks, lock events and card cancel use it; check-out uses the credentialID.' },
-  { id: 'operator-card', decision: 'The Web API client is set to "Ignore operator card" (hotel, 13 Oct).' },
-  { id: 'one-staff-card', decision: 'One live key per person; Change doors uses override=true and gets a new reg. no. (hotel, 13 Oct).' },
-  { id: 'mobile-access-uuid', decision: 'Mobile Access UUID 9 identifies the SEOS channel used to issue keys (hotel, 12–13 Oct).' },
-] as const;

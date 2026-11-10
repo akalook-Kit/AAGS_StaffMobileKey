@@ -5,7 +5,7 @@
   reaches the portal through it. Run as administrator on the server.
 
   Before: in the Cloudflare dashboard (your domain must use Cloudflare DNS):
-    Zero Trust -> Networks -> Tunnels -> Create a tunnel -> Cloudflared -> name it (e.g. "khb-portal") ->
+    Zero Trust -> Networks -> Tunnels -> Create a tunnel -> Cloudflared -> name it (e.g. "hotel-portal") ->
     copy the token shown in the install command (the long text after "service install").
     Then, Public Hostname: subdomain "portal", domain "afratech.africa", Service type HTTP, URL "localhost:8447".
     Recommended: Zero Trust -> Access -> Applications -> add "portal.afratech.africa" and allow only your

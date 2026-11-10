@@ -491,20 +491,21 @@ export function portalRoutes(app: FastifyInstance) {
     const vl = (await getConfigWithVersion(hotelId, 'visionline')).data;
     const ugs = await many(pool, `SELECT external_id FROM resources WHERE hotel_id=$1 AND kind='usergroup' AND active`, [hotelId]);
     const cb = getCallbackState(hotelId);
-    const { VENDOR_CONFIRMATION_REQUIRED, VENDOR_DECISIONS } = await import('@smk/shared/node');
+    // 2.33.1 Mobile-key checks only where mobile keys are used (switched on, full edition).
+    const mobileKeys = edition() !== 'light' && (await getConfigWithVersion(hotelId, 'features')).data?.staffMobileKeys === true;
     const csCfg = (await getConfigWithVersion(hotelId, 'credential_services')).data;
     const accounts = await many(pool, `SELECT name, data FROM resources WHERE hotel_id=$1 AND kind='mobileaccessaccount' AND active`, [hotelId]);
     const account = accounts.find((a) => !vl?.accountName || a.name === vl.accountName) ?? accounts[0];
     const accountSystemId = account?.data?.systemID != null ? Number(account.data.systemID) : null;
     const item = (id: string, label: string, ok: boolean, detail: string) => ({ id, label, ok, detail });
-    return {
+    const all = {
       checks: [
         item('connector', 'Connector online', isOnline(conn?.last_seen_at), conn?.last_seen_at ? `Last seen ${Math.round((Date.now() - new Date(conn.last_seen_at).getTime()) / 1000)} s ago` : 'No connector has checked in'),
         item('credentials', 'Property Visionline credentials stored on the connector', Boolean(h.credentialsConfigured), h.credentialsConfigured ? `Operator ${h.propertyUsername ?? ''} · encrypted on the Visionline PC` : 'Enter them under Settings → Visionline (or on the connector page)'),
         item('tls', 'Visionline certificate trusted', String(h.tlsTrust ?? '').startsWith('verified'), h.tlsTrust ?? 'unknown'),
         item('api', 'Visionline Web API reachable and session created', Boolean(h.visionlineReachable && h.lastSuccessfulSessionAt), h.visionlineReachable && h.lastSuccessfulSessionAt ? `Last session ${h.lastSuccessfulSessionAt}` : h.lastError ?? 'No session yet'),
         item('clock', 'Clock within 15 minutes of Visionline', Math.abs(h.clockOffsetMs ?? 0) < 5 * 60_000, `Offset ${Math.round((h.clockOffsetMs ?? 0) / 1000)} s`),
-        item('discovery', 'Doors, user groups and accounts discovered', n('door') > 0 && n('mobileaccessaccount') > 0, `${n('door')} doors, ${n('timeschedule')} time schedules, ${n('mobileaccessaccount')} mobile access accounts`),
+        item('discovery', mobileKeys ? 'Doors, user groups and accounts discovered' : 'Doors and user groups discovered', n('door') > 0 && (!mobileKeys || n('mobileaccessaccount') > 0), mobileKeys ? `${n('door')} doors, ${n('timeschedule')} time schedules, ${n('mobileaccessaccount')} mobile access accounts` : `${n('door')} doors, ${n('usergroup')} user groups`),
         item('mobileAccess', 'Visionline Mobile Access options recorded', vl?.mobileAccessUuid != null, vl?.mobileAccessUuid != null ? `UUID ${vl.mobileAccessUuid} · revoke mobile key when ${vl.revokeMode ?? 'overridden'}` : 'Copy them from Visionline → Options → Mobile Access into Settings → Visionline'),
         item('staffGroup', 'Staff user group exists in Visionline', Boolean(vl?.defaultUserGroup && ugs.some((u) => u.external_id === vl.defaultUserGroup)), vl?.defaultUserGroup ?? 'Not configured'),
         item('watch', 'Visionline watch running (cancelled cards, wrong doors)', String(h.visionlineWatch ?? '').startsWith('watching'), h.visionlineWatch ?? 'Connector 0.3.0 or newer needed'),
@@ -512,10 +513,10 @@ export function portalRoutes(app: FastifyInstance) {
           accountSystemId == null ? 'Run discovery to read the mobile access account from Visionline' : Number(csCfg?.systemId) === accountSystemId ? `System ID ${accountSystemId} (${account.name})` : `Settings → Credential Services has ${csCfg?.systemId ?? 'none'}; Visionline account ${account.name} uses ${accountSystemId}`),
         item('cs', 'Credential Services callbacks registered', Boolean(cb?.ok), cb?.ok ? cb.url ?? '' : cb?.error ?? 'Not attempted yet'),
       ],
-      vendorConfirmations: VENDOR_CONFIRMATION_REQUIRED,
-      vendorDecisions: VENDOR_DECISIONS,
       connectorHealth: h,
     };
+    const MOBILE_ONLY = new Set(['mobileAccess', 'staffGroup', 'systemId', 'cs']);
+    return { ...all, mobileKeys, checks: all.checks.filter((c) => mobileKeys || !MOBILE_ONLY.has(c.id)) };
   });
 
   // ---- Audit --------------------------------------------------------------------------------------

@@ -1,7 +1,10 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import manual from '../../../../docs/USER-MANUAL.md?raw';
 import quick from '../../../../docs/QUICK-START.md?raw';
+import manualFr from '../../../../docs/USER-MANUAL.fr.md?raw';
+import quickFr from '../../../../docs/QUICK-START.fr.md?raw';
 import { PageHead } from '../ui';
+import { lang } from '../i18n';
 
 /** Inline markdown: **bold**, *italic*, `code`. Text only: nothing in the manual is turned into HTML. */
 function inline(t: string): ReactNode[] {
@@ -43,7 +46,9 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(
 export function HelpPage() {
   // 2.16 The short quick start first; the full manual one click away.
   const [which, setWhich] = useState<'quick' | 'manual'>(() => (new URLSearchParams(location.search).get('doc') === 'manual' ? 'manual' : 'quick'));
-  const bs = useMemo(() => blocks(which === 'quick' ? quick : manual), [which]);
+  // 2.33.1 The manual in French when the portal is in French (written in French, not translated word by word).
+  const fr = lang() === 'fr';
+  const bs = useMemo(() => blocks(which === 'quick' ? (fr ? quickFr : quick) : (fr ? manualFr : manual)), [which, fr]);
   const [q, setQ] = useState('');
   const toc = bs.filter((b) => b.kind === 'h2').map((b) => b.lines[0]!);
   // Search: keep the sections whose text matches.
@@ -61,10 +66,10 @@ export function HelpPage() {
         <button className="btn" onClick={() => window.print()}>Print / PDF</button>
       </PageHead>
       <div className="help-layout">
-        <nav className="help-toc no-print" aria-label="Contents">{toc.map((t) => <a key={t} href={`#${slug(t)}`}>{t}</a>)}</nav>
-        <article className="panel help">
+        <nav className="help-toc no-print" aria-label="Contents" translate="no">{toc.map((t) => <a key={t} href={`#${slug(t)}`}>{t}</a>)}</nav>
+        <article className="panel help" translate="no">
           {sections.map((s, si) => <Fragment key={si}>{s.items.map((b, i) => <Render key={i} b={b} />)}</Fragment>)}
-          {!sections.length && <p className="empty">Nothing in the manual matches “{q}”.</p>}
+          {!sections.length && <p className="empty" translate="yes">Nothing in the manual matches “{q}”.</p>}
         </article>
       </div>
     </>

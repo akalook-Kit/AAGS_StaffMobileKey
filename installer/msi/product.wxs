@@ -36,6 +36,8 @@
       <Component Id="StartMenu" Guid="4C5D2E19-0B7B-4F8E-8E54-61C7A9D20B31" Win64="yes">
         <Shortcut Id="OpenPortal" Name="Access Monitoring Tool" Description="Open the Access Monitoring Tool portal on this server"
                   Target="[INSTALLDIR]Open-StaffMobileKey.cmd" WorkingDirectory="INSTALLDIR" />
+        <Shortcut Id="SetupCode" Name="Access Monitoring Tool - setup code" Description="Show the one-time code of the first-run setup page (administrators)"
+                  Target="[INSTALLDIR]Show-SetupCode.cmd" WorkingDirectory="INSTALLDIR" />
         <RegistryValue Root="HKLM" Key="Software\StaffMobileKey\Server" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>

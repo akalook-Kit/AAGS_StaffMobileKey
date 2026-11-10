@@ -132,6 +132,9 @@ INSTALL WITH THE ZIP
      Enter the hotel's details (name, time zone, country, ASSA ABLOY System ID), the first administrator,
      and optionally the Credential Services account. Then sign in.
      The setup code is also in C:\ProgramData\StaffMobileKey\Platform\setup-code.txt (administrators only).
+     To see it again: Start menu -> "Access Monitoring Tool - setup code" (Windows asks for administrator
+     permission; the code is copied to the clipboard). Opening the .txt with Notepad from a normal window fails
+     on purpose: only administrators may read it.
   4. In the portal: Connector health (the connector on this server shows Online), Settings -> Visionline
      (Visionline account, encrypted for the connector), Branding, then Account -> two-step sign-in.
 

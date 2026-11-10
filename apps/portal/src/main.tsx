@@ -6,6 +6,7 @@ import '@fontsource/public-sans/latin-700.css';
 import '@fontsource/ibm-plex-sans-condensed/latin-500.css';
 import '@fontsource/ibm-plex-sans-condensed/latin-600.css';
 import { applyTheme } from './ui';
+import './i18n-dom';
 
 // Light or dark before the first paint (no flash); follows the computer's setting unless the person chose one.
 applyTheme();

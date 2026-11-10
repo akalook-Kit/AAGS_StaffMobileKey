@@ -36,11 +36,70 @@ export function tr(s: string): string {
   if (current === 'en' || !s) return s;
   return FR[s] ?? s;
 }
+/**
+ * 2.33.1 Translate any text shown on the page (i18n-dom.ts): the exact text, then patterns for texts with numbers or
+ * names in them. A pattern is a dictionary entry with {placeholders}: "{0} min ago" matches "5 min ago". The values
+ * are kept as they are (translated only when a value is itself a known text). Unknown texts come back unchanged.
+ */
+export function trAny(s: string, depth = 0): string {
+  if (current === 'en' || !s) return s;
+  const hit = FR[s];
+  if (hit) return hit;
+  const memo = depth === 0 ? seen.get(s) : undefined;
+  if (memo !== undefined) return memo;
+  let out = s;
+  // "Text:" / "Text." / "(Text)" with the dictionary holding "Text" (French puts a space before : ? !).
+  const m = /^(\(?)(.*?)([:.!?)]*)$/.exec(s);
+  if (m && m[2] !== s && FR[m[2]!]) out = m[1] + FR[m[2]!] + m[3]!.replace(/^([:!?])/, ' $1');
+  else if (depth < 2) {
+    for (const p of patterns()) {
+      if (s.length < p.min || (p.lit && !s.includes(p.lit))) continue;
+      const r = p.re.exec(s);
+      if (!r) continue;
+      // The values may not be most of the text: a short pattern ("{0} card{1}") must not rewrite one word of a long
+      // sentence it happens to contain.
+      const captured = Object.values(r.groups ?? {}).reduce((n, v) => n + (v?.length ?? 0), 0);
+      if (captured > p.min * 1.5 + 24) continue;
+      out = p.fr.replace(/\{(\w+)\}/g, (_x, k) => { const v = r.groups?.[k] ?? ''; return /[A-Za-z]{2}/.test(v) ? trAny(v, depth + 1) : v; });
+      break;
+    }
+  }
+  if (depth === 0) { if (seen.size > 20000) seen.clear(); seen.set(s, out); }
+  return out;
+}
+const seen = new Map<string, string>();
+let compiled: { re: RegExp; fr: string; min: number; lit: string }[] | null = null;
+let compiledSize = 0;
+function patterns() {
+  const keys = Object.keys(FR);
+  if (compiled && compiledSize === keys.length) return compiled;
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  compiled = keys.filter((k) => /\{\w+\}/.test(k) && (k.replace(/\{\w+\}/g, '').match(/[A-Za-z]/g)?.length ?? 0) >= 3).map((k) => {
+    const seenNames = new Set<string>();
+    const parts = k.split(/(\{\w+\})/);
+    const src = parts.map((part) => {
+      const g = /^\{(\w+)\}$/.exec(part);
+      if (!g) return esc(part);
+      const name = 'v' + g[1]!.replace(/\W/g, '');
+      if (seenNames.has(name)) return `\\k<${name}>`;
+      seenNames.add(name);
+      return `(?<${name}>.+?)`;
+    }).join('');
+    const fr = FR[k]!.replace(/\{(\w+)\}/g, (_x, n) => `{v${String(n).replace(/\W/g, '')}}`);
+    const lit = parts.filter((x) => !/^\{\w+\}$/.test(x)).sort((a, b) => b.length - a.length)[0] ?? '';
+    return { re: new RegExp(`^${src}$`, 's'), fr, min: k.replace(/\{\w+\}/g, '').length, lit };
+  }).sort((a, b) => b.min - a.min); // most specific first
+  compiledSize = keys.length;
+  seen.clear();
+  return compiled;
+}
+
 /** Translate a text with {placeholders}. */
 export function trf(s: string, vars: Record<string, string | number>): string {
   return tr(s).replace(/\{(\w+)\}/g, (_m, k) => String(vars[k] ?? ''));
 }
 
+import { FR_ALL } from './i18n-fr';
 const FR: Record<string, string> = {
   // ---- menu and frame
   'Overview': 'Accueil', 'Reports': 'Rapports', 'Monitoring': 'Alertes', 'Alerts': 'Alertes',
@@ -208,3 +267,5 @@ Object.assign(FR, {
   'Record batteries or parts changed on a lock, and what was checked. The portal then tells from the next lock report whether it worked.': "Enregistrer les piles ou pièces changées sur une serrure et ce qui a été vérifié. Le portail dit ensuite, d'après le rapport suivant, si cela a réglé le problème.",
   'Battery changes, work done on this lock and whether the batteries are fine since.': 'Changements de piles, travaux faits sur cette serrure et si les piles tiennent depuis.',
 } satisfies Record<string, string>);
+// 2.33.1 The whole portal and the server's messages (i18n-fr.ts).
+for (const [k, v] of Object.entries(FR_ALL)) if (!(k in FR) && v) FR[k] = v;

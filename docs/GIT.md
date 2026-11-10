@@ -153,6 +153,25 @@ git tag --list "v2.2*"
 
 Only the newest zip is needed if the older ones are no longer at hand (each zip is the whole project).
 
+## 2.33.1 (10 Nov 2026)
+
+Same as 2.33.0 with `$v = '2.33.1'`: download `access-monitoring-tool-project-2.33.1.zip` into **Downloads**, then
+
+```powershell
+$v = '2.33.1'
+Expand-Archive "$env:USERPROFILE\Downloads\access-monitoring-tool-project-$v.zip" "$env:TEMP\amt-$v" -Force
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\amt-$v\access-monitoring-tool-project-$v\scripts\git-catch-up.ps1" `
+  -Repo C:\khb\staff-mobile-key\staff-mobile-key -From "$env:USERPROFILE\Downloads"
+cd C:\khb\staff-mobile-key\staff-mobile-key
+git log --oneline --decorate -3        # origin/main must be on v2.33.1
+```
+
+The installers are attached to a GitHub **release** on the website (no tool to install): open
+https://github.com/akalook-Kit/AAGS_StaffMobileKey/releases/new → *Choose a tag* `v2.33.1` → title
+`2.33.1 (La Falaise light edition, French)` → drag the two .msi files and `SHA256SUMS-2.33.1.txt` → wait for the
+uploads → **Publish release**. (`gh release create …` does the same once the GitHub CLI is installed:
+`winget install --id GitHub.cli -e`, then `gh auth login`.)
+
 ## 2.29 → 2.33 and the La Falaise light edition (10 Nov 2026)
 
 The La Falaise light edition is **not a separate project**: it is the same code, version 2.33.0, built with one

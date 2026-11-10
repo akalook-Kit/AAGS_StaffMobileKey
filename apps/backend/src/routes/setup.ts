@@ -88,7 +88,7 @@ export function setupRoutes(app: FastifyInstance) {
     const b = Body.parse(req.body);
     if (!codeMatches(b.code)) {
       tries.push(now);
-      throw new ApiError(403, 'BAD_SETUP_CODE', 'The setup code is not right. It was shown at the end of the installation (and saved in setup-code.txt in the installation data folder).');
+      throw new ApiError(403, 'BAD_SETUP_CODE', 'The setup code is not right. It was shown at the end of the installation. To see it again on the server: Start menu → "Access Monitoring Tool - setup code" (Windows asks for administrator permission).');
     }
     const cs = b.credentialServices;
     if ((cs?.user && !cs.password) || (!cs?.user && cs?.password)) throw new ApiError(400, 'CS_INCOMPLETE', 'Give both the Credential Services user and password, or neither (you can add them later).');

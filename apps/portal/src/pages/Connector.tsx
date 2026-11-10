@@ -55,27 +55,9 @@ export function ConnectorPage() {
               <dt>Doors</dt><dd>{kinds('door').length} in {kinds('doorgroup').length} door groups ({kinds('doorgroup').map((g) => g.name).join(', ') || 'none'})</dd>
               <dt>User groups</dt><dd>{kinds('usergroup').map((g) => g.name).join(', ') || 'none found'}</dd>
               <dt>Time schedules</dt><dd>{kinds('timeschedule').map((g) => g.name).join(', ') || 'none'}</dd>
-              <dt>Mobile access accounts</dt><dd>{kinds('mobileaccessaccount').map((g) => `${g.name} (system ${g.data.systemID})`).join(', ') || 'none'}</dd>
+              {ready.data?.mobileKeys && <><dt>Mobile access accounts</dt><dd>{kinds('mobileaccessaccount').map((g) => `${g.name} (system ${g.data.systemID})`).join(', ') || 'none'}</dd></>}
               <dt>Last discovery</dt><dd>{fmt.rel(kinds('door')[0]?.discovered_at)}</dd>
             </dl>
-          </div>
-          <div className="panel">
-            <h2>To check on site</h2>
-            <p className="small muted">How the platform handles each point, from the Visionline Web API manual; check them once on your own Visionline.</p>
-            {(ready.data?.vendorConfirmations ?? []).map((v: any) => (
-              <details key={v.id} style={{ borderTop: '1px solid var(--line-2)', padding: '8px 0' }}>
-                <summary style={{ cursor: 'pointer', fontWeight: 500 }}>{v.question}</summary>
-                <p className="small" style={{ marginTop: 6 }}><strong>Documented:</strong> {v.documented}</p>
-                {v.decided && <p className="small"><strong>Your decision:</strong> {v.decided}</p>}
-                <p className="small"><strong>What the platform does:</strong> {v.implemented}</p>
-              </details>
-            ))}
-            {(ready.data?.vendorDecisions ?? []).length > 0 && (
-              <>
-                <h3 style={{ marginTop: 14 }}>Settled</h3>
-                <ul className="small" style={{ paddingLeft: 18, margin: 0 }}>{ready.data.vendorDecisions.map((d: any) => <li key={d.id}>{d.decision}</li>)}</ul>
-              </>
-            )}
           </div>
         </div>
         <div>
@@ -107,7 +89,7 @@ export function ConnectorPage() {
               <dt>Being processed</dt><dd>{conns.data?.queue?.leased ?? 0}</dd>
               <dt>Expired (24 h)</dt><dd>{conns.data?.queue?.expired24h ?? 0}</dd>
               <dt>Failed (24 h)</dt><dd>{conns.data?.queue?.failed24h ?? 0}</dd>
-              <dt>Vendor callbacks</dt><dd>{conns.data?.callbacks?.ok ? 'Registered' : conns.data?.callbacks?.error ?? 'Not registered yet'}</dd>
+              {ready.data?.mobileKeys && <><dt>Vendor callbacks</dt><dd>{conns.data?.callbacks?.ok ? 'Registered' : conns.data?.callbacks?.error ?? 'Not registered yet'}</dd></>}
             </dl>
           </div>
           {can('connector.manage') && (

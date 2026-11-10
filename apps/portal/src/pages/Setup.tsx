@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { ErrorNote } from '../ui';
+import { lang } from '../i18n';
 
 /**
  * First-run setup (2.9): the hotel's details, the first administrator and, optionally, the Credential Services
@@ -20,7 +21,7 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
   const zones = useMemo(() => { try { return (Intl as any).supportedValuesOf('timeZone') as string[]; } catch { return [info.serverTimeZone ?? 'UTC']; } }, [info.serverTimeZone]);
   const countries = useMemo(() => {
     let names: Intl.DisplayNames | null = null;
-    try { names = new Intl.DisplayNames(['en'], { type: 'region' }); } catch { /* old browser */ }
+    try { names = new Intl.DisplayNames([lang() === 'fr' ? 'fr' : 'en'], { type: 'region' }); } catch { /* old browser */ }
     return COUNTRIES.map((c) => ({ code: c, name: names?.of(c) ?? c })).sort((a, b) => a.name.localeCompare(b.name));
   }, []);
   const [code, setCode] = useState(() => new URLSearchParams(location.hash.slice(1)).get('code') ?? '');
@@ -88,7 +89,7 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
         <div className="field">
           <label htmlFor="sc">Code shown at the end of the installation</label>
           <input id="sc" value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" spellCheck={false} placeholder="XXXX-XXXX-XXXX" required style={{ fontFamily: 'ui-monospace, Consolas, monospace', letterSpacing: '0.08em' }} />
-          <span className="hint">Also saved on this server in <code>C:\ProgramData\StaffMobileKey\Platform\setup-code.txt</code> (administrators only).</span>
+          <span className="hint">Filled in when the installer opens this page. Otherwise, on the server: Start menu → <strong>Access Monitoring Tool - setup code</strong> (Windows asks for administrator permission; the code is copied to the clipboard).</span>
         </div>
 
         {info.hotel ? (
@@ -116,7 +117,7 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
           </div>
         </div>
         <div className="field-row">
-          <div className="field"><label htmlFor="sid">ASSA ABLOY System ID</label><input id="sid" inputMode="numeric" pattern="\d*" value={h.systemId} onChange={(e) => setH({ ...h, systemId: e.target.value.replace(/\D/g, '') })} placeholder="e.g. 3460" /><span className="hint">Visionline: Options → Mobile Access. Leave empty to add later.</span></div>
+          <div className="field"><label htmlFor="sid">ASSA ABLOY System ID</label><input id="sid" inputMode="numeric" pattern="\d*" value={h.systemId} onChange={(e) => setH({ ...h, systemId: e.target.value.replace(/\D/g, '') })} placeholder="e.g. 1234" /><span className="hint">Visionline: Options → Mobile Access. Leave empty to add later.</span></div>
           <div className="field"><label htmlFor="sno">System number on reports</label><input id="sno" value={h.systemNumber} onChange={(e) => setH({ ...h, systemNumber: e.target.value })} maxLength={40} placeholder="Same as System ID" /></div>
         </div>
         <div className="field-row">
@@ -140,6 +141,7 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
         </div>
         {pwProblem && <div className="alert warn">{pwProblem}</div>}
 
+        {(info as any).edition !== 'light' && <>
         <h2 className="section-title">ASSA ABLOY Credential Services <span className="muted small" style={{ fontWeight: 400 }}>(optional)</span></h2>
         {info.secretStore === false ? (
           <p className="muted small">This server keeps this account in its own settings. Add it later with the server tools.</p>
@@ -152,6 +154,7 @@ export function SetupPage({ info }: { info: { version: string; serverTimeZone?: 
             </div>
           </>
         )}
+        </>}
 
         <div className="row end" style={{ marginTop: 8 }}>
           <button className="btn primary" disabled={busy || Boolean(pwProblem)} style={{ padding: '10px 18px' }}>{busy ? 'Setting up…' : 'Set up'}</button>

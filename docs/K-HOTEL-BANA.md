@@ -56,3 +56,20 @@ On the platform server, not on the Visionline PC:
 2. Settings → Credential Services: URL as above, System ID 3460.
 3. Connector health: readiness *Credential Services System ID matches Visionline* and *callbacks
    registered* are green.
+
+## Answers from ASSA ABLOY and the hotel (12–13 Oct 2026)
+
+Moved here in 2.33.1 from the Connector health page (they were shown at every hotel).
+
+- **Staff key start time:** the API has startTime, but staff keys are expected to start immediately; a future start is
+  treated as not supported. The platform holds a future key and creates it at its start time (default).
+- **Credential Services:** URL https://hospitality.credential-services.api.assaabloy.com, user k_-_hotel_bana-…,
+  System ID 3460, account hma-cs-92a0dc3e-…, Mobile Access UUID 9. The password is only in the platform secret store.
+- **Revocation:** cancelling or checking out a mobile staff key in Visionline revokes it from the phone through
+  Credential Services; the platform also revokes it in the app when the connector reports the cancellation.
+- **Wrong doors:** more than 5 wrong-door attempts (events 320/323) cancel the card automatically (hotel).
+- **Time schedule** is honoured on staff mobile keys; used only when the access template sets one.
+- **credentialID is not the card registration number:** the connector looks it up with GET /cards?cardHolder=… after
+  creating the key; callbacks, lock events and card cancel use it; check-out uses the credentialID.
+- The Web API client is set to **Ignore operator card**.
+- **One live key per person;** Change doors uses override=true and gets a new registration number.
