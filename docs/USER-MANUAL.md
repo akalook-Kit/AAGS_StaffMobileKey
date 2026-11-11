@@ -603,23 +603,41 @@ from the portal at an encoder or issued from Visionline and recorded here, with 
   (minutes per item are editable). **Summary for the supplier** downloads an anonymous signed summary (counts only).
 - **Audit trail**: every change with name and time, chained so that edits or deletions show.
 
-## 12b. Light edition (La Falaise, 2.33)
+## 12b. Light version (2.34): lock diagnosis
 
-The light edition is for hotels with offline locks that only need the reports. Its menu has Overview, Reports,
-Alerts, Visionline cards & people and Locks (lock troubleshooting, batteries, maintenance). Pages of the full
-edition (keys, staff keycards, live occupancy, emergency, attendance, breakfast, ID cards, door event log) are not
-shown; opening their address leads back to the Overview, and the server refuses their actions.
+The Light version (`AccessMonitoringTool-Light-…msi`) is for the engineering team. Its menu has **Home**, **Locks**,
+**Day report**, **Battery status** and **Reports**; there is no administration, no users and no connector page.
 
-**Without signing in.** On the hotel network the portal opens directly as *Reports (no sign-in)*: everything is
-read only, and the audit trail, connector details and settings are not shown. Each opening is written in the audit
-trail (operator.open_access). From the internet entrance or the tunnel the sign-in page is shown as usual.
+**First start.** The page asks only for the Visionline user and password (and, if you want, the hotel's name). The
+password is encrypted in the browser for the connector on the server. The portal tests the account with
+Visionline, reads the doors and switches battery monitoring on by itself. If the password changes later: Home →
+*Change the Visionline account*. The hotel's name and logo: Home → *Change the hotel's name or logo*.
 
-**Administrators** press *Administrator sign-in* at the bottom of the menu, sign in with their password (and
-two-step code if switched on), and get the short Settings. *Sign out* returns to the sign-in page, which has
-*Back to the reports (no sign-in)*.
+**Without signing in.** On the hotel network the portal opens directly. From outside the hotel network it does not
+open.
 
-The built-in account *open-access@reports.local* (Users page) is what the reports use without signing in. It is
-always read only, whatever role it is given, and cannot sign in from outside the hotel network.
+**Home.** Locks draining, locks waiting for a report, batteries expected low within 7 days, reminders, and charts:
+batteries expected low per week (if nothing changes: the last battery change + how long a set lasts on that lock,
+or on the locks of the hotel), the locks whose batteries last the least, and the days a set lasts by year.
+
+**Diagnosing a lock, in this order.**
+1. *Cables and alignment*: no cable cut or pinched, nothing misaligned; plug everything back correctly.
+2. *Battery holder*: rust or deposits? Clean it, or replace it if it is rusty, and keep watching the lock.
+3. *Batteries*: industrial alkaline AA from one batch; measure at rest and under load (a drop over 0.6 V when the
+   lock opens points to weak batteries, a rusty holder or a bad contact).
+4. If the batteries drop again: **Report a problem** on that day. The portal reminds the team to *Upload the latest
+   report of this lock* (read it with the service device, save its events from Visionline as .xls, upload).
+5. If the report shows the drop: change the **LCA** (lock case adapter), then the **LCU** (lock controller unit),
+   then the lock case on the old models — one at a time. To test a part, swap it with a lock that works and write
+   the door in *Swapped with the part of door*; if the problem moves with the part, the part is faulty.
+6. Read the lock again about 3 weeks after any work: the portal says *Fixed*, *No change* or *Still draining*.
+
+Each entry can carry up to 6 photos or screenshots (paper log, multimeter, battery holder, Visionline).
+
+**Day report** (menu, or Locks → Day report): choose a day or a period (up to 93 days). It lists, by date and floor,
+each door, what was done or seen, the parts changed or checked, the batteries, the voltages, who did it and the
+state of the lock now; then the reminders and the locks whose batteries are expected low soon. **Print** gives the
+paper copy; **Excel (CSV)** opens in Excel. The lock register (Locks → Locks) has its own *Excel (CSV)* button.
 
 ## 13. Licence
 

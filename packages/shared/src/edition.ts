@@ -21,11 +21,15 @@ export const LIGHT_REMOVED_PERMISSIONS: readonly Permission[] = [
 ];
 
 /** Portal pages of the light edition (anything else is not shown and not routed). */
-export const LIGHT_PAGES = ['/', '/reports', '/monitoring', '/visionline', '/battery', '/lock-troubleshoot', '/maintenance', '/settings', '/operators', '/connector',
-  '/setup-report', '/audit', '/branding', '/help', '/account', '/insights', '/charts'] as const;
+/**
+ * 2.34 Light edition (Armel, 11 Nov): only what the hotel team needs to diagnose its locks. The landing page (locks,
+ * forecast, reminders), the lock register and troubleshooting (with the day report), battery status, the locks and
+ * batteries report, and help. No users, connector, settings or administration pages.
+ */
+export const LIGHT_PAGES = ['/', '/lock-troubleshoot', '/battery', '/reports', '/help'] as const;
 
-/** Reports of the reports page that need online locks (door events): left out of the light edition. */
-export const LIGHT_HIDDEN_REPORTS = ['door-activity', 'refused-entries', 'keycard-requests'] as const;
+/** Reports of the reports page left out of the light edition: all but the locks and batteries report. */
+export const LIGHT_HIDDEN_REPORTS = ['daily-summary', 'guest-keycards', 'staff-keycards-issued', 'keycard-holders', 'keycard-requests', 'door-activity', 'refused-entries'] as const;
 
 export function withoutEdition(perms: Set<Permission>, edition: EditionId): Set<Permission> {
   if (edition !== 'light') return perms;

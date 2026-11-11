@@ -59,11 +59,17 @@ for (const f of ['Install.cmd', 'Uninstall.cmd', 'install-onprem.ps1', 'install-
   writeFileSync(join(out, f), /\.(cmd|ps1|txt)$/.test(f) ? crlf(readFileSync(join(op, f), 'utf8')) : readFileSync(join(op, f)));
 cpSync(connectorDir, join(out, 'connector'), { recursive: true });
 writeFileSync(join(out, 'VERSION'), `${version}\r\n`);
-// 2.33 Edition packages: SMK_PACKAGE_EDITION=la-falaise-light writes edition.json, read by install-onprem.ps1.
+// 2.33 Edition packages: SMK_PACKAGE_EDITION=light writes edition.json, read by install-onprem.ps1.
+// 2.34 The light edition is one package for every hotel (Armel: "don't call it La Falaise, call it light"). It keeps
+// the La Falaise look for now (SMK_PACKAGE_TENANT=none for a plain one); the hotel's name and logo can be changed in
+// the portal. Open access also works on the server itself (SMK_OPEN_ACCESS_DIRECT=1: the browser on the Visionline
+// server opens the portal directly).
+const tenant = process.env.SMK_PACKAGE_TENANT ?? 'la-falaise';
 const EDITIONS = {
-  'la-falaise-light': { title: 'La Falaise Hotel Bonapriso - Light (reports)', msiName: 'AccessMonitoringTool-LaFalaise-Light',
-    env: { SMK_EDITION: 'light', SMK_OPEN_ACCESS: 'lan', SMK_TENANT: 'la-falaise' } },
+  light: { title: 'Access Monitoring Tool Light (lock diagnosis and reports)', msiName: 'AccessMonitoringTool-Light',
+    env: { SMK_EDITION: 'light', SMK_OPEN_ACCESS: 'lan', SMK_OPEN_ACCESS_DIRECT: '1', ...(tenant !== 'none' ? { SMK_TENANT: tenant } : {}) } },
 };
+EDITIONS['la-falaise-light'] = EDITIONS.light; // the name used by 2.33
 const pe = process.env.SMK_PACKAGE_EDITION;
 rmSync(join(out, 'edition.json'), { force: true });
 if (pe) {

@@ -143,7 +143,9 @@ export async function musterView(hotelId: string) {
 // Usage
 // ---------------------------------------------------------------------------------------------------------------
 const AREAS = ['overview', 'insights', 'access', 'events', 'monitoring', 'visionline', 'staff', 'keys', 'attendance', 'breakfast', 'battery', 'maintenance',
-  'operators', 'connector', 'branding', 'settings', 'audit', 'account', 'idcards', 'muster', 'emergency', 'usage', 'help', 'keycards', 'setup-report'] as const;
+  'operators', 'connector', 'branding', 'settings', 'audit', 'account', 'idcards', 'muster', 'emergency', 'usage', 'help', 'keycards', 'setup-report',
+  // 2.34 Pages added since 2.13 (their visits were refused, so the Usage page did not count them).
+  'reports', 'lock-troubleshoot', 'locks-online', 'room-keycards', 'charts', 'demo'] as const;
 const recentPings = new Map<string, number>();
 /** What a page view or action is worth in minutes saved (editable in the Usage page, these are starting points). */
 const OUTCOMES: Record<string, { label: string; actions?: string[]; table?: string }> = {

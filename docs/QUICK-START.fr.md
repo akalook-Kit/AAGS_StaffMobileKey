@@ -1,4 +1,4 @@
-# Access Monitoring Tool — démarrage rapide (2.33.1)
+# Access Monitoring Tool — démarrage rapide (2.34.0)
 
 ## Ce que c'est et ce qu'il faut
 
@@ -9,7 +9,7 @@ demandes de badges du personnel, surveille les piles des serrures et aide en cas
 défaut.
 
 Il a deux parties : le **portail** (avec sa base de données) et le **connecteur**, qui dialogue avec Visionline. Un
-seul fichier installe l'un, l'autre ou les deux : `AccessMonitoringTool-Server-2.33.1.msi`.
+seul fichier installe l'un, l'autre ou les deux : `AccessMonitoringTool-Server-2.34.0.msi`.
 
 | | A. Un ordinateur | B. Deux ordinateurs |
 |---|---|---|
@@ -21,30 +21,31 @@ Il faut aussi Windows 10/11 ou Windows Server 2016+ (64 bits), un utilisateur Vi
 et l'API Web Visionline joignable en https (en général `https://localhost/api/v1` sur le serveur Visionline). Rien
 d'autre n'est à installer avant : le .msi contient son propre environnement d'exécution.
 
-## Édition allégée La Falaise (2.33.1)
+## Version Light (2.34.0) : diagnostic des serrures et rapports du jour
 
-`AccessMonitoringTool-LaFalaise-Light-2.33.1.msi` est le même programme, préparé pour **La Falaise Hotel
-Bonapriso** (serrures VingCard Classic Alfa hors ligne). Il s'installe exactement comme le .msi standard (étapes
-ci-dessous), avec ces différences :
+`AccessMonitoringTool-Light-2.34.0.msi` est une version allégée du même programme, pour l'équipe technique d'un
+hôtel équipé de serrures hors ligne (faite d'abord pour La Falaise : son logo et ses couleurs sont inclus).
+Installez-la sur le serveur Visionline, comme le .msi standard, puis :
 
-- **Rapports uniquement.** Rapports, badges et personnes Visionline (lecture seule), diagnostic des serrures, piles des
-  serrures, maintenance et alertes. Pas de clés mobiles, pas de délivrance ni de demande de badges du personnel, pas
-  de portes et sécurité (présence en direct, urgence), pas de pointage, de petit-déjeuner ni de cartes d'identité.
-  Ces fonctions sont retirées aussi sur le serveur, pas seulement masquées dans le menu.
-- **Sans connexion sur le réseau de l'hôtel.** Un ordinateur du réseau de l'hôtel ouvre `https://<serveur>:8443` et
-  voit directement les rapports, en lecture seule. Depuis l'extérieur (entrée Internet ou tunnel), un mot de passe
-  est toujours demandé.
-- **Administration réduite.** *Connexion administrateur* (en bas du menu) demande le mot de passe de l'administrateur
-  et affiche des Paramètres réduits (nom et coordonnées, modules, Visionline, connecteur, rapports et
-  synchronisation, journal des événements, alertes, piles et maintenance, protection des administrateurs,
-  confidentialité, sauvegardes, licence).
-- **Logo et couleurs de La Falaise** (bleu marine et or) dès le départ ; la page de configuration est remplie avec
-  *La Falaise Hotel Bonapriso*, *Africa/Douala* et *Cameroun*. Après la configuration : Paramètres → Modules →
-  activez **Suivi des piles** et **Maintenance** une fois le connecteur en marche.
+1. **Une page, un seul réglage.** Le navigateur ouvre *Access Monitoring Tool Light*. Saisissez l'**utilisateur et
+   le mot de passe Visionline** (et, si vous le souhaitez, le nom de l'hôtel), puis cliquez sur **Se connecter**. Le
+   mot de passe est chiffré dans le navigateur pour le connecteur de ce serveur. C'est tout : le portail teste le
+   compte, lit les portes et active seul le suivi des piles. Pas d'administrateur, pas d'utilisateurs, pas de pages
+   connecteur ou réglages.
+2. **Sans connexion sur le réseau de l'hôtel.** Tout ordinateur du réseau de l'hôtel ouvre `https://<serveur>:8443`.
+3. **Accueil** : serrures qui se déchargent, serrures en attente d'un relevé, piles faibles d'ici 7 jours, rappels,
+   graphiques (piles faibles prévues par semaine, serrures dont les piles durent le moins, durée d'un jeu par année)
+   et raccourcis.
+4. **Serrures** : enregistrer des travaux (câbles et alignement → porte-piles → piles → LCA → LCU → boîtier de
+   serrure), *Signaler un problème* le jour où les piles chutent (avec la tension au repos et en charge), la porte
+   avec laquelle un LCA ou un LCU a été échangé, des photos du carnet papier ou du porte-piles. Quand les piles
+   chutent de nouveau, le portail le rappelle à l'équipe : *Importer le dernier rapport de cette serrure*.
+5. **Rapport du jour** : un jour ou une période, étage par étage : ce qui a été remplacé (selon les fiches papier),
+   les piles, les tensions, l'état de chaque serrure, les rappels et les serrures dont il faut préparer les piles.
+   **Imprimer** ou **Excel**.
 
-Installez-le sur un serveur qui n'a pas encore Access Monitoring Tool (voir *Installation propre* ci-dessous). Les
-versions allégées suivantes s'installent par-dessus (comme le .msi standard) ; ne mélangez pas sur un même serveur le
-.msi allégé et le .msi standard d'une même version.
+Les .msi Light et standard peuvent être gardés côte à côte dans le même dépôt GitHub et la même publication ;
+n'installez qu'un des deux sur un même serveur (le .msi Light s'installe par-dessus l'édition allégée La Falaise 2.33).
 
 ## Première configuration en 5 étapes
 

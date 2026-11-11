@@ -42,6 +42,8 @@ import { DemoPage } from './pages/Demo';
 import { FeedbackButton } from './components/Feedback';
 import { ReportsPage } from './pages/Reports';
 import { DoorHistoryPage } from './pages/LockHistory';
+import { LightHome } from './pages/LightHome';
+import { LightSetupPage } from './pages/LightSetup';
 import { TipLayer } from './components/Tips';
 import { LANGS, hasLangChoice, lang, langChoice, setLang, tr, type LangChoice } from './i18n';
 
@@ -98,7 +100,7 @@ export function App() {
   // 2.16 Invitation link: choose a password, then straight into the portal.
   if (invite && !inviteDone) return <InvitePage token={invite} onSignedIn={(t) => { setInviteDone(true); auth.set(t); setToken(t); }} />;
   if (setup === undefined && !token) return <div className="empty">Loading…</div>;
-  if (setup?.needed) return <SetupPage info={setup} />;
+  if (setup?.needed) return setup.edition === 'light' ? <LightSetupPage info={setup} /> : <SetupPage info={setup} />;
   if (!token && !openTried) return <div className="empty">Loading…</div>;
   if (!token) return <Login light={setup?.edition === 'light'} onSignedIn={(t) => { try { sessionStorage.removeItem('smk.signin'); } catch { /* ignore */ } auth.set(t); setToken(t); }} />;
   if (!me) return <div className="empty">Loading…</div>;
@@ -191,6 +193,14 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
       { to: '/demo', label: 'Demo Hotel and testers', tip: 'A made-up hotel for people to try the portal, and their feedback.', show: me.isPlatformAdmin },
     ] },
   ];
+  // 2.34 Light edition: a short menu, no groups (Armel: "hide everything that is not necessary").
+  const LIGHT_NAV: { id?: string; label: string; tip?: string; items: Item[] }[] = [{ label: '', items: [
+    { to: '/', label: 'Home', tip: 'The locks at a glance: what drains, reminders, batteries expected low, the Visionline connection.', show: true },
+    { to: '/lock-troubleshoot', label: 'Locks', tip: 'Diagnose a lock: record work or a problem, follow the next step, upload its report.', show: can('battery.read') },
+    { to: '/lock-troubleshoot?tab=day', label: 'Day report', tip: 'What was done and seen on a day: floor, door, parts, batteries, state. Print or Excel.', show: can('battery.read') },
+    { to: '/battery', label: 'Battery status', tip: "Battery state of every lock, from the locks' own alarms.", show: can('battery.read') && Boolean(attention.data?.batteryMonitoring), badge: (attention.data?.battery?.critical ?? 0) > 0 ? <span className="count" title={tr('Critical batteries')}>{attention.data.battery.critical}</span> : null },
+    { to: '/reports', label: 'Reports', tip: 'The locks and batteries report: PDF or Excel.', show: reportsOk },
+  ] }];
   const initials = hotel.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 3).toUpperCase();
   const pageList = ([
     ['/', 'Overview', true], ['/reports', 'Reports', reportsOk], ['/insights', 'Insights', can('reports.read')], ['/insights?page=mine', 'My reports', can('reports.read')], ['/insights?page=build', 'Build a report', can('reports.read')],
@@ -229,10 +239,11 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           )}
           <CommandPalette pages={pageList} />
           <nav aria-label={tr('Main')}>
-            {NAV.map((g) => {
+            {(light ? LIGHT_NAV : NAV).map((g) => {
               const items = g.items.filter((i) => i.show && vis(i.to));
               if (!items.length) return null;
-              if (!g.id) return items.map((i) => <NavLink key={i.to} to={i.to} end={i.to === '/'} data-tip={i.tip}>{tr(i.label)} {i.badge}</NavLink>);
+              if (!g.id) return items.map((i) => <NavLink key={i.to} to={i.to} end={i.to === '/'} data-tip={i.tip}
+                className={({ isActive }) => (light && i.to.includes('?') ? here === i.to : isActive && !(light && i.to === '/lock-troubleshoot' && loc.search.includes('tab=day'))) ? 'active' : ''}>{tr(i.label)} {i.badge}</NavLink>);
               const open = openGroup === g.id;
               const badges = items.reduce((n, i) => n + (i.count ?? 0), 0);
               return (
@@ -251,7 +262,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <NavLink to="/help" className="help-link">{tr('Help and manual')}</NavLink>
             <ThemeSwitch />
             <LangSwitch />
-            {me.edition?.isOpenAccess
+            {light && me.edition?.isOpenAccess ? null : me.edition?.isOpenAccess
               ? <button onClick={onSignOut} data-tip="Reports are open on the hotel network. Administrators sign in here to change settings.">{tr('Administrator sign-in')}</button>
               : <button onClick={onSignOut}>{tr('Sign out')}</button>}
           </div>
@@ -266,7 +277,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <div className="page-enter" key={loc.pathname}>
           {!inEdition(loc.pathname) ? <Navigate to="/" replace /> : null}
           <Routes>
-            <Route path="/" element={!can('resources.read') && can('breakfast.read') ? <Navigate to="/breakfast" replace /> : !can('resources.read') && !can('reports.read') && can('muster.read') ? <Navigate to="/muster" replace /> : <Overview />} />
+            <Route path="/" element={light ? <LightHome /> : !can('resources.read') && can('breakfast.read') ? <Navigate to="/breakfast" replace /> : !can('resources.read') && !can('reports.read') && can('muster.read') ? <Navigate to="/muster" replace /> : <Overview />} />
             <Route path="/staff" element={<StaffPage />} />
             <Route path="/keys" element={<KeysPage />} />
             <Route path="/keys/:keyId" element={<KeysPage />} />

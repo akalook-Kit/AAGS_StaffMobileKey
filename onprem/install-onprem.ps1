@@ -407,7 +407,7 @@ foreach ($k in $hotel.Keys) { $envLines += "$k=$($hotel[$k])" }
 $editionFile = Join-Path $here 'edition.json'
 if (Test-Path $editionFile) {
   $ed = Get-Content $editionFile -Raw | ConvertFrom-Json
-  $allowed = @{ 'SMK_EDITION' = '^(full|light)$'; 'SMK_OPEN_ACCESS' = '^(off|lan)$'; 'SMK_TENANT' = '^[a-z0-9-]{1,40}$' }
+  $allowed = @{ 'SMK_EDITION' = '^(full|light)$'; 'SMK_OPEN_ACCESS' = '^(off|lan)$'; 'SMK_OPEN_ACCESS_DIRECT' = '^(0|1)$'; 'SMK_TENANT' = '^[a-z0-9-]{1,40}$' }
   $envLines += '# Edition of this installation (from edition.json of the installer).'
   foreach ($p in $ed.env.PSObject.Properties) {
     if ($allowed.ContainsKey($p.Name) -and ([string]$p.Value) -match $allowed[$p.Name]) { $envLines += "$($p.Name)=$($p.Value)" }

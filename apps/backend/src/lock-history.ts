@@ -16,45 +16,64 @@ export const BATTERY_TYPES = [
 ] as const;
 export type BatteryType = (typeof BATTERY_TYPES)[number]['id'];
 
-/** Groups in the order they are eliminated: simplest and cheapest first. step = the matching lock-report step. */
+/**
+ * Groups in the order they are eliminated: simplest and cheapest first. step = the matching lock-report step.
+ * 2.34 Armel's order for VingCard locks (11 Nov): 1. cables and alignment (nothing cut, nothing misaligned, everything
+ * plugged back correctly); 2. the battery holder (rust: clean it or replace it) and monitor; 3. if the batteries drop
+ * again, upload the latest lock report; if it has dropped, change a component — the LCA (lock case adapter) or the LCU
+ * (lock controller unit), swapping it with the one of a lock that works — and monitor; 4. the lock case (inside,
+ * several sizes) on the older models. Novel locks have everything in one unit; Zigbee node and Bluetooth come later.
+ */
 export const PART_GROUPS = [
-  { id: 'batteries', name: 'Batteries', step: 'batteries', why: 'Wrong type (not industrial alkaline), old stock, mixed packs or fitted the wrong way drain fast or give false alarms. Fit a new pack of industrial alkaline AA from a known supplier, note the brand and batch, and check each cell with a multimeter before fitting (about 1.6 V for a fresh alkaline cell).' },
-  { id: 'power', name: 'Battery holder, contacts and cable', step: 'contacts', why: 'Dirty, loose or corroded contacts and a pinched or cut cable make the voltage drop when the motor starts: alarms and restarts with good batteries.' },
+  { id: 'cabling', name: 'Cables and alignment', step: 'contacts', why: 'Check that no cable is cut or pinched and that nothing is misaligned (door, strike, lock). Plug every connector back together correctly. This is always the first check.' },
+  { id: 'holder', name: 'Battery holder (rust)', step: 'contacts', why: 'Rust or dirt on the battery holder stops the batteries giving their power. If there is rust, replace the battery holder (or clean the existing one), then monitor the lock.' },
+  { id: 'batteries', name: 'Batteries', step: 'batteries', why: 'Wrong type (not industrial alkaline), old stock, mixed packs or fitted the wrong way drain fast or give false alarms. Fit a new pack of industrial alkaline AA from a known supplier, note the brand and batch, and measure the pack at rest and under load before fitting.' },
   { id: 'mechanics', name: 'Door and lock mechanics', step: 'door', why: 'A door that rubs, a misaligned strike, a drooping handle or a stiff lockcase makes the motor work harder at every opening.' },
+  { id: 'lca', name: 'LCA (lock case adapter)', step: 'reader', why: 'If the batteries still drop after the cables, the battery holder and new batteries, change the LCA. Swap it with the LCA of a lock whose batteries last, record the door it came from, and monitor both locks: if the fault moves with the part, the part is faulty.' },
+  { id: 'lcu', name: 'LCU (lock controller unit)', step: 'electronics', why: 'If the batteries still drop after the LCA, change the LCU the same way: swap it with the LCU of a lock that works, record the door it came from, and monitor both locks.' },
+  { id: 'lockcase', name: 'Lock case (inside, several sizes)', step: 'door', why: 'On the older models the lock case inside the door can be changed (it comes in several sizes). A stiff or worn lock case makes the motor work harder.' },
   { id: 'reader', name: 'Card reader', step: 'reader', why: 'A faulty or disturbed reader wakes up and reads again and again.' },
   { id: 'ble', name: 'Bluetooth (mobile keys)', step: 'bluetooth', why: 'A faulty BLE board or many mobile-key sessions use more power than cards.' },
-  { id: 'online', name: 'Online radio and gateway', step: 'radio', why: 'A weak link to the gateway makes an online lock send again and again.' },
+  { id: 'online', name: 'Online radio (Zigbee node) and gateway', step: 'radio', why: 'A weak link to the gateway makes an online lock send again and again.' },
   { id: 'electronics', name: 'Door unit electronics and firmware', step: 'electronics', why: 'A faulty door unit or firmware can keep the lock awake or raise false battery alarms.' },
+  /** 2.34 Not a part: what was seen or measured (a problem, the voltage), recorded on its day. */
+  { id: 'note', name: 'Seen or measured (nothing changed)', step: 'none', why: 'A problem seen on a day (the batteries dropped, an alarm, the door did not open) or a voltage measured, without changing anything.' },
 ] as const;
 export type PartGroup = (typeof PART_GROUPS)[number]['id'];
+/** Groups that are parts of the lock (the "note" group is what was seen or measured). */
+export const isObservation = (part: string) => PARTS.find((p) => p.id === part)?.group === 'note';
 
 export const PARTS: { id: string; name: string; group: PartGroup; novel?: boolean; notNovel?: boolean; action?: boolean; only?: string[]; not?: string[] }[] = [
+  { id: 'issue-reported', name: 'Problem seen (batteries dropped, alarm, door not opening)', group: 'note', action: true },
+  { id: 'measured', name: 'Battery voltage measured (at rest and under load)', group: 'note', action: true },
+  { id: 'cables-checked', name: 'Cables checked: none cut, all plugged back correctly', group: 'cabling', action: true },
+  { id: 'battery-cable', name: 'Cut or damaged cable replaced', group: 'cabling' },
+  { id: 'strike', name: 'Misalignment corrected (door, strike, lock)', group: 'cabling', action: true },
+  { id: 'holder-cleaned', name: 'Battery holder cleaned (rust, dirt)', group: 'holder', action: true },
+  { id: 'battery-holder', name: 'Battery holder replaced (rust)', group: 'holder' },
+  { id: 'contacts-cleaned', name: 'Battery contacts cleaned (moisture, corrosion)', group: 'holder', action: true },
   { id: 'batteries', name: 'Batteries replaced', group: 'batteries' },
-  { id: 'battery-holder', name: 'Battery holder / cover cleaned or replaced', group: 'power' },
-  { id: 'battery-cable', name: 'Battery cable replaced', group: 'power' },
-  { id: 'contacts-cleaned', name: 'Contacts cleaned (dirt, moisture, corrosion)', group: 'power', action: true },
-  { id: 'strike', name: 'Strike plate / door alignment adjusted', group: 'mechanics', action: true },
-  { id: 'screws', name: 'Fixing screws and spindle secured', group: 'mechanics', action: true },
-  { id: 'handles', name: 'Handle or lever spring replaced', group: 'mechanics' },
-  { id: 'spindle', name: 'Spindle replaced', group: 'mechanics' },
+  { id: 'screws', name: 'Fixing screws and spindle secured', group: 'mechanics', action: true, not: ['classic-alfa'] },
+  { id: 'handles', name: 'Handle or lever spring replaced', group: 'mechanics', not: ['classic-alfa'] },
+  { id: 'spindle', name: 'Spindle replaced', group: 'mechanics', not: ['classic-alfa'] },
   { id: 'lockcase', name: 'Lockcase (mortise) replaced', group: 'mechanics', notNovel: true, not: ['classic-alfa'] },
-  { id: 'closer', name: 'Door closer adjusted or replaced', group: 'mechanics' },
+  { id: 'closer', name: 'Door closer adjusted or replaced', group: 'mechanics', not: ['classic-alfa'] },
   { id: 'reader', name: 'Card reader / outside escutcheon replaced', group: 'reader', notNovel: true, not: ['classic-alfa'] },
   { id: 'ble', name: 'BLE (mobile key) board replaced', group: 'ble', notNovel: true, not: ['classic-alfa'] },
-  { id: 'zigbee', name: 'Online (Zigbee) module replaced', group: 'online' , not: ['classic-alfa'] },
-  { id: 'gateway', name: 'Gateway moved, replaced or signal improved', group: 'online', action: true , not: ['classic-alfa'] },
-  { id: 'door-unit', name: 'Door unit electronics / inside escutcheon replaced', group: 'electronics', notNovel: true , not: ['classic-alfa'] },
+  { id: 'zigbee', name: 'Online (Zigbee node) module replaced', group: 'online', not: ['classic-alfa'] },
+  { id: 'gateway', name: 'Gateway moved, replaced or signal improved', group: 'online', action: true, not: ['classic-alfa'] },
+  { id: 'door-unit', name: 'Door unit electronics / inside escutcheon replaced', group: 'electronics', notNovel: true, not: ['classic-alfa'] },
   { id: 'firmware', name: 'Firmware updated / lock programmed', group: 'electronics', action: true },
   { id: 'time-set', name: 'Time set after the battery change', group: 'electronics', action: true },
-  // VingCard Classic Alfa, offline (2.31, Armel: "has the LCU, LCA, lock case and the battery holder as components")
-  { id: 'lca', name: 'LCA (outside unit, card reader) replaced', group: 'reader', only: ['classic-alfa'] },
-  { id: 'lcu', name: 'LCU (lock control unit, inside) replaced', group: 'electronics', only: ['classic-alfa'] },
-  { id: 'classic-lockcase', name: 'Lockcase replaced', group: 'mechanics', only: ['classic-alfa'] },
+  // VingCard Classic Alfa, offline (2.31; 2.34 Armel: LCA = lock case adapter, LCU = lock controller unit)
+  { id: 'lca', name: 'LCA (lock case adapter) replaced or swapped', group: 'lca', only: ['classic-alfa'] },
+  { id: 'lcu', name: 'LCU (lock controller unit) replaced or swapped', group: 'lcu', only: ['classic-alfa'] },
+  { id: 'classic-lockcase', name: 'Lock case replaced (inside, several sizes)', group: 'lockcase', only: ['classic-alfa'] },
   // Novel (2.30, Armel: "if it is a novel lock, we need also to consider the equipment changed")
   { id: 'novel-reader', name: 'Novel reader unit (outside, RFID/BLE) replaced', group: 'reader', novel: true },
   { id: 'novel-inside', name: 'Novel inside unit / battery pack replaced', group: 'electronics', novel: true },
   { id: 'novel-lockcase', name: 'Novel lockcase (motor) replaced', group: 'mechanics', novel: true },
-  { id: 'novel-power', name: 'Novel power module (frame / lock, battery-free) replaced', group: 'power', novel: true },
+  { id: 'novel-power', name: 'Novel power module (frame / lock, battery-free) replaced', group: 'holder', novel: true },
 ];
 export const partName = (id: string) => PARTS.find((p) => p.id === id)?.name ?? id;
 /** The parts that exist on a lock model (Novel and Classic Alfa have their own). */
@@ -150,7 +169,7 @@ export function nextStep(judged: Judged[], model: string | null, reportSteps: { 
   const okByCheck = new Set(Object.entries(checks ?? {}).filter(([, v]) => v === 'ok').map(([k]) => k));
   const rank = { likely: 0, possible: 1, unknown: 2, unlikely: 3 } as Record<string, number>;
   const has = new Set(partsFor(model).map((p) => p.group));
-  const left = PART_GROUPS.filter((g) => has.has(g.id) && !tried.has(g.id) && !okByCheck.has(g.step))
+  const left = PART_GROUPS.filter((g) => g.id !== 'note' && has.has(g.id) && !tried.has(g.id) && !okByCheck.has(g.step))
     .map((g, i) => ({ g, i, s: rank[reportSteps?.find((s) => s.id === g.step)?.suggests ?? 'unknown'] ?? 2 }))
     .sort((a, b) => a.s - b.s || a.i - b.i);
   const partsOf = (g: PartGroup) => partsFor(model).filter((p) => p.group === g).map((p) => p.name);
@@ -159,7 +178,7 @@ export function nextStep(judged: Judged[], model: string | null, reportSteps: { 
   return {
     state,
     next: state === 'solved' || !n ? null : { group: n.g.id, name: n.g.name, why: n.g.why, parts: partsOf(n.g.id), suggestedByReport: (reportSteps?.find((s) => s.id === n.g.step)?.suggests ?? null) },
-    tried: PART_GROUPS.filter((g) => tried.has(g.id)).map((g) => g.name),
+    tried: PART_GROUPS.filter((g) => g.id !== 'note' && tried.has(g.id)).map((g) => g.name),
     remaining: left.map((x) => x.g.name),
   };
 }

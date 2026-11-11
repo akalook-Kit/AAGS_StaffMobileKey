@@ -1003,3 +1003,21 @@ tr.row-warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
   .print-only { display: table-cell; }
 }
 .lh-kpi.wide .small strong { font-size: 14px; }
+
+/* 2.34 Light edition: home page, day report, lock forecast */
+.light-conn { margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.light-conn .linklike { padding: 0; }
+.light-connect { border-left: 4px solid var(--accent, #1f6feb); margin-bottom: 16px; }
+.light-connect .field-row { flex-wrap: wrap; }
+.light-reminders { margin: 0 0 14px; }
+.light-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin-top: 18px; }
+.light-actions .tile { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid var(--line, #ddd); border-radius: 12px; background: var(--card, transparent); color: inherit; text-decoration: none; }
+.light-actions .tile:hover, .light-actions .tile:focus-visible { border-color: var(--accent, #1f6feb); }
+.light-actions .tile span { font-size: 13px; opacity: .78; }
+.lh-head-figs > .lh-fig-bad strong { color: var(--bad, #b3261e); }
+.lh-head-figs > .lh-fig-warn strong { color: var(--warn, #b7791f); }
+.lh-head-figs > .lh-fig-ok strong { color: var(--good, #1a7f37); }
+.lh-day section.panel { margin-top: 12px; }
+.lh-day .lh-kpis { margin: 8px 0; }
+.print-title { margin-top: 10px; }
+@media print { .lh-day .table-scroll { overflow: visible; } }

@@ -701,26 +701,48 @@ l'a délivré.
 - **Piste d'audit** : chaque modification avec nom et heure, chaînée pour que les modifications ou suppressions se
   voient.
 
-## 12b. Édition allégée (La Falaise, 2.33)
+## 12b. Version Light (2.34) : diagnostic des serrures
 
-L'édition allégée est destinée aux hôtels à serrures hors ligne qui n'ont besoin que des rapports. Son menu comporte
-Accueil, Rapports, Alertes, Badges et personnes Visionline et Serrures (diagnostic des serrures, piles, maintenance).
-Les pages de l'édition complète (clés, badges du personnel, présence en direct, urgence, pointage, petit-déjeuner,
-cartes d'identité, journal des événements des portes) ne sont pas affichées ; ouvrir leur adresse ramène à l'Accueil,
-et le serveur refuse leurs actions.
+La version Light (`AccessMonitoringTool-Light-…msi`) est destinée à l'équipe technique. Son menu comprend
+**Accueil**, **Serrures**, **Rapport du jour**, **État des piles** et **Rapports** ; pas d'administration, pas
+d'utilisateurs, pas de page connecteur.
 
-**Sans connexion.** Sur le réseau de l'hôtel, le portail s'ouvre directement en *Rapports (sans connexion)* : tout est
-en lecture seule, et la piste d'audit, les détails du connecteur et les paramètres ne sont pas affichés. Chaque
-ouverture est inscrite dans la piste d'audit (operator.open_access). Depuis l'entrée Internet ou le tunnel, la page de
-connexion s'affiche comme d'habitude.
+**Premier démarrage.** La page demande seulement l'utilisateur et le mot de passe Visionline (et, si vous le
+souhaitez, le nom de l'hôtel). Le mot de passe est chiffré dans le navigateur pour le connecteur du serveur. Le
+portail teste le compte avec Visionline, lit les portes et active seul le suivi des piles. Si le mot de passe change
+plus tard : Accueil → *Changer le compte Visionline*. Nom et logo de l'hôtel : Accueil → *Changer le nom ou le logo
+de l'hôtel*.
 
-**Les administrateurs** cliquent sur *Connexion administrateur* en bas du menu, se connectent avec leur mot de passe
-(et le code à deux étapes s'il est activé), et obtiennent les Paramètres réduits. *Se déconnecter* ramène à la page de
-connexion, qui propose *Retour aux rapports (sans connexion)*.
+**Sans connexion.** Sur le réseau de l'hôtel, le portail s'ouvre directement. Hors du réseau de l'hôtel, il ne
+s'ouvre pas.
 
-Le compte intégré *open-access@reports.local* (page Utilisateurs) est celui qu'utilisent les rapports sans connexion.
-Il est toujours en lecture seule, quel que soit le rôle qu'on lui donne, et ne peut pas se connecter depuis
-l'extérieur du réseau de l'hôtel.
+**Accueil.** Serrures qui se déchargent, serrures en attente d'un relevé, piles faibles d'ici 7 jours, rappels, et
+graphiques : piles faibles prévues par semaine (si rien ne change : le dernier changement de piles + la durée d'un
+jeu sur cette serrure, ou sur les serrures de l'hôtel), les serrures dont les piles durent le moins, et la durée d'un
+jeu par année.
+
+**Diagnostiquer une serrure, dans cet ordre.**
+1. *Câbles et alignement* : aucun câble coupé ou pincé, rien de désaligné ; tout rebrancher correctement.
+2. *Porte-piles* : rouille ou dépôts ? Le nettoyer, ou le remplacer s'il est rouillé, et continuer à surveiller.
+3. *Piles* : AA alcalines industrielles d'un même lot ; mesurer au repos et en charge (une chute de plus de 0,6 V à
+   l'ouverture indique des piles faibles, un porte-piles rouillé ou un mauvais contact).
+4. Si les piles chutent de nouveau : **Signaler un problème** ce jour-là. Le portail rappelle à l'équipe
+   d'*Importer le dernier rapport de cette serrure* (la lire avec le terminal de service, enregistrer ses événements
+   depuis Visionline en .xls, importer).
+5. Si le rapport montre la chute : changer le **LCA** (adaptateur de boîtier de serrure), puis le **LCU** (unité de
+   contrôle de la serrure), puis le boîtier de serrure sur les anciens modèles — un à la fois. Pour tester une pièce,
+   l'échanger avec une serrure qui fonctionne et noter la porte dans *Échangé avec la pièce de la porte* ; si le
+   problème suit la pièce, la pièce est défectueuse.
+6. Relire la serrure environ 3 semaines après chaque intervention : le portail indique *Réparé*, *Aucun changement*
+   ou *Se décharge encore*.
+
+Chaque entrée peut porter jusqu'à 6 photos ou captures (carnet papier, multimètre, porte-piles, Visionline).
+
+**Rapport du jour** (menu, ou Serrures → Rapport du jour) : choisir un jour ou une période (jusqu'à 93 jours). Il
+liste, par date et par étage, chaque porte, ce qui a été fait ou constaté, les pièces changées ou vérifiées, les
+piles, les tensions, qui l'a fait et l'état actuel de la serrure ; puis les rappels et les serrures dont les piles
+seront bientôt faibles. **Imprimer** donne la copie papier ; **Excel (CSV)** s'ouvre dans Excel. Le registre des
+serrures (Serrures → Serrures) a son propre bouton *Excel (CSV)*.
 
 ## 13. Licence
 

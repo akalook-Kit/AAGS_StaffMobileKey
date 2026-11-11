@@ -4,7 +4,7 @@ import { api } from '../api';
 import { useHotel } from '../App';
 import { Columns, DataTable, Kpi, NoData, VizCard, useWidth } from '../components/charts';
 import { Drawer, ErrorNote, PageHead, fmt, useApi } from '../ui';
-import { LockTodo, LockTrend, LocksTable, RecordWorkButton, type LockList } from './LockHistory';
+import { DayReport, LockTodo, LockTrend, LocksTable, RecordWorkButton, type LockList } from './LockHistory';
 
 /**
  * 2.18 Lock troubleshooting, mainly for offline locks: the event report of one lock (exported from Visionline) is
@@ -66,20 +66,23 @@ function Steps() {
  * short page with the figures on top and tabs: To do (the technicians' round), Locks, Lock reports, How it works.
  */
 function ReportList() {
-  const { base, can } = useHotel();
+  const { base, can, me } = useHotel();
+  const light = me.edition?.id === 'light';
   const [sp, setSp] = useSearchParams();
-  const tab = (['todo', 'locks', 'reports', 'how'] as const).find((t) => t === sp.get('tab')) ?? 'todo';
-  const hist = useApi<LockList>(`${base}/lock-history`, []);
+  const tab = (['todo', 'locks', 'day', 'reports', 'how'] as const).find((t) => t === sp.get('tab')) ?? 'todo';
+  // 2.34 Light edition: every lock of the hotel is listed (with its floor and when its batteries are expected low).
+  const hist = useApi<LockList>(`${base}/lock-history${light ? '?all=1' : ''}`, []);
   const list = useApi<ReportRow[]>(tab === 'reports' ? `${base}/lock-reports` : null, [tab]);
   const att = useApi<any>(`${base}/attention`, []);
-  const [upload, setUpload] = useState(false);
+  const [upload, setUpload] = useState(sp.get('upload') === '1');
   const [q, setQ] = useState('');
   const [page, setPage] = useState(0);
   const rows = (list.data ?? []).filter((r) => !q || `${r.doorName} ${r.fileName}`.toLowerCase().includes(q.toLowerCase()));
   const per = 25, pages = Math.max(1, Math.ceil(rows.length / per)), pg = Math.min(page, pages - 1);
   const TABS: [typeof tab, string, string][] = [
     ['todo', `To do${hist.data ? ` (${hist.data.locks.reduce((n, l) => n + l.plan.filter((p) => p.priority <= 5).length, 0)})` : ''}`, 'What to do on which lock, in order: the technicians\' round. Printable.'],
-    ['locks', `Locks${hist.data ? ` (${hist.data.total})` : ''}`, 'Every lock with a history: state, battery changes, last set, last work.'],
+    ['locks', `Locks${hist.data ? ` (${hist.data.total})` : ''}`, 'Every lock with a history: floor, state, battery changes, last set, when the batteries are expected low, last work.'],
+    ['day', 'Day report', 'What was done and seen on a day or a period: floor, door, parts changed, batteries, voltages, state. Printable and for Excel.'],
     ['reports', 'Lock reports', 'The event reports uploaded, newest first.'],
     ['how', 'How it works', 'The method, step by step.'],
   ];
@@ -87,6 +90,7 @@ function ReportList() {
     <>
       <PageHead title="Lock troubleshooting" intro="Why locks drain their batteries, lock by lock, and what to do next.">
         {att.data?.batteryMonitoring && <Link className="btn no-print" to="/battery">Battery status</Link>}
+        <span className="no-print"><RecordWorkButton problem onDone={() => void hist.reload()} /></span>
         <span className="no-print"><RecordWorkButton onDone={() => void hist.reload()} /></span>
         {can('battery.manage') && <button className="btn primary no-print" onClick={() => setUpload(true)}>Upload a lock report</button>}
       </PageHead>
@@ -98,6 +102,7 @@ function ReportList() {
       </div>
       {tab === 'todo' && hist.data && <LockTodo data={hist.data} />}
       {tab === 'locks' && hist.data && <LocksTable data={hist.data} />}
+      {tab === 'day' && <DayReport />}
       {tab === 'how' && <HowItWorks />}
       {tab === 'reports' && <>
         <ErrorNote error={list.error} />
@@ -135,17 +140,19 @@ function ReportList() {
   );
 }
 
-/** The method, for anyone new: the same steps for every lock. */
+/** The method, for anyone new: the same steps for every lock (Armel's order, 11 Nov 2026). */
 function HowItWorks() {
   return (
     <div className="panel lh-how">
       <ol>
-        <li><strong>Each time batteries are changed or a part is swapped, record it</strong> on the lock (Record work, or Add from the paper log): the date, who, the parts, the battery type (industrial alkaline AA recommended), its brand and batch, and the pack voltage measured before and after.</li>
-        <li><strong>Read the lock</strong> with the service device, save its events from Visionline as a report (.xls) and <strong>upload it</strong>. The portal shows each set of batteries: how long it lasted, use, days to each voltage, alarms, restarts, card errors.</li>
-        <li><strong>Read it again about 3 weeks after any work.</strong> The portal compares the battery use before and after: <em>Fixed</em> (that part was the cause), <em>No change</em> (it was not), <em>Still draining</em>.</li>
-        <li><strong>While a lock still drains, follow the next part to check</strong>, simplest and cheapest first: batteries (industrial alkaline, measured) → battery holder, contacts and cable → door and lock mechanics (alignment, strike, screws, spindle, handle springs, lockcase) → card reader / LCA → Bluetooth → online radio → electronics / LCU and firmware.</li>
-        <li><strong>Work through the To do tab</strong> on each round: it lists the locks to read, those that need industrial alkaline batteries, the next part to check, the reports to refresh and the battery changes not yet recorded. Print it as the round sheet.</li>
-        <li><strong>Watch the trend</strong>: if the days a set lasts drop on many locks at once, look for a common cause (a new battery supply or batch, a setting, firmware) before changing parts.</li>
+        <li><strong>Cables and alignment first.</strong> Open the lock: is a cable cut, pinched or unplugged? Is anything misaligned (strike, lock case, door rubbing)? Plug everything back correctly and replace a cut cable. Record it: "Cables and connectors checked", "Cut or damaged cable replaced" or "Misalignment corrected".</li>
+        <li><strong>The battery holder.</strong> Look for rust or green deposits on the holder and its contacts. Clean the holder, or replace it if it is rusty, and keep watching the lock.</li>
+        <li><strong>The batteries.</strong> Industrial alkaline AA from one batch. Measure the voltage at rest and under load (while the lock opens): a drop of more than 0.6 V points to weak batteries, a rusty holder or a bad contact. Record the date, who, the brand and batch.</li>
+        <li><strong>If the batteries drop again</strong>, use <em>Report a problem</em> on that day. The portal then reminds the team: <em>Upload the latest report of this lock</em>. Read the lock with the service device, save its events from Visionline (.xls, 100 to 3000 events) and upload it here.</li>
+        <li><strong>If the report shows the drop</strong>, change a component, one at a time: the <strong>LCA</strong> (lock case adapter), then the <strong>LCU</strong> (lock controller unit), then the lock case (inside, several sizes) on the old models. You can swap the part with a lock that works and write which door it came from: if the problem moves with the part, the part is faulty. Novel locks have everything in one unit; their reader, Bluetooth and the online Zigbee node are listed separately.</li>
+        <li><strong>Monitor.</strong> Read the lock again about 3 weeks after any work. The portal compares the battery use before and after: <em>Fixed</em> (that part was the cause), <em>No change</em> (it was not) or <em>Still draining</em> (go to the next part).</li>
+        <li><strong>At the end of the day</strong>, open the <em>Day report</em>: which floor, which door, what was replaced as per the paperwork, batteries, voltages and the state of each lock. Print it or open it in Excel.</li>
+        <li><strong>Prepare in advance.</strong> Each lock shows when its batteries are expected low if nothing changes (from how long a set lasts on that lock, or on the locks of the hotel). The home page and the Day report list the locks expected low soon.</li>
       </ol>
     </div>
   );

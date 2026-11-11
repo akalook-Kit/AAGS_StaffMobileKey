@@ -1686,7 +1686,7 @@ async function main() {
     ok(h30.batteries.count >= 2 && h30.batteries.changes.some((c: any) => c.batteryTypeName?.startsWith('Industrial')), `battery changes counted: ${h30.batteries.count}, with the type fitted`);
     ok(h30.elimination.state === 'solved' && h30.elimination.next === null, 'the lock is marked solved; nothing more to check');
     const set1001 = h30.sets?.find((t: any) => t.from.startsWith('2026-10-01'));
-    ok(h30.sets?.length >= 2 && set1001?.work?.[0]?.parts?.includes('Battery cable replaced') && set1001.openingsPerDay !== undefined, `battery sets from the report, with the work done when each was fitted (${h30.sets?.length} sets)`);
+    ok(h30.sets?.length >= 2 && set1001?.work?.[0]?.parts?.includes('Cut or damaged cable replaced') && set1001.openingsPerDay !== undefined, `battery sets from the report, with the work done when each was fitted (${h30.sets?.length} sets)`);
     // 2.31 VingCard Classic Alfa (offline): LCU, LCA, lockcase and battery holder; no door sensor, openings from cards.
     ok(cat30.models.some((m: any) => m.id === 'classic-alfa') && ['lcu', 'lca', 'classic-lockcase'].every((id) => cat30.parts.some((p: any) => p.id === id && p.only?.includes('classic-alfa'))), 'Classic Alfa has its parts: LCU, LCA, lockcase (and battery holder)');
     const d106 = doors30.find((d: any) => d.name === '106');
@@ -1702,7 +1702,7 @@ async function main() {
     const h2 = (await call('GET', W2, tech30)).json;
     ok(h2.work[0].verdict === 'draining' && h2.work[0].againInDays === 30, `reader swap: "${h2.work[0].title}"`);
     ok(h2.batteries.notRecommended.length === 1, 'consumer alkaline batteries are flagged (industrial alkaline recommended)');
-    ok(h2.elimination.next?.group === 'power', `next to check: ${h2.elimination.next?.name}`);
+    ok(h2.elimination.next?.group === 'cabling', `next to check (2.34: cables and alignment first): ${h2.elimination.next?.name}`);
     const list30 = (await call('GET', `${H}/lock-history`, tech30)).json;
     ok(list30.locks.some((x: any) => x.doorName === '108' && x.state === 'solved') && list30.locks.some((x: any) => x.doorName === '107'), 'both locks listed with their state');
     ok(Array.isArray(list30.years) && list30.years.some((y: any) => y.year === '2026'), `days a set by year, all locks: ${list30.years.map((y: any) => `${y.year} ${y.medianDays} d`).join(', ')}`);

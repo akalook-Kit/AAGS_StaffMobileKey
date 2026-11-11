@@ -1,4 +1,4 @@
-# Access Monitoring Tool — quick start (2.33.1)
+# Access Monitoring Tool — quick start (2.34.0)
 
 ## What it is and what you need
 
@@ -8,7 +8,7 @@ requests, watches lock batteries and supports emergencies. It works for a hotel 
 hospital, a school). Staff mobile keys are an optional module, off by default.
 
 It has two parts: the **portal** (with its database) and the **connector**, which talks to Visionline. One file
-installs either or both: `AccessMonitoringTool-Server-2.33.1.msi`.
+installs either or both: `AccessMonitoringTool-Server-2.34.0.msi`.
 
 | | A. One computer | B. Two computers |
 |---|---|---|
@@ -20,25 +20,29 @@ You also need Windows 10/11 or Windows Server 2016+ (64-bit), a Visionline user 
 Visionline Web API reachable over https (usually `https://localhost/api/v1` on the Visionline server). Nothing else
 is installed beforehand: the .msi carries its own runtime.
 
-## La Falaise light edition (2.33.1)
+## Light edition (2.34.0): lock diagnosis and day reports
 
-`AccessMonitoringTool-LaFalaise-Light-2.33.1.msi` is the same program, made for **La Falaise Hotel Bonapriso**
-(offline VingCard Classic Alfa locks). It installs exactly like the standard .msi (steps below), with these differences:
+`AccessMonitoringTool-Light-2.34.0.msi` is a lighter version of the same program, for the engineering team of a
+hotel with offline locks (made first for La Falaise: its logo and colours are included). Install it on the
+Visionline server, like the standard .msi, then:
 
-- **Reports only.** Reports, Visionline cards & people (read only), lock troubleshooting, lock batteries, maintenance
-  and alerts. No mobile keys, no staff keycard issuing or requests, no doors & safety (live occupancy, emergency),
-  no time & attendance, breakfast or ID cards. These are removed on the server too, not only hidden from the menu.
-- **No sign-in on the hotel network.** A computer of the hotel network opens `https://<server>:8443` and sees the
-  reports straight away, read only. From outside (internet entrance or tunnel) a password is still asked.
-- **Short administration.** *Administrator sign-in* (bottom of the menu) asks for the administrator's password and
-  shows a shorter Settings (name & details, modules, Visionline, connector, reports & sync, event log, alerts,
-  battery & maintenance, administrator protection, privacy, backups, licence).
-- **La Falaise logo and colours** (navy and gold) from the start; the setup page is filled with *La Falaise Hotel
-  Bonapriso*, *Africa/Douala* and *Cameroon*. After the setup: Settings → Modules → switch on **Battery monitoring**
-  and **Maintenance** once the connector runs.
+1. **One page, one setting.** The browser opens *Access Monitoring Tool Light*. Enter the **Visionline user and
+   password** (and, if you want, the hotel's name) and click **Connect**. The password is encrypted in the browser
+   for the connector on this server. That is all: the portal tests the account, reads the doors and switches
+   battery monitoring on by itself. No administrator, no users, no connector or settings pages.
+2. **No sign-in on the hotel network.** Any computer of the hotel network opens `https://<server>:8443`.
+3. **Home**: locks draining, locks waiting for a report, batteries expected low within 7 days, reminders, charts
+   (batteries expected low per week, the locks whose batteries last the least, days a set lasts by year) and
+   shortcuts.
+4. **Locks**: record work (cables and alignment → battery holder → batteries → LCA → LCU → lock case), *Report a
+   problem* on the day the batteries drop (with the voltage at rest and under load), the door an LCA or LCU was
+   swapped with, photos of the paper log or the battery holder. When the batteries drop again the portal reminds
+   the team: *Upload the latest report of this lock*.
+5. **Day report**: one day or a period, floor by floor: what was replaced (as per the paperwork), batteries,
+   voltages, the state of each lock, the reminders and the locks to prepare batteries for. **Print** or **Excel**.
 
-Install it on a server that has no Access Monitoring Tool yet. Later light versions install over it (same as the
-standard .msi); do not mix the light and standard .msi of the same version on one server.
+The Light and standard .msi can be kept side by side in the same GitHub repository and release; install only one of
+them on a given server (the Light .msi installs over the 2.33 La Falaise light edition).
 
 ## First setup in 5 steps
 

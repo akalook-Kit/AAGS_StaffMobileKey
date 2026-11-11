@@ -153,6 +153,28 @@ git tag --list "v2.2*"
 
 Only the newest zip is needed if the older ones are no longer at hand (each zip is the whole project).
 
+## 2.34.0 (11 Nov 2026): the Light version beside the standard one
+
+Both installers come from the same project and the same commit, so one repository and one release hold them:
+`AccessMonitoringTool-Server-2.34.0.msi` (standard) and `AccessMonitoringTool-Light-2.34.0.msi` (lock diagnosis
+only). Download `access-monitoring-tool-project-2.34.0.zip` into **Downloads**, then
+
+```powershell
+$v = '2.34.0'
+Expand-Archive "$env:USERPROFILE\Downloads\access-monitoring-tool-project-$v.zip" "$env:TEMP\amt-$v" -Force
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\amt-$v\access-monitoring-tool-project-$v\scripts\git-catch-up.ps1" `
+  -Repo C:\khb\staff-mobile-key\staff-mobile-key -From "$env:USERPROFILE\Downloads"
+cd C:\khb\staff-mobile-key\staff-mobile-key
+git log --oneline --decorate -3        # origin/main must be on v2.34.0
+```
+
+Release on the website: https://github.com/akalook-Kit/AAGS_StaffMobileKey/releases/new → *Choose a tag* `v2.34.0`
+→ title `2.34.0 (Light version: lock diagnosis and day reports)` → drag **both** .msi files and
+`SHA256SUMS-2.34.0.txt` → **Publish release**.
+
+To build either installer yourself from the project: `npm run package:onprem && npm run package:msi` (standard), or
+`$env:SMK_PACKAGE_EDITION='light'; npm run package:onprem; npm run package:msi` (Light).
+
 ## 2.33.1 (10 Nov 2026)
 
 Same as 2.33.0 with `$v = '2.33.1'`: download `access-monitoring-tool-project-2.33.1.zip` into **Downloads**, then

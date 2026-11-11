@@ -31,6 +31,7 @@ import { noticeRoutes } from './routes/notices.ts';
 import { vlImportRoutes } from './routes/vl-imports.ts';
 import { lockReportRoutes } from './routes/lock-reports.ts';
 import { lockHistoryRoutes } from './routes/lock-history.ts';
+import { lightRoutes } from './routes/light.ts';
 import { gatewayRoutes } from './routes/gateways.ts';
 import { safetyRoutes } from './routes/safety.ts';
 import { reportBuilderRoutes } from './routes/report-builder.ts';
@@ -113,6 +114,7 @@ export async function buildServer() {
   vlImportRoutes(app);
   lockReportRoutes(app);
   lockHistoryRoutes(app);
+  lightRoutes(app);
   gatewayRoutes(app);
 
   const dist = resolve(config.portalDist);

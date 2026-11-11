@@ -178,7 +178,12 @@ export function permsIn(op: OperatorCtx, hotelId: string): Set<Permission> {
   // 2.33 The light edition has no mobile keys, keycard issuing, doors & safety, attendance, breakfast or ID cards.
   const p = withoutEdition(base, edition());
   // Open access (no sign-in, light edition): reports only, not the audit trail or the connector.
-  if (op.email === OPEN_ACCESS_EMAIL) for (const x of ['audit.read', 'audit.export', 'connector.read', 'alerts.manage', 'battery.manage', 'maintenance.work', 'maintenance.manage', 'staff.read'] as Permission[]) p.delete(x);
+  if (op.email === OPEN_ACCESS_EMAIL) {
+    for (const x of ['audit.read', 'audit.export', 'connector.read', 'alerts.manage', 'battery.manage', 'maintenance.work', 'maintenance.manage', 'staff.read'] as Permission[]) p.delete(x);
+    // 2.34 Light edition: the hotel team works without signing in (on the hotel network): they record what was done
+    // on each lock, upload lock reports and read Visionline again. Nothing else changes.
+    if (edition() === 'light') for (const x of ['battery.manage', 'maintenance.work', 'resources.discover'] as Permission[]) p.add(x);
+  }
   return p;
 }
 

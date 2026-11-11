@@ -37,7 +37,9 @@ describe('lock history: judging work from the reports after it (2.30)', () => {
     expect(n.next?.group).toBe('mechanics');
     expect(n.next?.parts).toContain('Lockcase (mortise) replaced');
     const unknown = judgeWorks([{ id: 'b', on: '2026-08-01', parts: ['batteries', 'lcu'], batteryType: 'unknown' }], [], ['2026-09-10'], [], o);
-    expect(nextStep(unknown, 'classic-alfa', null, null, true).next?.group).toBe('batteries');
+    // 2.34 Armel's order: cables and alignment first, then the battery holder, then the batteries.
+    expect(nextStep(unknown, 'classic-alfa', null, null, true).next?.group).toBe('cabling');
+    expect(nextStep(unknown, 'classic-alfa', null, { contacts: 'ok' }, true).next?.group).toBe('batteries');
     const nn = nextStep(j, 'novel', null, { contacts: 'ok', door: 'ok' }, true);
     expect(nn.next?.group).toBe('reader');
     expect(nn.next?.parts).toEqual(['Novel reader unit (outside, RFID/BLE) replaced']);
