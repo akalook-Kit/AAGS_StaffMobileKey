@@ -153,6 +153,14 @@ git tag --list "v2.2*"
 
 Only the newest zip is needed if the older ones are no longer at hand (each zip is the whole project).
 
+## 2.35.0 (16 Nov 2026): battery change frequency, K Hotel Douala Light
+
+Three installers from the same commit: `AccessMonitoringTool-Server-2.35.0.msi` (standard),
+`AccessMonitoringTool-Light-2.35.0.msi` (Light, La Falaise look) and `AccessMonitoringTool-Light-KHotelDouala-2.35.0.msi`
+(Light, K Hotel look). Same commands as 2.34.0 with `$v = '2.35.0'`; attach all three .msi files and
+`SHA256SUMS-2.35.0.txt` to the release `v2.35.0`. To build the K Hotel one yourself:
+`$env:SMK_PACKAGE_EDITION='light'; $env:SMK_PACKAGE_TENANT='k-hotel-douala'; npm run package:onprem; npm run package:msi`.
+
 ## 2.34.0 (11 Nov 2026): the Light version beside the standard one
 
 Both installers come from the same project and the same commit, so one repository and one release hold them:

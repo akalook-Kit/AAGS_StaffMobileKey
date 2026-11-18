@@ -28,7 +28,8 @@ describe('2.33.1 French everywhere', () => {
     const ph = (s: string) => (s.match(/\{\d+\}/g) ?? []).sort().join();
     for (const [en, fr] of Object.entries(FR_ALL)) {
       expect(fr.trim().length, en).toBeGreaterThan(0);
-      expect(ph(fr), en).toBe(ph(en));
+      // 2.35 An English plural ending glued to a word ("time{1}" = "times") may be left out in French ("fois").
+      expect(ph(fr), en).toBe(ph(en.replace(/[a-z]\{\d+\}/g, (m) => (fr.includes(m.slice(1)) ? m : m[0]!))));
     }
   });
 

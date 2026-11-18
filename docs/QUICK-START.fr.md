@@ -1,4 +1,4 @@
-# Access Monitoring Tool — démarrage rapide (2.34.0)
+# Access Monitoring Tool — démarrage rapide (2.35.0)
 
 ## Ce que c'est et ce qu'il faut
 
@@ -9,7 +9,7 @@ demandes de badges du personnel, surveille les piles des serrures et aide en cas
 défaut.
 
 Il a deux parties : le **portail** (avec sa base de données) et le **connecteur**, qui dialogue avec Visionline. Un
-seul fichier installe l'un, l'autre ou les deux : `AccessMonitoringTool-Server-2.34.0.msi`.
+seul fichier installe l'un, l'autre ou les deux : `AccessMonitoringTool-Server-2.35.0.msi`.
 
 | | A. Un ordinateur | B. Deux ordinateurs |
 |---|---|---|
@@ -21,9 +21,15 @@ Il faut aussi Windows 10/11 ou Windows Server 2016+ (64 bits), un utilisateur Vi
 et l'API Web Visionline joignable en https (en général `https://localhost/api/v1` sur le serveur Visionline). Rien
 d'autre n'est à installer avant : le .msi contient son propre environnement d'exécution.
 
-## Version Light (2.34.0) : diagnostic des serrures et rapports du jour
+## Version Light (2.35.0) : diagnostic des serrures et rapports du jour
 
-`AccessMonitoringTool-Light-2.34.0.msi` est une version allégée du même programme, pour l'équipe technique d'un
+**K Hotel Douala** : `AccessMonitoringTool-Light-KHotelDouala-2.35.0.msi` est la même version Light avec le logo et
+les couleurs de K Hotel (noir et or rose). Depuis la 2.35, chaque relevé de serrure indique aussi la fréquence de
+changement des piles (par an, durée d'un jeu, si chaque jeu dure moins que le précédent, et le jour où une serrure qui
+se déchargeait a été réglée).
+
+
+`AccessMonitoringTool-Light-2.35.0.msi` est une version allégée du même programme, pour l'équipe technique d'un
 hôtel équipé de serrures hors ligne (faite d'abord pour La Falaise : son logo et ses couleurs sont inclus).
 Installez-la sur le serveur Visionline, comme le .msi standard, puis :
 

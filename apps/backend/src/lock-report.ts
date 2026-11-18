@@ -211,7 +211,10 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   const count = (list: readonly number[], src: LockEvent[] = all) => src.filter((e) => isIn(e.code, list)).length;
   // 2.31 Locks without a door sensor (VingCard Classic: no "The door is opened" event) count an opening for each card
   // accepted, power open or metal key, so use per day and battery use per 1,000 openings work for them too.
-  const sensor = all.some((e) => isIn(e.code, OPENING));
+  // 2.35 A few "door opened" events (from inside, or from a service visit) do not make a door sensor: K Hotel Douala 508
+  // had 2,500 guest cards accepted and only a handful of door events, and was shown with 0 openings a day.
+  const doorEvents = all.filter((e) => isIn(e.code, OPENING)).length;
+  const sensor = doorEvents > 0 && doorEvents >= 0.25 * all.filter((e) => isIn(e.code, [...C.staffAccepted, ...C.guestAccepted])).length;
   const isOpening = (e: LockEvent): boolean => (sensor ? isIn(e.code, OPENING) : isIn(e.code, [...C.staffAccepted, ...C.guestAccepted, ...C.mechanicalKey, 76]) || (/accepted|power open/i.test(e.name) && !/^error/i.test(e.name)));
   const countOpen = (src: LockEvent[] = all) => src.filter(isOpening).length;
   const from = ev[0]?.t ?? null, to = ev[ev.length - 1]?.t ?? null;
@@ -350,8 +353,35 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
     currentDays: lastPeriod && lastPeriod.startedBy !== 'report' ? lastPeriod.days : null,
   };
   const lastReading = readings[readings.length - 1] ?? null;
+  // 2.35 How often the batteries were changed (Armel, 16 Nov: "share the frequency of battery changed"): per year, the
+  // trend of the set life (each set lasting less than the one before points to a fault getting worse) and, when sets
+  // that used to last weeks now last months, the day it changed (what was done that day fixed it).
+  const setDays = lasted.sets.map((x) => x.days);
+  const med = (a: number[]) => { const v = [...a].sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[(v.length - 1) / 2]! : (v[v.length / 2 - 1]! + v[v.length / 2]!) / 2) : null; };
+  const third = Math.max(1, Math.floor(setDays.length / 3));
+  const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+  const early = avg(setDays.slice(0, third)), late = avg(setDays.slice(-third));
+  const years = new Map<string, { year: string; changes: number; days: number[] }>();
+  for (const x of exchanges) { const y = x.t.slice(0, 4); const e = years.get(y) ?? { year: y, changes: 0, days: [] }; e.changes++; years.set(y, e); }
+  for (const x of lasted.sets) years.get(x.to.slice(0, 4))?.days.push(x.days);
+  const firstChange = exchanges[0]?.t ?? null, lastChange = exchanges[exchanges.length - 1]?.t ?? null;
+  const spanForRate = firstChange && to ? (ms(to) - ms(wFrom ?? firstChange)) / DAY : 0;
+  const setMedian = med(setDays);
+  const currentSet = lasted.currentDays;
+  const frequency = {
+    changes: exchanges.length, firstChange, lastChange,
+    daysSinceLast: lastChange && to ? Math.round((ms(to) - ms(lastChange)) / DAY) : null,
+    perYearRate: spanForRate >= 60 ? r1(exchanges.length / (spanForRate / 365)) : null,
+    last365: to ? exchanges.filter((x) => ms(x.t) > ms(to) - 365 * DAY).length : 0,
+    medianDays: setMedian != null ? r1(setMedian) : null, shortestDays: setDays.length ? r1(Math.min(...setDays)) : null, longestDays: setDays.length ? r1(Math.max(...setDays)) : null,
+    trend: setDays.length >= 4 && early && late ? (late <= early * 0.7 ? 'shortening' as const : late >= early * 1.4 ? 'lengthening' as const : 'stable' as const) : null,
+    earlyAvgDays: setDays.length >= 4 && early ? r1(early) : null, lateAvgDays: setDays.length >= 4 && late ? r1(late) : null,
+    perYear: [...years.values()].sort((a, b) => (a.year < b.year ? -1 : 1)).map((y) => ({ year: y.year, changes: y.changes, avgDays: y.days.length ? r1(avg(y.days)!) : null })),
+    fixedSince: setDays.length >= 3 && setMedian != null && setMedian <= 60 && currentSet != null && currentSet >= Math.max(90, setMedian * 3) && lastChange
+      ? { since: lastChange, days: Math.round(currentSet), before: r1(setMedian) } : null,
+  };
   const battery = { readings, ignoredReadings, alarms, alarmDays, exchanges, periods, avgDropPer30Days: avgDrop, estimatedDaysPerSet: estimatedDays,
-    scale: scaleHigh ? '6-9 V' : '3-4.8 V', alarmLevel, confirmLevel, firmwareDays, lastReading, firmwareAlarms, lasted };
+    scale: scaleHigh ? '6-9 V' : '3-4.8 V', alarmLevel, confirmLevel, firmwareDays, lastReading, firmwareAlarms, lasted, frequency };
 
   // ---- Faults ------------------------------------------------------------------------------------------------------
   const restartsAll = all.filter((e) => isIn(e.code, C.restart));
@@ -415,12 +445,12 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
     }
   }
   if (fast.length) f.push({ area: 'battery', level: 'high', title: fast.length === 1 ? `New batteries down to ${levels[0]!.toFixed(1)} V in ${fastest < 1 ? 'less than a day' : nd(Math.round(fastest))}` : `New batteries drained fast ${fast.length} times`,
-    detail: `${fast.map((x) => x[0]!.toUpperCase() + x.slice(1)).join('; ')}. A good set normally lasts many months.`,
+    detail: `${(fast.length > 5 ? fast.slice(-5) : fast).map((x) => x[0]!.toUpperCase() + x.slice(1)).join('; ')}${fast.length > 5 ? ` (the last 5 of ${fast.length}; all are in Battery periods below)` : ''}. A good set normally lasts many months.`,
     action: 'Check that the batteries are new, of the type the lock requires (alkaline or lithium as specified, not rechargeable), all from the same pack, and that the contacts are clean and tight. Then look at the lock and door findings below: a lock that restarts, keeps its motor running, or a door that rubs or is left open, drains batteries.' });
   if (firmwareAlarms.length) {
     const changes = [...new Set(firmwareAlarms.map((x) => x.changedAt))];
     f.push({ area: 'lock', level: 'high', title: `Battery alarm after new batteries: firmware fault (${firmwareAlarms.length} time${firmwareAlarms.length === 1 ? '' : 's'})`,
-      detail: `After the battery change${changes.length === 1 ? '' : 's'} on ${changes.map(dt).join(', ')} the lock raised a battery alarm (first: ${firmwareAlarms[0]!.name}, ${firmwareAlarms[0]!.t.replace('T', ' ')}) while its readings stayed above ${confirmLevel.toFixed(1)} V. A battery alarm after new batteries, even once, is a firmware fault, not a battery problem; it is not counted as a battery alarm here.`,
+      detail: `After the battery change${changes.length === 1 ? '' : 's'} on ${changes.length > 6 ? `${changes.slice(-6).map(dt).join(', ')} and ${changes.length - 6} earlier` : changes.map(dt).join(', ')} the lock raised a battery alarm (first: ${firmwareAlarms[0]!.name}, ${firmwareAlarms[0]!.t.replace('T', ' ')}) while its readings stayed above ${confirmLevel.toFixed(1)} V. A battery alarm after new batteries, even once, is a firmware fault, not a battery problem; it is not counted as a battery alarm here.`,
       action: 'Program the lock and upload its firmware with the service tool, then read the lock again and check that the alarm has cleared.' });
   }
   if (faults.accessDeniedBattery) f.push({ area: 'battery', level: 'high', title: 'The lock refused cards because of its battery', detail: `${faults.accessDeniedBattery} time(s) the lock switched to "access denied" for low battery.`, action: 'Replace the batteries now.' });
@@ -465,12 +495,92 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
     detail: `The deadbolt knob inside the room was turned ${usage.deadbolt} time(s) (released ${usage.deadboltReleased}).${deadboltRefused ? ` ${deadboltRefused} card(s) were refused while it was on: only cards with the right to override the deadbolt open the room then.` : ''}` });
   if (online.pings) f.push({ area: 'data', level: 'info', title: `The lock has an online connection (${online.pings} pings from the server)`,
     detail: `Last ping ${online.lastPing?.replace('T', ' ')}. Pings are sent when the server asks, so gaps between them alone do not mean the lock was offline.` });
-  if (lasted.sets.length) f.push({ area: 'battery', level: 'info', title: `Battery sets lasted ${lasted.sets.map((x) => Math.round(x.days)).join(', ')} day${lasted.sets.length === 1 && Math.round(lasted.sets[0]!.days) === 1 ? '' : 's'}`,
+  // 2.35 Battery change frequency, trend and the day a draining lock was fixed.
+  if (frequency.changes >= 2 && frequency.perYearRate != null) {
+    const often = frequency.medianDays != null && frequency.medianDays <= 90 && !frequency.fixedSince;
+    f.push({ area: 'battery', level: often ? 'high' : 'info', title: `Batteries changed ${frequency.changes} times (${frequency.perYearRate} a year)`,
+      detail: `${frequency.medianDays != null ? `A set lasted ${Math.round(frequency.medianDays)} days (median), from ${Math.round(frequency.shortestDays!)} to ${Math.round(frequency.longestDays!)} days. ` : ''}Last change ${dt(frequency.lastChange!)}, ${frequency.daysSinceLast} days before the end of the report. A healthy lock with industrial alkaline batteries goes a year or more on one set. Year by year: see "Battery change frequency" below.`,
+      ...(often ? { action: 'Follow the steps below in order (cables and alignment, battery holder, batteries, then the LCA and the LCU swapped with a lock that works) and record each one on the lock, so the next report shows which one fixed it.' } : {}) });
+  }
+  if (frequency.trend === 'shortening' && !frequency.fixedSince)
+    f.push({ area: 'battery', level: 'high', title: `Each set lasts less: from ${Math.round(frequency.earlyAvgDays!)} to ${Math.round(frequency.lateAvgDays!)} days`,
+      detail: 'The first sets in the report lasted much longer than the last ones. Batteries of the same type do not do that: a fault in the lock is getting worse (a contact, the LCA or LCU, the reader or Bluetooth module keeping the lock awake).',
+      action: 'Do not keep changing batteries: swap the LCA, then the LCU, with a lock whose batteries last, and read both locks again after 3 weeks.' });
+  if (frequency.fixedSince) {
+    const day0 = frequency.fixedSince.since.slice(0, 10);
+    const that = all.filter((e) => e.t && e.t.slice(0, 10) === day0);
+    const what = [that.some((e) => isIn(e.code, C.program)) && 'a program was uploaded', that.filter((e) => isIn(e.code, C.restart)).length >= 2 && `the door unit restarted ${that.filter((e) => isIn(e.code, C.restart)).length} times (parts being changed or plugged back)`,
+      that.some((e) => isIn(e.code, C.timeSet)) && 'the time was set'].filter(Boolean);
+    f.push({ area: 'battery', level: 'info', title: `Fixed since ${day0}: the current set has lasted ${frequency.fixedSince.days} days`,
+      detail: `Before ${day0} a set lasted about ${Math.round(frequency.fixedSince.before)} days; the set fitted that day has lasted ${frequency.fixedSince.days} days so far.${what.length ? ` That day ${what.join(', ')}.` : ''} Whatever was done on ${day0} fixed the drain: write it in the lock's history so other locks get the same repair.` });
+  }
+  {
+    // Card reading errors that started at some point (a reader going bad), month by month over the report.
+    const byMonth = new Map<string, number>();
+    for (const e of ev) if (isIn(e.code, C.cardRead)) byMonth.set(e.t!.slice(0, 7), (byMonth.get(e.t!.slice(0, 7)) ?? 0) + 1);
+    const months: string[] = []; if (from && to) for (let d = new Date(`${from.slice(0, 7)}-01T00:00:00Z`); d.toISOString().slice(0, 7) <= to.slice(0, 7); d.setUTCMonth(d.getUTCMonth() + 1)) months.push(d.toISOString().slice(0, 7));
+    const series = months.map((m) => byMonth.get(m) ?? 0);
+    if (series.length >= 9) {
+      // The month the errors jumped: the split into two steady levels that fits best (least squares, each side at least
+      // 4 months); it counts when the level after is 4 times the level before and still high in the last 3 months.
+      const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
+      const sse = (a: number[]) => { const m = mean(a); return a.reduce((x, y) => x + (y - m) ** 2, 0); };
+      let start = -1, best = Infinity;
+      for (let k = 4; k <= series.length - 4; k++) { const e = sse(series.slice(0, k)) + sse(series.slice(k)); if (e < best) { best = e; start = k; } }
+      const a6 = start >= 0 ? mean(series.slice(start)) : 0, b = start >= 0 ? mean(series.slice(0, start)) : 0;
+      if (start >= 0 && a6 >= 20 && a6 >= Math.max(1, b) * 4 && mean(series.slice(-3)) >= a6 / 2) {
+        for (let i = f.length - 1; i >= 0; i--) if (/^Card reading errors \d+ times$/.test(f[i]!.title)) f.splice(i, 1);
+        f.push({ area: 'lock', level: 'medium', title: `Card reading errors rose to ${Math.round(a6)} a month since ${months[start]}`,
+          detail: `Before ${months[start]}: about ${b.toFixed(b < 10 ? 1 : 0)} a month. A reader that keeps failing makes guests and staff present their card again and again, and each try wakes the lock: it also uses battery.`,
+          action: 'Clean the reader and test with a new card. If the errors continue for every card, swap the reader (or the LCA on Classic locks) with a lock that works.' });
+      }
+    }
+  }
+  {
+    // Use that rose sharply (a room that was little sold and is now busy): faster battery use is then expected.
+    if (to && from && ms(to) - ms(from) >= 240 * DAY) {
+      const cut = ms(to) - 90 * DAY, yearAgo = ms(to) - 365 * DAY;
+      const accepted = ev.filter((e) => isIn(e.code, [...C.staffAccepted, ...C.guestAccepted]));
+      const now90 = accepted.filter((e) => ms(e.t!) > cut).length / 90;
+      const prev = accepted.filter((e) => ms(e.t!) > yearAgo && ms(e.t!) <= cut).length / 275;
+      if (now90 >= 2 && now90 >= Math.max(0.3, prev) * 3)
+        f.push({ area: 'use', level: 'info', title: `The room is used much more: ${now90.toFixed(1)} cards a day, against ${prev.toFixed(1)} before`,
+          detail: 'Cards accepted in the last 90 days compared with the 9 months before. More openings use the batteries faster: a shorter set life is expected, not a fault, as long as the set still lasts many months.' });
+    }
+  }
+  const low30 = to ? readings.filter((r) => ms(r.t) > ms(to) - 30 * DAY).reduce<number | null>((m, r) => (m == null || r.volts < m ? r.volts : m), null) : null;
+  if (low30 != null && lasted.currentDays != null && lasted.currentDays >= 300 && low30 <= (scaleHigh ? 8.4 : 4.4) + 1e-6 && low30 > alarmLevel + 1e-6)
+    f.push({ area: 'battery', level: 'medium', title: `Old set: in for ${Math.round(lasted.currentDays)} days, dipping to ${low30.toFixed(1)} V`,
+      detail: `The set has done its time; the voltage dips when the lock works. It reaches the low-battery level (${alarmLevel.toFixed(1)} V) soon.`, action: 'Plan a battery change in the coming weeks (not urgent while no battery alarm shows).' });
+  if (!readings.length && !raw.length && !exchanges.length && all.length > 0 && all.length < 1500 && !all.some((e) => isIn(e.code, [...C.ping, ...C.restart, ...C.readout, ...C.paramsRead])))
+    f.push({ area: 'data', level: 'medium', title: 'This file has no battery readings: not a full read-out of the lock',
+      detail: `${all.length} events over ${Math.round((ms(to ?? from ?? '2000-01-01T00:00') - ms(from ?? '2000-01-01T00:00')) / DAY)} days, without any "Battery level below" reading, battery change, restart or service event. It looks like a filtered export from Visionline (for example card events only), so the battery change frequency cannot be worked out.`,
+      action: 'Read the lock with the service device, then in Visionline export all its events (100 to 3,000) without a filter, and upload that file.' });
+  if (lasted.sets.length > 6) f.push({ area: 'battery', level: 'info', title: `${lasted.sets.length} battery sets lasted ${Math.round(frequency.medianDays ?? lasted.avgDays!)} days (median)`,
+    detail: `From ${Math.round(frequency.shortestDays!)} to ${Math.round(frequency.longestDays!)} days, from one battery change to the next (average ${Math.round(lasted.avgDays!)} days).${lasted.currentDays != null ? ` The set in the lock at the end of the report had been in for ${Math.round(lasted.currentDays)} days.` : ''}` });
+  else if (lasted.sets.length) f.push({ area: 'battery', level: 'info', title: `Battery sets lasted ${lasted.sets.map((x) => Math.round(x.days)).join(', ')} day${lasted.sets.length === 1 && Math.round(lasted.sets[0]!.days) === 1 ? '' : 's'}`,
     detail: `From one battery change to the next${lasted.sets.length > 1 ? ` (average ${Math.round(lasted.avgDays!)} days)` : ''}.${lasted.currentDays != null ? ` The set in the lock at the end of the report had been in for ${Math.round(lasted.currentDays)} days.` : ''}` });
   else if (lasted.currentDays != null) f.push({ area: 'battery', level: 'info', title: `Batteries in for ${Math.round(lasted.currentDays)} days`, detail: 'Since the last battery change in the report; no complete set to compare with.' });
   if (avgDrop != null) f.push({ area: 'battery', level: 'info', title: `Battery use: ${avgDrop.toFixed(2)} V per 30 days`, detail: estimatedDays != null ? `At this rate a new set reaches the low-battery level (${alarmLevel.toFixed(1)} V) after about ${estimatedDays} days.` : 'Average of the battery periods in the report.' });
   f.push({ area: 'use', level: 'info', title: `${usage.perDay} openings a day`, detail: `Over the last ${Math.round(spanDays)} days${busiest.length ? `, busiest around ${busiest.map((b) => `${String(b.h).padStart(2, '0')}:00`).join(', ')}` : ''}. In the whole report: ${usage.openings} openings (${usage.staffCards} staff card, ${usage.guestCards} guest card, ${usage.openedFromInside} from inside).` });
   if (service.readouts) f.push({ area: 'data', level: 'info', title: `Read with the service device ${service.readouts} times`, detail: `Last read ${service.lastReadout?.replace('T', ' ') ?? '—'}. Time set ${service.timeSet} times, program uploaded ${service.programDownloads} times.` });
+  // 2.35 A drain that stopped (fixedSince): the old fast drains, battery alarms and battery refusals all came before the
+  // fix, so they no longer ask for action; they stay listed as history.
+  // A firmware battery alarm long ago (more than 6 months before the end of the report) is history, not an action.
+  if (firmwareAlarms.length && to && ms(to) - ms(firmwareAlarms[firmwareAlarms.length - 1]!.t) > 180 * DAY)
+    for (const x of f) if (/^Battery alarm after new batteries/.test(x.title)) { x.level = 'info'; x.title = `${x.title} (last ${firmwareAlarms[firmwareAlarms.length - 1]!.t.slice(0, 7)})`; delete x.action; }
+  if (frequency.fixedSince) {
+    const fx = frequency.fixedSince.since;
+    const after = (l: readonly number[]) => ev.filter((e) => e.t! > fx && isIn(e.code, l) && !nearChange(e.t!)).length;
+    for (const x of f) if (x.level !== 'info' && ((/^Internal lock error/.test(x.title) && after(C.internal) === 0) || (/^The lock restarted/.test(x.title) && after(C.restart) <= Math.max(2, frequency.fixedSince.days / 60)))) {
+      x.level = 'info'; x.title = `Before ${fx.slice(0, 10)}: ${x.title[0]!.toLowerCase()}${x.title.slice(1)}`; delete x.action;
+    }
+    const lastAlarm = [...alarms, ...firmwareAlarms].map((a) => a.t).sort().pop() ?? '';
+    for (const x of f) if (x.level === 'high' && x.area === 'battery' || /^Battery alarm after new batteries/.test(x.title)) {
+      if (lastAlarm && lastAlarm > fx && !/^New batteries/.test(x.title)) continue;
+      x.level = 'info'; x.title = `Before ${fx.slice(0, 10)}: ${x.title[0]!.toLowerCase()}${x.title.slice(1)}`; delete x.action;
+    }
+  }
   const order = { high: 0, medium: 1, info: 2 };
   f.sort((a, b) => order[a.level] - order[b.level]);
 
@@ -486,33 +596,37 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   const per1000 = periods.map((x) => x.dropPer1000Openings).filter((x): x is number => x != null);
   const restartsNow = faults.restarts;
   const S = (id: string, title: string, check: string, suggests: Step['suggests'], evidence: string): Step => ({ id, title, check, suggests, evidence });
+  // 2.35 Armel's order: cables and alignment, battery holder, batteries, door, then the LCA and the LCU.
   const steps: Step[] = [
+    S('contacts', 'Cables, alignment and battery holder', 'First: is any cable cut, pinched or unplugged, is anything misaligned? Plug everything back correctly. Then the battery holder: rust or deposits on the holder, its springs and contacts? Clean it, or replace it if it is rusty.',
+      restartsNow >= 5 || clockLost > 0 ? 'likely' : restartsNow > 0 ? 'possible' : 'unlikely',
+      `${restartsNow} restart(s) not explained by a battery change${clockLost ? `, clock lost (${clockLost} events before 2000)` : ''}.`),
     S('batteries', 'Batteries', 'Are the batteries new, of the type the lock requires (not rechargeable), all from the same pack and fitted the right way round?',
       fastDrain ? 'likely' : alarms.length ? 'possible' : 'unlikely',
       fastDrain ? `New batteries drained fast ${fast.length} time(s).` : alarms.length ? `${alarms.length} battery alarm(s) that count.` : 'No fast drain in the report.'),
-    S('contacts', 'Battery holder and contacts', 'Are the battery springs and contacts clean, tight and not corroded; is the cable to the door unit firmly connected?',
-      restartsNow >= 5 || clockLost > 0 ? 'likely' : restartsNow > 0 ? 'possible' : 'unlikely',
-      `${restartsNow} restart(s) not explained by a battery change${clockLost ? `, clock lost (${clockLost} events before 2000)` : ''}.`),
     S('door', 'Door and lock mechanics', 'Is the door aligned; do latch and strike engage without rubbing; does the closer shut and latch the door; does the deadbolt turn freely?',
       ajarPerDay >= 0.5 || door.openedWithoutCredential.length >= 3 ? 'likely' : door.leftOpenRecent > 0 ? 'possible' : 'unlikely',
       `Left open too long ${door.leftOpenRecent} time(s) in ${Math.round(spanDays)} days (up to ${door.longestOpenMinutes ?? 0} min); opened from outside with no card or key ${door.openedWithoutCredential.length} time(s).`),
-    S('use', 'How much the door is used', 'Is this door unusually busy (staff corridor, service door), so the batteries simply work harder?',
-      usage.perDay >= 40 ? 'possible' : 'unlikely',
-      `${usage.perDay} openings a day${per1000.length ? `; ${per1000.map((x) => x.toFixed(1)).join(' / ')} V per 1,000 openings` : ''}.`),
+    S('electronics', 'LCA, then LCU (door unit electronics)', 'If the batteries still drop after the cables, the battery holder and new batteries: swap the LCA (lock case adapter) with a lock whose batteries last, then the LCU (lock controller unit), one at a time, and read both locks again after 3 weeks. Internal errors that continue after programming point there too.',
+      faults.internal >= 5 || (fastDrain && frequency.trend === 'shortening') ? 'likely' : faults.internal > 0 || fastDrain ? 'possible' : 'unlikely', `${faults.internal} internal error(s) (1975).`),
     S('reader', 'Card reader', 'Is the reader clean and undamaged; do different cards fail, or only some?',
       faults.cardReading >= 5 ? 'likely' : faults.cardReading > 0 ? 'possible' : 'unlikely', `${faults.cardReading} card reading error(s).`),
     S('bluetooth', 'Bluetooth (mobile keys)', 'Is Bluetooth on at this lock; are mobile keys used here; is the BLE module and its firmware up to date?',
       faults.ble >= 3 ? 'likely' : faults.ble > 0 ? 'possible' : 'unlikely', `${faults.ble} Bluetooth error(s).`),
     S('radio', 'Online radio and gateway', 'Online locks keep a radio link to their gateway: is the signal to the gateway good, and the gateway online? A weak link makes the lock retry and use more battery.',
       online.pings > 0 && fastDrain ? 'possible' : online.pings > 0 ? 'unknown' : 'unlikely', online.pings ? `Online lock: ${online.pings} ping(s) from the server, last ${online.lastPing?.replace('T', ' ')}.` : 'No server pings: the lock works offline.'),
-    S('electronics', 'Door unit electronics', 'If internal errors continue after programming, the door unit (electronics) must be checked or replaced.',
-      faults.internal >= 5 ? 'likely' : faults.internal > 0 ? 'possible' : 'unlikely', `${faults.internal} internal error(s) (1975).`),
     S('firmware', 'Firmware', 'Program the lock and upload the firmware with the service tool; read the lock again afterwards. Firmware faults cause false battery alarms and can also drain the batteries.',
       firmwareAlarms.length || faults.internal >= 5 ? 'likely' : fastDrain ? 'possible' : 'unknown',
       `${firmwareAlarms.length} battery alarm(s) after new batteries with good readings; ${faults.internal} internal error(s); program uploaded ${service.programDownloads} time(s)${service.lastProgram ? `, last ${service.lastProgram.replace('T', ' ')}` : ''}.`),
+    S('use', 'How much the door is used', 'Is this door unusually busy (staff corridor, service door), so the batteries simply work harder?',
+      usage.perDay >= 40 ? 'possible' : 'unlikely',
+      `${usage.perDay} openings a day${per1000.length ? `; ${per1000.slice(-6).map((x) => x.toFixed(1)).join(' / ')} V per 1,000 openings${per1000.length > 6 ? ' (last 6 sets)' : ''}` : ''}.`),
     S('environment', 'Location and climate', 'Is the lock outdoors, in a humid or very cold or hot place (pool, kitchen, near heating, direct sun)? Batteries lose capacity there.',
       'unknown', 'The report cannot tell; check on site.'),
   ];
+
+  // 2.35 A lock whose drain stopped: the steps keep their evidence, but none is "likely" any more.
+  if (frequency.fixedSince) for (const st of steps) if (st.suggests === 'likely') { st.suggests = 'possible'; st.evidence = `Drain stopped on ${frequency.fixedSince.since.slice(0, 10)}. Before: ${st.evidence}`; }
 
   // Event names, most frequent first (for the "all events" table).
   const byName = new Map<string, { code: number; name: string; n: number; last: string | null; meaning: string | null; internal: boolean }>();

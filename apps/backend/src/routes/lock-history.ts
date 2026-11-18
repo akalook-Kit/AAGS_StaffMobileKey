@@ -61,9 +61,11 @@ const median = (a: number[]) => { if (!a.length) return null; const x = [...a].s
 /** 2.34 How long a battery set lasts at this hotel (median over every lock with at least two changes). */
 async function siteMedianLife(hotelId: string) {
   const D = await loadData(hotelId, null); const tz = await siteTz(hotelId);
-  const all: number[] = [];
-  for (const id of new Set([...D.work.keys(), ...D.reports.keys(), ...D.changes.keys()])) all.push(...buildHistory(id, D, tz, null).batteries.lastedDays);
-  return median(all);
+  // 2.35 The median of each lock's own median: one lock changed 30 times (K Hotel Douala 508) does not set the hotel's
+  // usual set life on its own.
+  const perLock: number[] = [];
+  for (const id of new Set([...D.work.keys(), ...D.reports.keys(), ...D.changes.keys()])) { const m = median(buildHistory(id, D, tz, null).batteries.lastedDays); if (m != null) perLock.push(m); }
+  return median(perLock);
 }
 
 function buildHistory(doorId: string, D: Data, tz: string, siteLife: number | null) {
@@ -100,7 +102,12 @@ function buildHistory(doorId: string, D: Data, tz: string, siteLife: number | nu
   const judged = judgeWorks(works, readings, changeList.map((c) => c.day), alarms, { top, alarmLevel, today });
   const est = latest?.battery?.estimatedDaysPerSet as number | null | undefined;
   const recentAlarms = alarms.filter((a) => a.slice(0, 10) >= localDay(new Date(Date.now() - 45 * 86_400_000), tz)).length;
-  const drainingNow = (est != null && est < 180) || recentAlarms >= 2 || (lasted.length > 0 && lasted[lasted.length - 1]! < 180);
+  // 2.35 A lock whose sets used to last weeks and whose current set has lasted months is fixed (K Hotel Douala 508:
+  // 33 changes up to Oct 2025, then one set for over a year), even with no work recorded here.
+  const currentDays = changeList.length ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${changeList[changeList.length - 1]!.day}T00:00:00Z`)) / 86_400_000) : null;
+  const usual = median(lasted);
+  const fixedLock = recentAlarms === 0 && currentDays != null && usual != null && lasted.length >= 2 && usual < 180 && currentDays >= Math.max(180, usual * 3);
+  const drainingNow = !fixedLock && ((est != null && est < 180) || recentAlarms >= 2 || (lasted.length > 0 && lasted[lasted.length - 1]! < 180));
   const checks = latest ? Object.fromEntries(Object.entries(latest.checks ?? {}).map(([k, v]: [string, any]) => [k, v?.result])) : null;
   // 2.32 Firmware upgrades that concern this lock, and how long its battery sets lasted before and after each.
   const fw = D.firmware.filter((f) => !f.doors || f.doors.includes(doorId)).map((f) => {
@@ -116,6 +123,7 @@ function buildHistory(doorId: string, D: Data, tz: string, siteLife: number | nu
   const fwDrop = fw.find((f) => f.beforeMedian && f.afterMedian != null && f.afterMedian <= f.beforeMedian * 0.5) ?? null;
   const steps = [...((latest?.steps ?? []) as { id: string; suggests: string }[]).filter((x) => !(fwDrop && x.id === 'electronics')), ...(fwDrop ? [{ id: 'electronics', suggests: 'likely' }] : [])];
   const elimination = nextStep(judged, lockModel, steps.length ? steps : null, checks, drainingNow);
+  if (fixedLock && elimination.state !== 'waiting') { elimination.state = 'solved'; elimination.next = null; }
   const notRecommended = workRows.filter((w) => w.parts.includes('batteries') && w.battery_type && w.battery_type !== RECOMMENDED_BATTERY)
     .map((w) => ({ on: w.day, type: BATTERY_TYPES.find((t) => t.id === w.battery_type)?.name ?? w.battery_type, brand: w.battery_brand }));
 
@@ -177,9 +185,13 @@ function buildHistory(doorId: string, D: Data, tz: string, siteLife: number | nu
   // 2.34 When the batteries are expected to be low if nothing changes: the last battery change + how long a set lasts
   // on this lock (its own sets), else the estimate of its latest report, else the hotel's usual set.
   const lastChange = changeList[changeList.length - 1]?.day ?? null;
-  const ownLife = median(lasted);
-  const life = ownLife ?? (est != null && est > 0 ? Math.round(est) : null) ?? siteLife;
-  const basis = ownLife != null ? 'this lock' : est != null && est > 0 ? 'lock report' : siteLife != null ? 'hotel' : null;
+  // 2.35 A lock that was fixed (its sets last much longer now) is forecast from the hotel's usual set, and a set that has
+  // already outlived that too gets no date ("outlived": watch its readings).
+  const ownLife = fixedLock ? null : median(lasted);
+  const estOk = !fixedLock && est != null && est > 0;
+  let life = ownLife ?? (estOk ? Math.round(est!) : null) ?? siteLife;
+  let basis: string | null = ownLife != null ? 'this lock' : estOk ? 'lock report' : siteLife != null ? 'hotel' : null;
+  if (life != null && currentDays != null && currentDays > life * 1.5 && currentDays > 60) { life = null; basis = 'outlived'; }
   const lowOn = lastChange && life != null ? new Date(Date.parse(`${lastChange}T00:00:00Z`) + life * 86_400_000).toISOString().slice(0, 10) : null;
   const forecast = { lastChange, expectedLifeDays: life, basis, expectedLowOn: lowOn,
     daysLeft: lowOn ? Math.round((Date.parse(`${lowOn}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000) : null };
@@ -234,7 +246,7 @@ export function lockHistoryRoutes(app: FastifyInstance) {
     const counted = new Map<string, number>(); for (const [id, ch] of D.changes) counted.set(id, ch.length);
     const ids = [...new Set([...D.work.keys(), ...D.reports.keys(), ...[...counted.entries()].filter(([, n]) => n >= (all ? 1 : 2)).map(([id]) => id), ...(all ? D.doors.keys() : [])])].slice(0, 3000);
     const out = []; const detail: ReturnType<typeof buildHistory>[] = [];
-    const siteLife = median(ids.flatMap((id) => buildHistory(id, D, tz, null).batteries.lastedDays));
+    const siteLife = median(ids.map((id) => median(buildHistory(id, D, tz, null).batteries.lastedDays)).filter((x): x is number => x != null));
     for (const id of ids) {
       const h = buildHistory(id, D, tz, siteLife); detail.push(h);
       const last = h.work[h.work.length - 1] ?? null;
@@ -376,7 +388,7 @@ export function lockHistoryRoutes(app: FastifyInstance) {
     if (Date.parse(to) - Date.parse(q.from) > 93 * 86_400_000) throw new ApiError(400, 'RANGE', 'At most 93 days at a time');
     const D = await loadData(hotelId, null);
     const ids = [...new Set([...D.work.keys(), ...D.reports.keys(), ...D.changes.keys()])];
-    const siteLife = median(ids.flatMap((id) => buildHistory(id, D, tz, null).batteries.lastedDays));
+    const siteLife = median(ids.map((id) => median(buildHistory(id, D, tz, null).batteries.lastedDays)).filter((x): x is number => x != null));
     const hs = ids.map((id) => buildHistory(id, D, tz, siteLife));
     const inRange = (d: string | null | undefined) => Boolean(d && d >= q.from && d <= to);
     const entries: any[] = [];

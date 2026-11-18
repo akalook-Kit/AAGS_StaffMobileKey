@@ -66,7 +66,9 @@ writeFileSync(join(out, 'VERSION'), `${version}\r\n`);
 // server opens the portal directly).
 const tenant = process.env.SMK_PACKAGE_TENANT ?? 'la-falaise';
 const EDITIONS = {
-  light: { title: 'Access Monitoring Tool Light (lock diagnosis and reports)', msiName: 'AccessMonitoringTool-Light',
+  // 2.35 A Light build per hotel look: SMK_PACKAGE_TENANT=k-hotel-douala gives AccessMonitoringTool-Light-KHotelDouala.
+  light: { title: `Access Monitoring Tool Light (lock diagnosis and reports)${tenant === 'k-hotel-douala' ? ' - K Hotel Douala' : ''}`,
+    msiName: tenant === 'k-hotel-douala' ? 'AccessMonitoringTool-Light-KHotelDouala' : 'AccessMonitoringTool-Light',
     env: { SMK_EDITION: 'light', SMK_OPEN_ACCESS: 'lan', SMK_OPEN_ACCESS_DIRECT: '1', ...(tenant !== 'none' ? { SMK_TENANT: tenant } : {}) } },
 };
 EDITIONS['la-falaise-light'] = EDITIONS.light; // the name used by 2.33

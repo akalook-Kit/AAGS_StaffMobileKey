@@ -102,4 +102,42 @@ describe('VingCard Classic report without a door sensor (2.31)', () => {
     expect(set.restarts).toBe(1);
     expect(set.reached.find((x) => x.volts === 4.0)?.days).toBe(14);
   });
+
+  it('2.35 gives the battery change frequency, sees a drain getting worse, and the day it was fixed', () => {
+    // Events built oldest first, then reversed (Visionline lists newest first). Sets of 40, 35, 30, 25, 20, 15, 12, 10 days,
+    // then one set in for 200 days. Guests open the door with cards; only a few "door opened" events (no real door sensor).
+    const ev: [string, string][] = [];
+    const fmt = (d: Date) => `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()} ${((d.getUTCHours() + 11) % 12) + 1}:${String(d.getUTCMinutes()).padStart(2, '0')} ${d.getUTCHours() < 12 ? 'AM' : 'PM'}`;
+    let t = Date.parse('2025-01-01T10:00:00Z');
+    const lives = [40, 35, 30, 25, 20, 15, 12, 10];
+    for (const life of lives) {
+      ev.push([fmt(new Date(t)), 'Battery exchanged (0528)']);
+      ev.push([fmt(new Date(t + 60_000)), 'Battery level below 4.8 volts (1081)']);
+      for (let d = 1; d < life; d++) ev.push([fmt(new Date(t + d * 86_400_000)), 'Guest Card accepted (0067)']);
+      ev.push([fmt(new Date(t + (life - 2) * 86_400_000)), 'Battery level below 4.0 volts (1077)']);
+      t += life * 86_400_000;
+    }
+    ev.push([fmt(new Date(t)), 'Battery exchanged (0528)']);
+    ev.push([fmt(new Date(t + 60_000)), 'Battery level below 4.8 volts (1081)']);
+    for (let d = 1; d < 200; d++) ev.push([fmt(new Date(t + d * 86_400_000)), 'Guest Card accepted (0067)']);
+    for (let i = 0; i < 3; i++) ev.push([fmt(new Date(t + (10 + i) * 86_400_000 + 60_000)), 'The door is opened from the inside (0917)']);
+    const end = t + 199 * 86_400_000;
+    const lines = [HEAD, ...[...ev].reverse().map(([when, what]) => row(when, what, 'Guest'))];
+    const a = analyseLockReport(parseLockReport(utf16(lines)), end + 86_400_000);
+    const f = a.battery.frequency;
+    expect(f.changes).toBe(9);
+    expect(f.perYear.map((y) => y.year)).toEqual(['2025']);
+    expect(f.medianDays).toBe(22.5);
+    expect(f.trend).toBe('shortening');
+    expect(f.fixedSince?.since.slice(0, 10)).toBe(new Date(t).toISOString().slice(0, 10));
+    expect(a.findings.some((x) => x.title.startsWith('Fixed since'))).toBe(true);
+    // The old fast drain is history, not an action, once the drain has stopped.
+    expect(a.findings.filter((x) => x.level === 'high').map((x) => x.title)).toEqual([]);
+    // A few door events are not a door sensor: openings are counted from the cards accepted.
+    expect(a.usage.openingsFrom).toBe('cards accepted');
+    expect(a.usage.perDay).toBeGreaterThan(0.5);
+    // Steps start with the cables and the battery holder (Armel's order).
+    expect(a.steps[0]!.id).toBe('contacts');
+    expect(a.steps.findIndex((x) => x.id === 'electronics')).toBeLessThan(a.steps.findIndex((x) => x.id === 'reader'));
+  });
 });

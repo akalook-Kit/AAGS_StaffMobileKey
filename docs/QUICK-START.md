@@ -1,4 +1,4 @@
-# Access Monitoring Tool — quick start (2.34.0)
+# Access Monitoring Tool — quick start (2.35.0)
 
 ## What it is and what you need
 
@@ -8,7 +8,7 @@ requests, watches lock batteries and supports emergencies. It works for a hotel 
 hospital, a school). Staff mobile keys are an optional module, off by default.
 
 It has two parts: the **portal** (with its database) and the **connector**, which talks to Visionline. One file
-installs either or both: `AccessMonitoringTool-Server-2.34.0.msi`.
+installs either or both: `AccessMonitoringTool-Server-2.35.0.msi`.
 
 | | A. One computer | B. Two computers |
 |---|---|---|
@@ -20,9 +20,15 @@ You also need Windows 10/11 or Windows Server 2016+ (64-bit), a Visionline user 
 Visionline Web API reachable over https (usually `https://localhost/api/v1` on the Visionline server). Nothing else
 is installed beforehand: the .msi carries its own runtime.
 
-## Light edition (2.34.0): lock diagnosis and day reports
+## Light edition (2.35.0): lock diagnosis and day reports
 
-`AccessMonitoringTool-Light-2.34.0.msi` is a lighter version of the same program, for the engineering team of a
+**K Hotel Douala**: `AccessMonitoringTool-Light-KHotelDouala-2.35.0.msi` is the same Light version with the K Hotel
+logo and colours (black and rose gold). Since 2.35 every lock report also shows how often the batteries were
+changed (per year, how long a set lasts, whether each set lasts less than the one before, and the day a draining lock
+was fixed).
+
+
+`AccessMonitoringTool-Light-2.35.0.msi` is a lighter version of the same program, for the engineering team of a
 hotel with offline locks (made first for La Falaise: its logo and colours are included). Install it on the
 Visionline server, like the standard .msi, then:
 

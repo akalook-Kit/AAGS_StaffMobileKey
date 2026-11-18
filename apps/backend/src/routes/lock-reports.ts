@@ -16,6 +16,26 @@ async function analysisOptions(hotelId: string) {
 }
 
 /**
+ * 2.35 Reports kept before 2.35 are analysed again from their stored events (battery change frequency, the new findings
+ * and the steps in the new order), a few at a time when the list or a report is opened.
+ */
+const refreshing = new Set<string>();
+async function refreshOld(hotelId: string, onlyId?: string) {
+  if (refreshing.has(hotelId)) return;
+  refreshing.add(hotelId);
+  try {
+    const rows = await many(pool, `SELECT id, lock_events, analysis->'quality' AS q FROM lock_reports WHERE hotel_id=$1 AND ($2::uuid IS NULL OR id=$2) AND analysis->'battery'->'frequency' IS NULL ORDER BY uploaded_at DESC LIMIT 20`, [hotelId, onlyId ?? null]);
+    if (!rows.length) return;
+    const opt = await analysisOptions(hotelId);
+    for (const r of rows) {
+      const events = (r.lock_events as [string | null, number, string, number, string][]).map(([t, code, name, mark, card]) => ({ t, code, name, mark: Boolean(mark), card }));
+      const a = analyseLockReport({ events, duplicates: r.q?.duplicates ?? 0, invalidTimes: r.q?.invalidTimes ?? 0, dateOrder: r.q?.dateOrder ?? undefined }, Date.now(), opt);
+      await pool.query(`UPDATE lock_reports SET analysis=$3 WHERE id=$1 AND hotel_id=$2`, [r.id, hotelId, JSON.stringify(a)]);
+    }
+  } finally { refreshing.delete(hotelId); }
+}
+
+/**
  * 2.18 Lock troubleshooting (Building -> Lock troubleshooting; works with or without battery monitoring). An administrator or the maintenance manager
  * uploads the event report of one lock, checks what was read (step 1, nothing stored), confirms the door (step 2)
  * and gets usage, battery periods and consumption, faults and what to do. Only time, event and card type are kept.
@@ -93,8 +113,11 @@ export function lockReportRoutes(app: FastifyInstance) {
     const hotelId = hid(req);
     await requirePerm(req, hotelId, 'battery.read');
     const door = z.string().max(100).optional().parse((req.query as any).door);
+    await refreshOld(hotelId);
     const rows = await many(pool, `SELECT r.id, r.door_id, r.door_name, r.lock_model, r.checks, r.analysis->'steps' AS steps, r.file_name, r.period_from, r.period_to, r.events, r.uploaded_at, o.display_name AS uploaded_by,
-        r.analysis->'findings' AS findings, r.analysis->'battery'->'avgDropPer30Days' AS avg_drop, r.analysis->'usage'->'perDay' AS per_day
+        r.analysis->'findings' AS findings, r.analysis->'battery'->'avgDropPer30Days' AS avg_drop, r.analysis->'usage'->'perDay' AS per_day,
+        r.analysis->'battery'->'frequency'->'changes' AS changes, r.analysis->'battery'->'frequency'->'perYearRate' AS per_year, r.analysis->'battery'->'frequency'->'medianDays' AS median_days,
+        r.analysis->'battery'->'frequency'->'fixedSince'->>'since' AS fixed_since
       FROM lock_reports r LEFT JOIN operators o ON o.id=r.uploaded_by WHERE r.hotel_id=$1 AND ($2::text IS NULL OR r.door_id=$2) ORDER BY r.uploaded_at DESC LIMIT 200`, [hotelId, door ?? null]);
     return rows.map((r) => ({
       id: r.id, doorId: r.door_id, doorName: r.door_name, lockModel: lockModelName(r.lock_model),
@@ -102,6 +125,7 @@ export function lockReportRoutes(app: FastifyInstance) {
       problemsFound: Object.values(r.checks ?? {}).filter((x: any) => x?.result === 'problem').length,
       fileName: r.file_name, from: r.period_from, to: r.period_to, events: r.events, uploadedAt: r.uploaded_at, uploadedBy: r.uploaded_by,
       avgDropPer30Days: r.avg_drop, perDay: r.per_day,
+      batteryChanges: r.changes ?? null, changesPerYear: r.per_year ?? null, setMedianDays: r.median_days ?? null, fixedSince: r.fixed_since ?? null,
       high: (r.findings ?? []).filter((f: any) => f.level === 'high').length, medium: (r.findings ?? []).filter((f: any) => f.level === 'medium').length,
       top: (r.findings ?? []).find((f: any) => f.level !== 'info')?.title ?? null,
     }));
@@ -111,6 +135,7 @@ export function lockReportRoutes(app: FastifyInstance) {
     const hotelId = hid(req);
     await requirePerm(req, hotelId, 'battery.read');
     const id = z.string().uuid().parse((req.params as any).id);
+    await refreshOld(hotelId, id);
     const r = await one(pool, `SELECT r.*, o.display_name AS uploader FROM lock_reports r LEFT JOIN operators o ON o.id=r.uploaded_by WHERE r.id=$1 AND r.hotel_id=$2`, [id, hotelId]);
     if (!r) throw notFound('Report');
     const prev = await many(pool, `SELECT id, uploaded_at, analysis->'battery'->'avgDropPer30Days' AS avg_drop, period_to FROM lock_reports WHERE hotel_id=$1 AND door_id=$2 AND id<>$3 ORDER BY uploaded_at DESC LIMIT 5`, [hotelId, r.door_id, id]);

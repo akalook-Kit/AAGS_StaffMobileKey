@@ -634,6 +634,13 @@ or on the locks of the hotel), the locks whose batteries last the least, and the
 
 Each entry can carry up to 6 photos or screenshots (paper log, multimeter, battery holder, Visionline).
 
+**Battery change frequency** (every lock report, 2.35): how many times the batteries were changed, how many a year
+and in the last 12 months, how long a set lasted (median, shortest, longest), year by year, and whether each set
+lasts less than the one before (a fault getting worse: swap the LCA, then the LCU, instead of changing batteries
+again). When sets that used to last weeks now last months, the report says *Fixed since* that day, and the old
+alarms are kept as history only. A file without any battery reading (a filtered export) is flagged: read the lock
+with the service device and export all its events.
+
 **Day report** (menu, or Locks → Day report): choose a day or a period (up to 93 days). It lists, by date and floor,
 each door, what was done or seen, the parts changed or checked, the batteries, the voltages, who did it and the
 state of the lock now; then the reminders and the locks whose batteries are expected low soon. **Print** gives the

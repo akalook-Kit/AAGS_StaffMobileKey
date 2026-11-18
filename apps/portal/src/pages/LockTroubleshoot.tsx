@@ -13,6 +13,9 @@ import { DayReport, LockTodo, LockTrend, LocksTable, RecordWorkButton, type Lock
  */
 interface Finding { level: 'high' | 'medium' | 'info'; title: string; detail: string; action?: string; area?: 'battery' | 'lock' | 'door' | 'use' | 'security' | 'data' }
 interface Period { from: string; to: string; startedBy: 'exchange' | 'reading' | 'report'; firstVolts: number | null; lowestVolts: number | null; lowestAt: string | null; days: number; dropPer30Days: number | null; openings: number; dropPer1000Openings: number | null; alarms: number; reached?: { volts: number; days: number | null }[]; firmwareAlarms?: number }
+/** 2.35 How often the batteries were changed. */
+interface Frequency { changes: number; firstChange: string | null; lastChange: string | null; daysSinceLast: number | null; perYearRate: number | null; last365: number; medianDays: number | null; shortestDays: number | null; longestDays: number | null;
+  trend: 'shortening' | 'stable' | 'lengthening' | null; earlyAvgDays: number | null; lateAvgDays: number | null; perYear: { year: string; changes: number; avgDays: number | null }[]; fixedSince: { since: string; days: number; before: number } | null }
 interface Step { id: string; title: string; check: string; suggests: 'likely' | 'possible' | 'unlikely' | 'unknown'; evidence: string }
 type Checks = Record<string, { result: 'ok' | 'problem'; note: string | null; by: string | null; at: string }>;
 interface Week { week: string; openings: number; refused: number; leftOpen: number; internal: number; cardReading: number; restarts: number; batteryAlarms: number; lowest: number | null }
@@ -27,11 +30,11 @@ interface Analysis {
   faults: { internal: number; cardReading: number; ble: number; data: number; wrongSystem: number; restarts: number; restartsAfterBatteryChange?: number; coldStarts: number; accessDeniedBattery: number };
   service: { readouts: number; parametersRead?: number; timeSet: number; programDownloads: number; initialisations: number; lastReadout?: string | null; lastTimeSet?: string | null; lastProgram?: string | null };
   online?: { pings: number; lastPing: string | null; longestGapHours: number | null };
-  battery: { readings: { t: string; volts: number }[]; ignoredReadings: number; alarms: { t: string; code: number; name: string }[]; exchanges: { t: string; how: string }[]; periods: Period[]; avgDropPer30Days: number | null; estimatedDaysPerSet: number | null; scale: string; alarmLevel: number;
+  battery: { frequency?: Frequency; readings: { t: string; volts: number }[]; ignoredReadings: number; alarms: { t: string; code: number; name: string }[]; exchanges: { t: string; how: string }[]; periods: Period[]; avgDropPer30Days: number | null; estimatedDaysPerSet: number | null; scale: string; alarmLevel: number;
     confirmLevel?: number; firmwareDays?: number; lasted?: { sets: { from: string; to: string; days: number }[]; avgDays: number | null; currentDays: number | null }; lastReading?: { t: string; volts: number } | null; firmwareAlarms?: { t: string; code: number; name: string; changedAt: string }[] };
   steps?: Step[]; weekly?: Week[]; daily: { day: string; openings: number }[]; findings: Finding[]; eventTypes: { code: number; name: string; n: number; last?: string | null; meaning?: string | null; internal?: boolean }[];
 }
-interface ReportRow { id: string; doorId: string; doorName: string; lockModel?: string | null; stepsLeft?: number; problemsFound?: number; fileName: string; from: string | null; to: string | null; events: number; uploadedAt: string; uploadedBy: string | null; avgDropPer30Days: number | null; perDay: number | null; high: number; medium: number; top: string | null }
+interface ReportRow { id: string; doorId: string; doorName: string; lockModel?: string | null; stepsLeft?: number; problemsFound?: number; fileName: string; from: string | null; to: string | null; events: number; uploadedAt: string; uploadedBy: string | null; avgDropPer30Days: number | null; perDay: number | null; batteryChanges?: number | null; changesPerYear?: number | null; setMedianDays?: number | null; fixedSince?: string | null; high: number; medium: number; top: string | null }
 
 /** Lock times are the lock's own wall-clock times ("2026-10-24T13:52"), shown as they are. */
 const lt = (t: string | null | undefined, withTime = true) => {
@@ -116,7 +119,7 @@ function ReportList() {
           <div className="panel" style={{ padding: 0 }}>
             <div className="row lh-filters"><input className="search" placeholder="Door or file…" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} aria-label="Search the reports" /><span className="small muted">{rows.length} report(s)</span></div>
             <div className="table-scroll"><table className="grid">
-              <thead><tr><th>Door and lock</th><th>Events from – to</th><th>Findings</th><th>Causes left</th><th className="num">Openings a day</th><th className="num">Battery use (V / 30 days)</th><th>Uploaded</th></tr></thead>
+              <thead><tr><th>Door and lock</th><th>Events from – to</th><th>Findings</th><th>Causes left</th><th className="num">Openings a day</th><th className="num">Battery use (V / 30 days)</th><th className="num" data-tip="Battery changes in the report, how many a year, and how long a set lasted (median).">Battery changes</th><th>Uploaded</th></tr></thead>
               <tbody>
                 {rows.slice(pg * per, pg * per + per).map((r) => (
                   <tr key={r.id}>
@@ -126,6 +129,7 @@ function ReportList() {
                     <td className="small">{r.problemsFound ? <span className="badge bad">{r.problemsFound} found</span> : null} {r.stepsLeft != null ? `${r.stepsLeft} to check` : '—'}</td>
                     <td className="num">{r.perDay ?? '—'}</td>
                     <td className="num">{r.avgDropPer30Days != null ? Number(r.avgDropPer30Days).toFixed(2) : '—'}</td>
+                    <td className="num">{r.batteryChanges != null ? <>{r.batteryChanges}{r.changesPerYear != null && <div className={`small ${r.changesPerYear >= 4 && !r.fixedSince ? 'warn-text' : 'muted'}`}>{`${r.changesPerYear} a year`}</div>}{r.setMedianDays != null && <div className="small muted">{`a set: ${Math.round(r.setMedianDays)} days`}</div>}{r.fixedSince && <div className="small"><span className="badge ok">{`fixed ${r.fixedSince.slice(0, 10)}`}</span></div>}</> : '—'}</td>
                     <td className="small">{fmt.dt(r.uploadedAt)}{r.uploadedBy ? <div className="muted">{r.uploadedBy}</div> : null}</td>
                   </tr>
                 ))}
@@ -284,7 +288,11 @@ function ReportView({ id }: { id: string }) {
         <Kpi label="Openings a day" value={String(x.usage.perDay)} sub={x.usage.openingsFrom === 'cards accepted' ? `${x.usage.staffCards} staff · ${x.usage.guestCards} guest card (no door sensor: counted from cards accepted)` : `${x.usage.staffCards} staff · ${x.usage.guestCards} guest card · ${x.usage.openedFromInside} from inside`} />
         <Kpi label="Battery use" value={b.avgDropPer30Days != null ? `${b.avgDropPer30Days.toFixed(2)} V` : '—'} sub={b.avgDropPer30Days != null ? 'per 30 days (average of the battery periods)' : 'not enough readings in the report'} tone={b.estimatedDaysPerSet != null && b.estimatedDaysPerSet < 90 ? 'bad' : undefined} />
         {b.lasted && (b.lasted.sets.length > 0 || b.lasted.currentDays != null)
-          ? <Kpi label={b.lasted.sets.length ? 'Sets lasted' : 'Batteries in for'} value={b.lasted.sets.length ? `${b.lasted.sets.map((x) => Math.round(x.days)).join(' · ')} days` : `${Math.round(b.lasted.currentDays!)} days`}
+          ? b.lasted.sets.length > 4
+            ? <Kpi label="A set lasted (median)" value={`${Math.round(b.frequency?.medianDays ?? b.lasted.avgDays ?? 0)} days`}
+                sub={b.lasted.currentDays != null ? `${b.lasted.sets.length} sets, from ${Math.round(Math.min(...b.lasted.sets.map((s) => s.days)))} to ${Math.round(Math.max(...b.lasted.sets.map((s) => s.days)))} days; current set in for ${Math.round(b.lasted.currentDays)} days` : `${b.lasted.sets.length} sets, from ${Math.round(Math.min(...b.lasted.sets.map((s) => s.days)))} to ${Math.round(Math.max(...b.lasted.sets.map((s) => s.days)))} days`}
+                tone={(b.frequency?.medianDays ?? b.lasted.avgDays ?? 999) < 90 && !b.frequency?.fixedSince ? 'bad' : undefined} />
+            : <Kpi label={b.lasted.sets.length ? 'Sets lasted' : 'Batteries in for'} value={b.lasted.sets.length ? `${b.lasted.sets.map((x) => Math.round(x.days)).join(' · ')} days` : `${Math.round(b.lasted.currentDays!)} days`}
               sub={b.lasted.sets.length ? `change to change${b.lasted.avgDays != null && b.lasted.sets.length > 1 ? `, average ${Math.round(b.lasted.avgDays)} days` : ''}${b.lasted.currentDays != null ? `; current set in for ${Math.round(b.lasted.currentDays)} days` : ''}` : 'since the last change in the report'}
               tone={b.lasted.avgDays != null && b.lasted.avgDays < 90 ? 'bad' : undefined} />
           : <Kpi label="A set lasts about" value={b.estimatedDaysPerSet != null ? `${b.estimatedDaysPerSet} days` : '—'} sub={`rough estimate, from new to ${b.alarmLevel.toFixed(1)} V at this rate`} tone={b.estimatedDaysPerSet != null && b.estimatedDaysPerSet < 90 ? 'bad' : undefined} />}
@@ -305,6 +313,7 @@ function ReportView({ id }: { id: string }) {
       {(x.steps ?? []).length > 0 && <Elimination id={id} steps={x.steps!} initial={r.data.checks ?? {}} canMark={can('maintenance.work')} />}
       <h2 className="section-title">Battery</h2>
       <div className="grid12">
+        {b.frequency && <Frequency f={b.frequency} sets={b.lasted?.sets ?? []} exchanges={b.exchanges} current={b.lasted?.currentDays ?? null} lt={lt} />}
         <VizCard span={12} title="Battery readings" sub={`"Battery level below X volts" events of the lock (${b.scale} scale). Dashed lines: new batteries.${b.ignoredReadings ? ` ${b.ignoredReadings} readings taken while the lock was being programmed or restarting are left out.` : ''}`}
           chart={<VoltChart a={x} />}
           table={<DataTable head={['Lock time', 'Below (V)']} numeric={[1]} rows={[...b.readings].reverse().map((p) => [lt(p.t), p.volts.toFixed(1)])} />} />
@@ -451,5 +460,29 @@ function Elimination({ id, steps, initial, canMark }: { id: string; steps: Step[
         })}
       </ol>
     </section>
+  );
+}
+
+/** 2.35 Battery change frequency: how often, by year, the trend of the set life and when a drain stopped. */
+function Frequency({ f, sets, exchanges, current, lt }: { f: Frequency; sets: { from: string; to: string; days: number }[]; exchanges: { t: string; how: string }[]; current: number | null; lt: (t: string | null, time?: boolean) => string }) {
+  if (!f.changes) return (
+    <VizCard span={12} title="Battery change frequency" sub="No battery change in the report: the same set was in the lock for the whole period, or the file is not a full read-out."
+      chart={<p className="empty">{current != null ? `Batteries in for ${Math.round(current)} days.` : 'No battery change found.'}</p>} />
+  );
+  const trend = f.trend === 'shortening' ? { cls: 'bad', text: `Shortening: ${Math.round(f.earlyAvgDays!)} → ${Math.round(f.lateAvgDays!)} days` } : f.trend === 'lengthening' ? { cls: 'ok', text: `Lengthening: ${Math.round(f.earlyAvgDays!)} → ${Math.round(f.lateAvgDays!)} days` } : f.trend === 'stable' ? { cls: '', text: 'Stable' } : null;
+  const rows = exchanges.map((x, i) => { const s = sets.find((y) => y.from === x.t); return [lt(x.t, false), x.how.startsWith('Battery') ? 'Battery exchanged (event)' : x.how, s ? Math.round(s.days) : i === exchanges.length - 1 && current != null ? `${Math.round(current)} (still in)` : '—']; });
+  return (
+    <VizCard span={12} title="Battery change frequency" sub="Every battery change the lock recorded (or a reading back at the top), how long each set lasted, and the changes per year."
+      chart={<>
+        <div className="kpis" style={{ marginBottom: 12 }}>
+          <Kpi label="Battery changes" value={String(f.changes)} sub={f.perYearRate != null ? `${f.perYearRate} a year · ${f.last365} in the last 12 months` : `${f.last365} in the last 12 months`} tone={f.perYearRate != null && f.perYearRate >= 4 && !f.fixedSince ? 'bad' : undefined} />
+          <Kpi label="A set lasted" value={f.medianDays != null ? `${Math.round(f.medianDays)} days` : '—'} sub={f.medianDays != null ? `median · from ${Math.round(f.shortestDays!)} to ${Math.round(f.longestDays!)} days` : 'no complete set yet'} tone={f.medianDays != null && f.medianDays <= 90 && !f.fixedSince ? 'bad' : undefined} />
+          <Kpi label="Last change" value={f.lastChange ? lt(f.lastChange, false) : '—'} sub={f.daysSinceLast != null ? `${f.daysSinceLast} days before the end of the report` : ''} />
+          {trend && <Kpi label="Set life" value={trend.text} sub="first sets against the last ones" tone={trend.cls === 'bad' && !f.fixedSince ? 'bad' : undefined} />}
+        </div>
+        {f.fixedSince && <p className="badge ok" style={{ whiteSpace: 'normal' }}>{`Fixed since ${lt(f.fixedSince.since, false)}: sets lasted about ${Math.round(f.fixedSince.before)} days before, the current one ${f.fixedSince.days} days so far.`}</p>}
+        <DataTable head={['Year', 'Changes', 'Sets ending that year lasted (average days)']} numeric={[1, 2]} rows={f.perYear.map((y) => [y.year, y.changes, y.avgDays != null ? Math.round(y.avgDays) : '—'])} />
+      </>}
+      table={<DataTable head={['Changed on', 'How the portal knows', 'Days the set lasted']} numeric={[2]} rows={[...rows].reverse()} />} />
   );
 }

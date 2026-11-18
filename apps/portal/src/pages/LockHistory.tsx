@@ -39,13 +39,13 @@ export const STATE: Record<History['elimination']['state'], { cls: string; label
 };
 const day = (d: string | null | undefined) => (d ? new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString(undefined, { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 /** 2.34 "in 5 days" / "3 days ago" / "today" for an expected low-battery date. */
-export const lowIn = (f?: Forecast | null) => (!f?.expectedLowOn || f.daysLeft == null ? '—' : f.daysLeft === 0 ? 'today' : f.daysLeft > 0 ? `in ${f.daysLeft} days` : `${-f.daysLeft} days ago`);
-export const lowCls = (f?: Forecast | null) => (f?.daysLeft == null ? '' : f.daysLeft <= 0 ? 'bad' : f.daysLeft <= 7 ? 'warn' : 'ok');
+export const lowIn = (f?: Forecast | null) => (f?.basis === 'outlived' ? 'outlived its usual set' : !f?.expectedLowOn || f.daysLeft == null ? '—' : f.daysLeft === 0 ? 'today' : f.daysLeft > 0 ? `in ${f.daysLeft} days` : `${-f.daysLeft} days ago`);
+export const lowCls = (f?: Forecast | null) => (f?.basis === 'outlived' ? 'warn' : f?.daysLeft == null ? '' : f.daysLeft <= 0 ? 'bad' : f.daysLeft <= 7 ? 'warn' : 'ok');
 const rate = (r: Rate | null) => (r ? `${r.per30Days.toFixed(2)} V/30 d${r.lifeDays != null ? ` · ~${r.lifeDays} d a set` : ' · no drop'}` : '—');
 
 /** 2.32 The hotel's locks: one load for the To do list, the locks table and the trend. */
 /** 2.34 When the batteries are expected to be low if nothing changes. */
-export interface Forecast { lastChange: string | null; expectedLifeDays: number | null; basis: 'this lock' | 'lock report' | 'hotel' | null; expectedLowOn: string | null; daysLeft: number | null }
+export interface Forecast { lastChange: string | null; expectedLifeDays: number | null; basis: 'this lock' | 'lock report' | 'hotel' | 'outlived' | null; expectedLowOn: string | null; daysLeft: number | null }
 export interface PlanItem { kind: 'read' | 'batteries' | 'check' | 'report' | 'record' | 'firmware'; priority: number; title: string; detail: string; due: string | null }
 export interface LockRow { doorId: string; doorName: string; group: string | null; floor?: string | null; forecast?: Forecast; lastChange?: string | null; lastIssue?: { on: string; notes: string | null } | null; lockModelId?: string | null; online: boolean | null; lockModel: string | null; batteryChanges: number; avgDays: number | null; lastSetDays: number | null; daysSinceLast: number | null; reports: number; work: number;
   lastWork: { on: string; parts: string[]; verdict: WorkRow['verdict']; title: string } | null; state: History['elimination']['state']; next: string | null; notRecommended: number; plan: PlanItem[] }
@@ -144,7 +144,7 @@ export function LocksTable({ data, title }: { data: LockList; title?: string }) 
               <td><Link to={`/lock-troubleshoot/door/${encodeURIComponent(r.doorId)}`}><strong>{r.doorName}</strong></Link><div className="small muted">{r.lockModel ?? 'model not given'}</div></td>
               <td className="small">{floorOf(r) ?? '—'}</td>
               <td><span className={`badge ${STATE[r.state]?.cls ?? ''}`}>{STATE[r.state]?.label ?? r.state}</span>{r.notRecommended > 0 && <div className="small warn-text">batteries not recommended</div>}</td>
-              <td className="num">{r.batteryChanges}</td>
+              <td className="num">{r.batteryChanges}{r.avgDays != null && r.avgDays > 0 && <div className={`small ${r.avgDays <= 90 ? 'warn-text' : 'muted'}`}>{`${(365 / r.avgDays).toFixed(1)} a year`}</div>}</td>
               <td className="num">{r.lastSetDays != null ? `${r.lastSetDays} d` : '—'}{r.avgDays != null && <div className="small muted">avg {r.avgDays} d</div>}</td>
               <td className="small nowrap">{r.forecast?.expectedLowOn ? <><span className={`badge ${lowCls(r.forecast)}`}>{lowIn(r.forecast)}</span><div className="muted">{day(r.forecast.expectedLowOn)}</div></> : '—'}</td>
               <td className="small">{r.lastWork ? <>{day(r.lastWork.on)}: {r.lastWork.parts.join(', ')} <span className={`badge ${WORK_VERDICT[r.lastWork.verdict]?.cls ?? ''}`}>{WORK_VERDICT[r.lastWork.verdict]?.label}</span></> : '—'}</td>
@@ -213,7 +213,9 @@ export function DoorHistoryPage() {
           <div><strong>{x.batteries.count}</strong><span>battery changes</span></div>
           <div><strong>{x.batteries.lastedDays.length ? x.batteries.lastedDays[x.batteries.lastedDays.length - 1] : '—'}</strong><span>days the last set lasted</span></div>
           <div><strong>{x.batteries.avgDays ?? '—'}</strong><span>days a set, average</span></div>
+          {x.batteries.avgDays != null && x.batteries.avgDays > 0 && <div className={x.batteries.avgDays <= 90 ? 'lh-fig-bad' : ''}><strong>{(365 / x.batteries.avgDays).toFixed(1)}</strong><span>battery changes a year at this rate</span></div>}
           <div><strong>{x.batteries.daysSinceLast ?? '—'}</strong><span>days since the last change</span></div>
+          {x.forecast?.basis === 'outlived' && <div className="lh-fig-warn" data-tip="This set has already lasted much longer than a set usually does here: no date can be forecast. Watch the battery readings; plan a change when they dip to 4.4 V."><strong>{`${x.batteries.daysSinceLast ?? '—'} d`}</strong><span>set outlived its usual life: watch the readings</span></div>}
           {x.forecast?.expectedLowOn && <div className={`lh-fig-${lowCls(x.forecast)}`} data-tip={`If nothing changes: the last battery change (${day(x.forecast.lastChange)}) + ${x.forecast.expectedLifeDays} days, how long a set lasts on ${x.forecast.basis === 'this lock' ? 'this lock' : x.forecast.basis === 'lock report' ? 'this lock (from its report)' : 'the locks of this hotel'}. Prepare the batteries in advance.`}>
             <strong>{lowIn(x.forecast)}</strong><span>batteries expected low ({day(x.forecast.expectedLowOn)})</span></div>}
         </div>

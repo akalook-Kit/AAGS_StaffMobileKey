@@ -18,4 +18,16 @@ export const LA_FALAISE = {
    *  (it needs connector 0.5.0 or newer, checked when it is switched on). */
   features: { staffMobileKeys: false },
 };
-export const tenantPreset = (env: NodeJS.ProcessEnv = process.env) => (env.SMK_TENANT === 'la-falaise' ? LA_FALAISE : null);
+/** 2.35 K Hotel Douala (Light build, Armel 16 Nov: "another build for K Hotel Douala with the logo and colour"). */
+const kLogoFile = process.env.SMK_BRAND_DIR ? join(process.env.SMK_BRAND_DIR, 'k-hotel', 'k-hotel-logo.png') : fileURLToPath(new URL('../../../../brand/k-hotel/k-hotel-logo.png', import.meta.url));
+export const K_HOTEL_DOUALA = {
+  id: 'k-hotel-douala',
+  name: 'K Hotel Douala',
+  timezone: 'Africa/Douala',
+  country: 'CM',
+  logo: () => (existsSync(kLogoFile) ? `data:image/png;base64,${readFileSync(kLogoFile).toString('base64')}` : null),
+  branding: { appName: 'K Hotel Douala', portalTitle: 'K Hotel Douala · Lock diagnosis', primaryColor: '#050505', secondaryColor: '#DCAE99', backgroundColor: '#F7F2EF', textOnPrimary: '#DCAE99' },
+  features: { staffMobileKeys: false },
+};
+const PRESETS: Record<string, typeof LA_FALAISE> = { 'la-falaise': LA_FALAISE, 'k-hotel-douala': K_HOTEL_DOUALA };
+export const tenantPreset = (env: NodeJS.ProcessEnv = process.env) => (env.SMK_TENANT ? PRESETS[env.SMK_TENANT] ?? null : null);

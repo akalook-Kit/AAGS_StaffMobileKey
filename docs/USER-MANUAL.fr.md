@@ -738,6 +738,13 @@ jeu par année.
 
 Chaque entrée peut porter jusqu'à 6 photos ou captures (carnet papier, multimètre, porte-piles, Visionline).
 
+**Fréquence de changement des piles** (chaque relevé de serrure, 2.35) : combien de fois les piles ont été changées,
+combien par an et sur les 12 derniers mois, la durée d'un jeu (médiane, plus courte, plus longue), année par année,
+et si chaque jeu dure moins que le précédent (une panne qui s'aggrave : échangez le LCA, puis le LCU, au lieu de
+changer encore les piles). Quand des jeux qui duraient quelques semaines durent maintenant des mois, le relevé
+indique *Réglé depuis* ce jour, et les anciennes alarmes restent comme historique. Un fichier sans aucun relevé de
+piles (export filtré) est signalé : lisez la serrure avec le terminal de service et exportez tous ses événements.
+
 **Rapport du jour** (menu, ou Serrures → Rapport du jour) : choisir un jour ou une période (jusqu'à 93 jours). Il
 liste, par date et par étage, chaque porte, ce qui a été fait ou constaté, les pièces changées ou vérifiées, les
 piles, les tensions, qui l'a fait et l'état actuel de la serrure ; puis les rappels et les serrures dont les piles
