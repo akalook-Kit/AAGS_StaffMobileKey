@@ -153,6 +153,14 @@ git tag --list "v2.2*"
 
 Only the newest zip is needed if the older ones are no longer at hand (each zip is the whole project).
 
+## 2.35.1 (16 Nov 2026): K Hotel Douala full version, every lock in the register
+
+Four installers from the same commit: `AccessMonitoringTool-Server-KHotelDouala-2.35.1.msi` (full version, K Hotel logo
+and colours), `AccessMonitoringTool-Server-2.35.1.msi` (standard), `AccessMonitoringTool-Light-2.35.1.msi` and
+`AccessMonitoringTool-Light-KHotelDouala-2.35.1.msi`. Same commands with `$v = '2.35.1'`; attach the four .msi files and
+`SHA256SUMS-2.35.1.txt` to the release `v2.35.1`. To build the K Hotel full version yourself:
+`$env:SMK_PACKAGE_EDITION='full'; $env:SMK_PACKAGE_TENANT='k-hotel-douala'; npm run package:onprem; npm run package:msi`.
+
 ## 2.35.0 (16 Nov 2026): battery change frequency, K Hotel Douala Light
 
 Three installers from the same commit: `AccessMonitoringTool-Server-2.35.0.msi` (standard),

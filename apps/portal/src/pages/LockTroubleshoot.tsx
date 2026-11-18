@@ -74,7 +74,9 @@ function ReportList() {
   const [sp, setSp] = useSearchParams();
   const tab = (['todo', 'locks', 'day', 'reports', 'how'] as const).find((t) => t === sp.get('tab')) ?? 'todo';
   // 2.34 Light edition: every lock of the hotel is listed (with its floor and when its batteries are expected low).
-  const hist = useApi<LockList>(`${base}/lock-history${light ? '?all=1' : ''}`, []);
+  // 2.35 Every lock of the hotel in both editions (Armel: "ensure I can see all the locks").
+  const hist = useApi<LockList>(`${base}/lock-history?all=1`, []);
+  void light;
   const list = useApi<ReportRow[]>(tab === 'reports' ? `${base}/lock-reports` : null, [tab]);
   const att = useApi<any>(`${base}/attention`, []);
   const [upload, setUpload] = useState(sp.get('upload') === '1');

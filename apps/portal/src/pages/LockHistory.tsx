@@ -47,7 +47,7 @@ const rate = (r: Rate | null) => (r ? `${r.per30Days.toFixed(2)} V/30 d${r.lifeD
 /** 2.34 When the batteries are expected to be low if nothing changes. */
 export interface Forecast { lastChange: string | null; expectedLifeDays: number | null; basis: 'this lock' | 'lock report' | 'hotel' | 'outlived' | null; expectedLowOn: string | null; daysLeft: number | null }
 export interface PlanItem { kind: 'read' | 'batteries' | 'check' | 'report' | 'record' | 'firmware'; priority: number; title: string; detail: string; due: string | null }
-export interface LockRow { doorId: string; doorName: string; group: string | null; floor?: string | null; forecast?: Forecast; lastChange?: string | null; lastIssue?: { on: string; notes: string | null } | null; lockModelId?: string | null; online: boolean | null; lockModel: string | null; batteryChanges: number; avgDays: number | null; lastSetDays: number | null; daysSinceLast: number | null; reports: number; work: number;
+export interface LockRow { reportTodo?: string | null; changesPerYear?: number | null; doorId: string; doorName: string; group: string | null; floor?: string | null; forecast?: Forecast; lastChange?: string | null; lastIssue?: { on: string; notes: string | null } | null; lockModelId?: string | null; online: boolean | null; lockModel: string | null; batteryChanges: number; avgDays: number | null; lastSetDays: number | null; daysSinceLast: number | null; reports: number; work: number;
   lastWork: { on: string; parts: string[]; verdict: WorkRow['verdict']; title: string } | null; state: History['elimination']['state']; next: string | null; notRecommended: number; plan: PlanItem[] }
 export interface FirmwareRow { id: string; day: string; from: string | null; to: string | null; scope: string; notes: string | null; beforeMedian: number | null; beforeSets: number; afterMedian: number | null; afterSets: number; drop: number | null }
 export interface LockList { locks: LockRow[]; years: { year: string; sets: number; medianDays: number; shortest: number; longest: number }[]; counts: Record<string, number>; total: number; firmware: FirmwareRow[]; siteLifeDays?: number | null; today?: string }
@@ -114,24 +114,38 @@ export function LocksTable({ data, title }: { data: LockList; title?: string }) 
   const [state, setState] = useState('');
   const [grp, setGrp] = useState('');
   const [soon, setSoon] = useState(false);
+  const [changed, setChanged] = useState(false);
+  const [sort, setSort] = useState<'changes' | 'door' | 'low'>('changes');
   const [page, setPage] = useState(0);
   const floorOf = (l: LockRow) => l.floor ?? l.group ?? null;
   const groups = [...new Set(data.locks.map(floorOf).filter(Boolean))].sort((a, b) => a!.localeCompare(b!, undefined, { numeric: true })) as string[];
   const rows = data.locks.filter((l) => (!state || l.state === state) && (!grp || floorOf(l) === grp) && (!soon || (l.forecast?.daysLeft != null && l.forecast.daysLeft <= 14))
-    && (!q || `${l.doorName} ${l.lockModel ?? ''}`.toLowerCase().includes(q.toLowerCase())));
+    && (!changed || l.batteryChanges > 0)
+    && (!q || `${l.doorName} ${l.lockModel ?? ''}`.toLowerCase().includes(q.toLowerCase())))
+    // 2.35 Most battery changes first by default: the locks that eat batteries are at the top.
+    .sort((a, b) => sort === 'door' ? a.doorName.localeCompare(b.doorName, undefined, { numeric: true })
+      : sort === 'low' ? (a.forecast?.daysLeft ?? 99999) - (b.forecast?.daysLeft ?? 99999)
+      : b.batteryChanges - a.batteryChanges || (a.avgDays ?? 99999) - (b.avgDays ?? 99999) || a.doorName.localeCompare(b.doorName, undefined, { numeric: true }));
+  const totalChanges = data.locks.reduce((n, l) => n + l.batteryChanges, 0);
+  const withChanges = data.locks.filter((l) => l.batteryChanges > 0).length;
+  // What to do on each lock: the first item of its plan, else what its state says.
+  const todo = (r: LockRow) => r.plan[0]?.title ?? (r.state === 'solved' ? `Fixed: the batteries last now.${r.reportTodo ? ` ${r.reportTodo}` : ''}` : r.reportTodo ? r.reportTodo : r.state === 'draining' && r.next ? `Check next: ${r.next}` : r.batteryChanges === 0 && !r.reports ? 'Nothing recorded yet: upload a lock report when you read it' : 'Nothing to do now');
   const per = 25, pages = Math.max(1, Math.ceil(rows.length / per)), pg = Math.min(page, pages - 1);
   // 2.34 The lock register as a spreadsheet (Armel: "an important Excel"): one line per lock.
-  const exportCsv = () => saveCsv(['Door', 'Floor', 'Lock model', 'State', 'Battery changes', 'Last battery change', 'Days the last set lasted', 'Days a set (average)', 'Batteries expected low on', 'Days left',
+  const exportCsv = () => saveCsv(['Door', 'Floor', 'Lock model', 'State', 'Battery changes', 'Battery changes a year', 'Last battery change', 'Days the last set lasted', 'Days a set (average)', 'Batteries expected low on', 'Days left',
     'Last work', 'Parts', 'Last problem seen', 'Next step'],
-    rows.map((r) => [r.doorName, floorOf(r), r.lockModel, STATE[r.state]?.label ?? r.state, r.batteryChanges, r.lastChange ?? '', r.lastSetDays, r.avgDays, r.forecast?.expectedLowOn ?? '', r.forecast?.daysLeft ?? '',
-      r.lastWork?.on ?? '', r.lastWork?.parts.join(', ') ?? '', r.lastIssue?.on ?? '', r.plan[0]?.title ?? '']), `${hotel.slug}-locks-${new Date().toISOString().slice(0, 10)}.csv`);
+    rows.map((r) => [r.doorName, floorOf(r), r.lockModel, STATE[r.state]?.label ?? r.state, r.batteryChanges, r.changesPerYear ?? '', r.lastChange ?? '', r.lastSetDays, r.avgDays, r.forecast?.expectedLowOn ?? '', r.forecast?.daysLeft ?? '',
+      r.lastWork?.on ?? '', r.lastWork?.parts.join(', ') ?? '', r.lastIssue?.on ?? '', todo(r)]), `${hotel.slug}-locks-${new Date().toISOString().slice(0, 10)}.csv`);
   return (
     <section className="panel" style={{ padding: 0 }}>
       {title && <h3 className="lh-todo-h">{title}</h3>}
+      <p className="small" style={{ margin: '12px 16px 0' }}>{`${data.locks.length} locks · ${withChanges} with battery changes · ${totalChanges} battery changes in total · ${data.counts.draining ?? 0} draining`}</p>
       <div className="row lh-filters">
         <input className="search" placeholder="Door…" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} aria-label="Search a door" />
         <select value={state} onChange={(e) => { setState(e.target.value); setPage(0); }} aria-label="State"><option value="">All states</option>{Object.entries(STATE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
         {groups.length > 1 && <select value={grp} onChange={(e) => { setGrp(e.target.value); setPage(0); }} aria-label="Floor or door group"><option value="">All floors</option>{groups.map((g) => <option key={g}>{g}</option>)}</select>}
+        <select value={sort} onChange={(e) => { setSort(e.target.value as typeof sort); setPage(0); }} aria-label="Order"><option value="changes">Most battery changes first</option><option value="door">By door</option><option value="low">Batteries low soonest</option></select>
+        <label className="check small"><input type="checkbox" checked={changed} onChange={(e) => { setChanged(e.target.checked); setPage(0); }} /> Only locks with battery changes</label>
         <label className="check small"><input type="checkbox" checked={soon} onChange={(e) => { setSoon(e.target.checked); setPage(0); }} /> Batteries low within 14 days</label>
         <span className="small muted">{rows.length} lock(s)</span>
         <button className="btn small no-print" style={{ marginLeft: 'auto' }} data-tip="Download this list for Excel (one line per lock)." onClick={exportCsv}>Excel (CSV)</button>
@@ -144,11 +158,11 @@ export function LocksTable({ data, title }: { data: LockList; title?: string }) 
               <td><Link to={`/lock-troubleshoot/door/${encodeURIComponent(r.doorId)}`}><strong>{r.doorName}</strong></Link><div className="small muted">{r.lockModel ?? 'model not given'}</div></td>
               <td className="small">{floorOf(r) ?? '—'}</td>
               <td><span className={`badge ${STATE[r.state]?.cls ?? ''}`}>{STATE[r.state]?.label ?? r.state}</span>{r.notRecommended > 0 && <div className="small warn-text">batteries not recommended</div>}</td>
-              <td className="num">{r.batteryChanges}{r.avgDays != null && r.avgDays > 0 && <div className={`small ${r.avgDays <= 90 ? 'warn-text' : 'muted'}`}>{`${(365 / r.avgDays).toFixed(1)} a year`}</div>}</td>
+              <td className="num">{r.batteryChanges}{r.changesPerYear != null && <div className={`small ${r.changesPerYear >= 4 && r.state !== 'solved' ? 'warn-text' : 'muted'}`}>{`${r.changesPerYear} a year`}</div>}</td>
               <td className="num">{r.lastSetDays != null ? `${r.lastSetDays} d` : '—'}{r.avgDays != null && <div className="small muted">avg {r.avgDays} d</div>}</td>
               <td className="small nowrap">{r.forecast?.expectedLowOn ? <><span className={`badge ${lowCls(r.forecast)}`}>{lowIn(r.forecast)}</span><div className="muted">{day(r.forecast.expectedLowOn)}</div></> : '—'}</td>
               <td className="small">{r.lastWork ? <>{day(r.lastWork.on)}: {r.lastWork.parts.join(', ')} <span className={`badge ${WORK_VERDICT[r.lastWork.verdict]?.cls ?? ''}`}>{WORK_VERDICT[r.lastWork.verdict]?.label}</span></> : '—'}</td>
-              <td className="small">{r.plan[0]?.title ?? '—'}</td>
+              <td className="small">{!r.plan[0] && r.state === 'solved' ? <><div>Fixed: the batteries last now.</div>{r.reportTodo && <div className="muted">{r.reportTodo}</div>}</> : todo(r)}</td>
             </tr>))}</tbody>
         </table></div>
       )}

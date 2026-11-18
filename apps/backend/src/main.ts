@@ -8,6 +8,7 @@ import { pool } from './db.ts';
 if (process.env.PROVISION_ON_START === '1') { const { provision } = await import('./provision-lib.ts'); await provision(); }
 else await migrate();
 await (await import('./secret-store.ts')).loadStoredSecrets();
+await (await import('./tenants/apply.ts')).applyTenantLook((m) => console.log(m));
 const app = await buildServer();
 const jobs = startJobs();
 await app.listen({ port: config.port, host: config.host });

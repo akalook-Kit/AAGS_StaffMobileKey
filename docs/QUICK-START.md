@@ -22,7 +22,12 @@ is installed beforehand: the .msi carries its own runtime.
 
 ## Light edition (2.35.0): lock diagnosis and day reports
 
-**K Hotel Douala**: `AccessMonitoringTool-Light-KHotelDouala-2.35.0.msi` is the same Light version with the K Hotel
+**K Hotel Douala, full version** (2.35.1): `AccessMonitoringTool-Server-KHotelDouala-2.35.1.msi` is the standard
+version with the K Hotel logo and colours. Installed over the existing K Hotel server it keeps everything and gives
+the logo and colours to the hotel if it has no logo of its own yet. Locks → Lock troubleshooting → **Locks** lists
+every lock: battery changes (and how many a year), the state and what to do, most battery changes first.
+
+**K Hotel Douala, Light**: `AccessMonitoringTool-Light-KHotelDouala-2.35.1.msi` is the same Light version with the K Hotel
 logo and colours (black and rose gold). Since 2.35 every lock report also shows how often the batteries were
 changed (per year, how long a set lasts, whether each set lasts less than the one before, and the day a draining lock
 was fixed).

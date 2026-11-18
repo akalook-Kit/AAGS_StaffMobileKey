@@ -35,7 +35,8 @@ async function loadData(hotelId: string, doorIds: string[] | null) {
   const by = <T extends { door_id: string }>(rows: T[]) => { const m = new Map<string, T[]>(); for (const r of rows) { const a = m.get(r.door_id) ?? []; a.push(r); m.set(r.door_id, a); } return m; };
   const doors = await many(pool, `SELECT external_id AS id, name, data->>'doorGroup' AS "group", (data->>'online')::boolean AS online FROM resources WHERE hotel_id=$1 AND kind='door' AND ($2::text[] IS NULL OR external_id = ANY($2))`, [hotelId, ids]);
   const models = await many(pool, `SELECT door_id, model FROM door_lock_models WHERE hotel_id=$1 AND ($2::text[] IS NULL OR door_id = ANY($2))`, [hotelId, ids]);
-  const reports = await many(pool, `SELECT id, door_id, file_name, period_from, period_to, uploaded_at, lock_model, checks, analysis->'battery' AS battery, analysis->'steps' AS steps, analysis->'verdict' AS verdict
+  const reports = await many(pool, `SELECT id, door_id, file_name, period_from, period_to, uploaded_at, lock_model, checks, analysis->'battery' AS battery, analysis->'steps' AS steps, analysis->'verdict' AS verdict,
+    (SELECT jsonb_agg(x) FROM jsonb_array_elements(analysis->'findings') x WHERE x->>'level' <> 'info' AND x ? 'action') AS todo
     FROM lock_reports WHERE hotel_id=$1 AND ($2::text[] IS NULL OR door_id = ANY($2)) ORDER BY period_to NULLS FIRST, uploaded_at`, [hotelId, ids]);
   const work = await many(pool, `SELECT w.*, w.done_on::text AS day, o.display_name AS recorded_by, (SELECT count(*) FROM lock_work_files f WHERE f.work_id=w.id)::int AS files FROM lock_work w LEFT JOIN operators o ON o.id=w.created_by
     WHERE w.hotel_id=$1 AND ($2::text[] IS NULL OR w.door_id = ANY($2)) ORDER BY w.done_on, w.created_at`, [hotelId, ids]);
@@ -107,7 +108,9 @@ function buildHistory(doorId: string, D: Data, tz: string, siteLife: number | nu
   const currentDays = changeList.length ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${changeList[changeList.length - 1]!.day}T00:00:00Z`)) / 86_400_000) : null;
   const usual = median(lasted);
   const fixedLock = recentAlarms === 0 && currentDays != null && usual != null && lasted.length >= 2 && usual < 180 && currentDays >= Math.max(180, usual * 3);
-  const drainingNow = !fixedLock && ((est != null && est < 180) || recentAlarms >= 2 || (lasted.length > 0 && lasted[lasted.length - 1]! < 180));
+  // A rough estimate from a few readings does not make a lock "draining" when its last complete set lasted a year.
+  const longLast = lasted.length > 0 && lasted[lasted.length - 1]! >= 365;
+  const drainingNow = !fixedLock && ((est != null && est < 180 && !longLast) || recentAlarms >= 2 || (lasted.length > 0 && lasted[lasted.length - 1]! < 180));
   const checks = latest ? Object.fromEntries(Object.entries(latest.checks ?? {}).map(([k, v]: [string, any]) => [k, v?.result])) : null;
   // 2.32 Firmware upgrades that concern this lock, and how long its battery sets lasted before and after each.
   const fw = D.firmware.filter((f) => !f.doors || f.doors.includes(doorId)).map((f) => {
@@ -222,6 +225,14 @@ function buildHistory(doorId: string, D: Data, tz: string, siteLife: number | nu
     reports: reports.map((r) => ({ id: r.id, fileName: r.file_name, from: r.period_from, to: r.period_to, uploadedAt: r.uploaded_at, verdict: r.verdict })),
     elimination, plan, weakPacks, firmware: fw, firmwareSeen: firmwareWorks,
     forecast, issues, measures,
+    // 2.35 What the latest lock report says to do (battery first), for the lock register's "What to do".
+    reportTodo: (() => {
+      const rank = (f: { area: string; level: string; title?: string }) => (f.level === 'high' ? 0 : 10) + ({ battery: 0, lock: 1, door: 2, use: 3, security: 4, data: 5 } as Record<string, number>)[f.area]! + (/another system|Metal key|firmware \/ software/i.test(f.title ?? '') ? 6 : 0);
+      return [...((latest?.todo ?? []) as { area: string; level: string; action: string; title?: string }[])].sort((a, b) => rank(a) - rank(b))[0]?.action ?? null;
+    })(),
+    // Battery changes a year over the time the lock has been followed (not 365 / average set: a lock that was fixed
+    // would look worse than it is).
+    changesPerYear: changeList.length >= 2 ? Math.round((changeList.length / Math.max(60, (Date.parse(today) - Date.parse(changeList[0]!.day)) / 86_400_000)) * 3650) / 10 : null,
     seen: seenRows.map((w) => ({ id: w.id as string, on: w.day as string, parts: w.parts as string[], partNames: (w.parts as string[]).map(partName), notes: w.notes as string | null, by: w.done_by as string | null,
       voltsIdle: w.volts_idle != null ? Number(w.volts_idle) : null, voltsLoaded: w.volts_loaded != null ? Number(w.volts_loaded) : null, recordedBy: w.recorded_by as string | null, files: Number(w.files ?? 0) })),
   };
@@ -251,7 +262,7 @@ export function lockHistoryRoutes(app: FastifyInstance) {
       const h = buildHistory(id, D, tz, siteLife); detail.push(h);
       const last = h.work[h.work.length - 1] ?? null;
       out.push({ doorId: id, doorName: h.door.name, group: h.door.group, floor: h.door.floor, online: h.door.online, lockModel: h.lockModelName, lockModelId: h.lockModel, novel: h.novel,
-        forecast: h.forecast, lastIssue: h.issues[h.issues.length - 1] ?? null, lastChange: h.batteries.changes[h.batteries.changes.length - 1]?.day ?? null,
+        forecast: h.forecast, reportTodo: h.reportTodo, changesPerYear: h.changesPerYear, lastIssue: h.issues[h.issues.length - 1] ?? null, lastChange: h.batteries.changes[h.batteries.changes.length - 1]?.day ?? null,
         batteryChanges: h.batteries.count, avgDays: h.batteries.avgDays, lastSetDays: h.batteries.lastedDays[h.batteries.lastedDays.length - 1] ?? null, daysSinceLast: h.batteries.daysSinceLast, reports: h.reports.length,
         work: h.work.length, lastWork: last ? { on: last.on, parts: last.partNames, verdict: last.verdict, title: last.title } : null,
         state: h.elimination.state, next: h.elimination.next?.name ?? null, notRecommended: h.batteries.notRecommended.length, plan: h.plan });

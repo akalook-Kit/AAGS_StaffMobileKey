@@ -23,7 +23,13 @@ d'autre n'est à installer avant : le .msi contient son propre environnement d'e
 
 ## Version Light (2.35.0) : diagnostic des serrures et rapports du jour
 
-**K Hotel Douala** : `AccessMonitoringTool-Light-KHotelDouala-2.35.0.msi` est la même version Light avec le logo et
+**K Hotel Douala, version complète** (2.35.1) : `AccessMonitoringTool-Server-KHotelDouala-2.35.1.msi` est la version
+standard avec le logo et les couleurs de K Hotel. Installée sur le serveur K Hotel existant, elle garde tout et donne
+le logo et les couleurs à l'hôtel s'il n'a pas encore de logo. Serrures → Diagnostic des serrures → **Serrures**
+liste toutes les serrures : changements de piles (et combien par an), l'état et que faire, en commençant par les plus
+changées.
+
+**K Hotel Douala, Light** : `AccessMonitoringTool-Light-KHotelDouala-2.35.1.msi` est la même version Light avec le logo et
 les couleurs de K Hotel (noir et or rose). Depuis la 2.35, chaque relevé de serrure indique aussi la fréquence de
 changement des piles (par an, durée d'un jeu, si chaque jeu dure moins que le précédent, et le jour où une serrure qui
 se déchargeait a été réglée).

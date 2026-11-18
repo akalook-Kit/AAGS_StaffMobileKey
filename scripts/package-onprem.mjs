@@ -72,6 +72,11 @@ const EDITIONS = {
     env: { SMK_EDITION: 'light', SMK_OPEN_ACCESS: 'lan', SMK_OPEN_ACCESS_DIRECT: '1', ...(tenant !== 'none' ? { SMK_TENANT: tenant } : {}) } },
 };
 EDITIONS['la-falaise-light'] = EDITIONS.light; // the name used by 2.33
+// 2.35 The full (standard) version with one hotel's logo and colours: SMK_PACKAGE_EDITION=full SMK_PACKAGE_TENANT=k-hotel-douala
+// gives AccessMonitoringTool-Server-KHotelDouala (everything of the standard version; the logo and colours also go to a
+// hotel set up before, as long as it has no logo of its own).
+EDITIONS.full = { title: `Access Monitoring Tool${tenant === 'k-hotel-douala' ? ' - K Hotel Douala' : ''}`, msiName: tenant === 'k-hotel-douala' ? 'AccessMonitoringTool-Server-KHotelDouala' : 'AccessMonitoringTool-Server',
+  env: { SMK_EDITION: 'full', ...(tenant !== 'none' && tenant !== 'la-falaise' ? { SMK_TENANT: tenant } : {}) } };
 const pe = process.env.SMK_PACKAGE_EDITION;
 rmSync(join(out, 'edition.json'), { force: true });
 if (pe) {
