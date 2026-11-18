@@ -738,6 +738,20 @@ jeu par année.
 
 Chaque entrée peut porter jusqu'à 6 photos ou captures (carnet papier, multimètre, porte-piles, Visionline).
 
+**Règles piles d'ASSA ABLOY** (2.37, d'après le cas CS0055208) :
+- *Alerte piles faibles après piles neuves* : la serrure n'efface son indicateur que si les piles neuves mesurent plus
+  de 4,5 V **et** au moins 0,5 V de plus que la mesure précédente. Des piles de stock à 4,4–4,6 V font fonctionner la
+  serrure mais laissent l'alerte. Posez des piles alcalines industrielles neuves (Varta Industrial 4006 ou Panasonic
+  Industrial LR6) ; si l'alerte reste, effacez-la avec Lock Service 3G (Configure lock → « 9V battery, 9V lock case » →
+  Set → remettre le câble → « 4.5V battery, 4.5V lock case » → Set → carte personnel → lecture des paramètres).
+- *Repos et charge* : plus de 0,5 V entre la tension au repos et en charge signale une mauvaise connexion entre les
+  piles et la cassette : le plan de la serrure commence alors par « Remplacer la cassette de piles », jusqu'au
+  remplacement d'un porte-piles.
+- *Test de consommation de courant* : Enregistrer des travaux a des champs pour le courant en µA (serrure complète, LCA
+  seul, LCA + LCU, avec et sans le nœud en ligne, cassette contournée). Le plan nomme la pièce qui fait grimper le
+  courant. ASSA ABLOY a jugé 468–633 µA anormalement élevés.
+- Des relevés sur les échelles 4,5 V et 9 V signifient que la serrure a été réglée en 9 V : remettez-la en 4,5 V.
+
 **Comparer les serrures** (Diagnostic des serrures, 2.36) : toutes les serrures avec un relevé, côte à côte, d'après
 leur dernier relevé, celles à traiter en premier. Chaque serrure reçoit un état, avec les raisons :
 - *Piles qui se vident* : un jeu dure 90 jours ou moins.

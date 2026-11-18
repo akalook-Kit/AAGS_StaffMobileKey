@@ -88,6 +88,6 @@ two-step*), who must re-enter their password, and it is audited.
 2. Turn on **Require two-step sign-in for administrators** at every hotel.
 3. Keep the Visionline server patched and the portal reachable only from the hotel network (or the documented secret
    pathway); never expose Visionline itself.
-4. Code-sign the `.msi` (LICENSING.md).
+4. Code-sign the `.msi` (the vendor licensing kit (kept by the vendor, not in this repository)).
 5. The content security policy blocks `eval`; one library probes it at start-up, which shows one harmless console
    message. No inline scripts are used.

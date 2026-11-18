@@ -83,7 +83,7 @@ Developers can also run the services directly with Node.js 22 (`npm install`, `n
 | [docs/ON-PREMISES.md](docs/ON-PREMISES.md) | Installing everything on a hotel's Vingcard/Visionline server (any hotel): one-click `Install.cmd` with its own Node.js and PostgreSQL, first-run setup page, passwords and backups in the portal; outside access by public IP and secret path |
 | [docs/VISIONLINE-DATA.md](docs/VISIONLINE-DATA.md) | Doors, user groups, people and keycards read from Visionline by themselves; keycards made at the desk recorded within seconds; the Visionline cards & people page |
 | [docs/BREAKFAST.md](docs/BREAKFAST.md) | Breakfast at the restaurant: in-house list from the PMS (CSV), serving by room, paying and walk-in guests, day sheet and reports; Restaurant role |
-| [docs/LICENSING.md](docs/LICENSING.md) | Selling to other hotels: the .msi installer, licence keys and the offline License Manager, keeping the platform yours (or hosting it) |
+| Licences | Licence keys and the License Manager are in the vendor licensing kit (kept by the vendor, not in this repository). The portal only checks licences (Settings → Licence). |
 | [docs/ACCESS-HISTORY.md](docs/ACCESS-HISTORY.md) | Access history (who went where), lock events matched to keycards and who issued them, card lookup, reading a card at the encoder (pilot), choosing whose cards are read |
 | [docs/ATTENDANCE.md](docs/ATTENDANCE.md) | Time & attendance: check-in desk, timesheets, daily workers without a keycard, shifts, leave, approval and payroll exports; hiding modules from people |
 | [docs/MONITORING.md](docs/MONITORING.md) | Monitoring: doors offline, watched (VIP) doors, lock alarms, disk space and database size; alerts by e-mail and SMS; database copy tools |

@@ -23,3 +23,10 @@ vendor-sdk/
 *.apk
 *.xapk
 .cache/
+
+# 2.37.1 Vendor licensing (the License Manager, the signing key and issued licences) is kept by the vendor only.
+tools/license-manager/
+dist/license-manager/
+smk-vendor-key*.json
+*.smklic
+SMK-License-Manager*.html

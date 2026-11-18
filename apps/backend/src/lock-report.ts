@@ -496,12 +496,35 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   if (fast.length) f.push({ area: 'battery', level: 'high', title: fast.length === 1 ? `New batteries down to ${levels[0]!.toFixed(1)} V in ${fastest < 1 ? 'less than a day' : nd(Math.round(fastest))}` : `New batteries drained fast ${fast.length} times`,
     detail: `${(fast.length > 5 ? fast.slice(-5) : fast).map((x) => x[0]!.toUpperCase() + x.slice(1)).join('; ')}${fast.length > 5 ? ` (the last 5 of ${fast.length}; all are in Battery periods below)` : ''}. A good set normally lasts many months.`,
     action: 'Check that the batteries are new, of the type the lock requires (alkaline or lithium as specified, not rechargeable), all from the same pack, and that the contacts are clean and tight. Then look at the lock and door findings below: a lock that restarts, keeps its motor running, or a door that rubs or is left open, drains batteries.' });
+  // 2.37 ASSA ABLOY (case CS0055208, Armel's 2021 Radisson Blu case): after LOW or CRITICAL, the lock clears its
+  // battery flag only when the new batteries measure more than 4.5 V AND at least 0.5 V more than the previous
+  // measurement. Batteries that are "good enough" but not fresh leave the flag on: low-battery warnings with new
+  // batteries. Readings are steps of 0.2 V ("below 4.8 V" = 4.6 to 4.8 V).
+  const flagCase = (changedAt: string) => {
+    const prev = [...readings].reverse().find((r) => ms(r.t) < ms(changedAt) - 10 * MIN)?.volts ?? null;
+    const next = readings.find((r) => ms(r.t) >= ms(changedAt) - 10 * MIN && ms(r.t) <= ms(changedAt) + 3 * DAY)?.volts ?? null;
+    if (scaleHigh || next == null) return { prev, next, clears: null as boolean | null };
+    // "below 4.8 V" (4.6-4.8) is over 4.5 V; "below 4.6 V" (4.4-4.6) may not be. A rise of one 0.2 V step or two
+    // (0.4 V) may be under 0.5 V.
+    const clears = next >= 4.8 - 1e-6 && (prev == null || next - prev >= 0.6 - 1e-6) ? true : next <= 4.6 + 1e-6 || (prev != null && next - prev <= 0.4 + 1e-6) ? false : null;
+    return { prev, next, clears };
+  };
   if (firmwareAlarms.length) {
     const changes = [...new Set(firmwareAlarms.map((x) => x.changedAt))];
-    f.push({ area: 'lock', level: 'high', title: `Battery alarm after new batteries: firmware fault (${firmwareAlarms.length} time${firmwareAlarms.length === 1 ? '' : 's'})`,
-      detail: `After the battery change${changes.length === 1 ? '' : 's'} on ${changes.length > 6 ? `${changes.slice(-6).map(dt).join(', ')} and ${changes.length - 6} earlier` : changes.map(dt).join(', ')} the lock raised a battery alarm (first: ${firmwareAlarms[0]!.name}, ${firmwareAlarms[0]!.t.replace('T', ' ')}) while its readings stayed above ${confirmLevel.toFixed(1)} V. A battery alarm after new batteries, even once, is a firmware fault, not a battery problem; it is not counted as a battery alarm here.`,
-      action: 'Program the lock and upload its firmware with the service tool, then read the lock again and check that the alarm has cleared.' });
+    const cases = changes.map((c) => ({ c, ...flagCase(c) }));
+    const notFresh = cases.filter((x) => x.clears === false);
+    const n = firmwareAlarms.length;
+    f.push({ area: 'battery', level: 'medium', title: `Low-battery warning still shown after new batteries (${n} time${n === 1 ? '' : 's'})`,
+      detail: `${notFresh.length ? `${notFresh.slice(-4).map((x) => `${dt(x.c)}: ${x.prev != null ? `${x.prev.toFixed(1)} V before, ` : ''}${x.next!.toFixed(1)} V after`).join('; ')}. ` : ''}The lock clears its low-battery flag only when the new batteries measure more than 4.5 V and at least 0.5 V more than the previous measurement (ASSA ABLOY). ${notFresh.length ? 'These batteries were good enough to run the lock but not fresh enough to clear the flag, so the warning stayed on.' : 'The readings after the change do not show why the flag stayed on: the lock firmware kept it.'} These warnings are not counted as battery alarms here.`,
+      action: notFresh.length
+        ? 'Fit fresh industrial alkaline batteries from one pack (ASSA ABLOY recommends Varta Industrial 4006 or Panasonic Industrial LR6), not batteries from stock that already read under 4.6 V.'
+        : 'Clear the flag with Lock Service 3G: Configure lock → "9V battery, 9V lock case" → Set → remove and re-insert the service cable → "4.5V battery, 4.5V lock case" → Set → remove the cable → present a staff card → parameter read-out. If the flag keeps coming back, upgrade the lock firmware.' });
   }
+  // 2.37 Readings on both scales: the lock was set as a 9 V lock case at some point ("10 V / 10 V" after initialising).
+  if (raw.some((r) => r.volts >= 6) && raw.some((r) => r.volts < 6))
+    f.push({ area: 'lock', level: 'medium', title: 'Battery readings on both the 4.5 V and the 9 V scale',
+      detail: 'Some readings are on the 9 V scale (a lock set as "9V battery, 9V lock case"), others on the 4.5 V scale. A lock on the wrong setting reports wrong battery levels and false alarms.',
+      action: 'With Lock Service 3G: Configure lock → "4.5V battery, 4.5V lock case" → Set, then read the lock again.' });
   if (faults.accessDeniedBattery) f.push({ area: 'battery', level: 'high', title: 'The lock refused cards because of its battery', detail: `${faults.accessDeniedBattery} time(s) the lock switched to "access denied" for low battery.`, action: 'Replace the batteries now.' });
   if (!exchanges.length && lastReading && lastReading.volts <= confirmLevel + 1e-6)
     f.push({ area: 'battery', level: lastReading.volts <= alarmLevel + 1e-6 ? 'high' : 'medium', title: `Batteries at ${lastReading.volts.toFixed(1)} V at the end of the report`, detail: `Last reading ${lastReading.t.replace('T', ' ')}; the lock's usual low-battery level is ${alarmLevel.toFixed(1)} V.`, action: 'Plan a battery change.' });
@@ -671,7 +694,7 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   // fix, so they no longer ask for action; they stay listed as history.
   // A firmware battery alarm long ago (more than 6 months before the end of the report) is history, not an action.
   if (firmwareAlarms.length && to && ms(to) - ms(firmwareAlarms[firmwareAlarms.length - 1]!.t) > 180 * DAY)
-    for (const x of f) if (/^Battery alarm after new batteries/.test(x.title)) { x.level = 'info'; x.title = `${x.title} (last ${firmwareAlarms[firmwareAlarms.length - 1]!.t.slice(0, 7)})`; delete x.action; }
+    for (const x of f) if (/^Low-battery warning still shown after new batteries/.test(x.title)) { x.level = 'info'; x.title = `${x.title} (last ${firmwareAlarms[firmwareAlarms.length - 1]!.t.slice(0, 7)})`; delete x.action; }
   if (frequency.fixedSince) {
     const fx = frequency.fixedSince.since;
     const after = (l: readonly number[]) => ev.filter((e) => e.t! > fx && isIn(e.code, l) && !nearChange(e.t!)).length;
@@ -679,7 +702,7 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
       x.level = 'info'; x.title = `Before ${fx.slice(0, 10)}: ${x.title[0]!.toLowerCase()}${x.title.slice(1)}`; delete x.action;
     }
     const lastAlarm = [...alarms, ...firmwareAlarms].map((a) => a.t).sort().pop() ?? '';
-    for (const x of f) if (x.level === 'high' && x.area === 'battery' || /^Battery alarm after new batteries/.test(x.title)) {
+    for (const x of f) if (x.level === 'high' && x.area === 'battery' || /^Low-battery warning still shown after new batteries/.test(x.title)) {
       if (lastAlarm && lastAlarm > fx && !/^New batteries/.test(x.title)) continue;
       x.level = 'info'; x.title = `Before ${fx.slice(0, 10)}: ${x.title[0]!.toLowerCase()}${x.title.slice(1)}`; delete x.action;
     }

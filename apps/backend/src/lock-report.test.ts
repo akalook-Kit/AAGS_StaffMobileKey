@@ -71,7 +71,8 @@ describe('lock event report (2.18 troubleshooting)', () => {
     // 2.19: a battery alarm after new batteries (readings fine) is a firmware fault, not a battery alarm.
     expect(a.battery.firmwareAlarms.length).toBe(3); // incl. 10:03, minutes before the change
     expect(a.battery.alarms.length).toBe(0);
-    expect(a.findings.some((f) => /firmware fault/.test(f.title) && f.level === 'high')).toBe(true);
+    // 2.37 Named for what the lock does: the low-battery flag stays on (ASSA ABLOY's clearing rule).
+    expect(a.findings.some((f) => /^Low-battery warning still shown after new batteries/.test(f.title))).toBe(true);
     const fw = a.steps.find((x) => x.id === 'firmware')!;
     expect(fw.suggests).toBe('likely');
   });
@@ -173,5 +174,20 @@ describe('VingCard Classic report without a door sensor (2.31)', () => {
     expect(a.health.reasons.length).toBe(2);
     // No personal names kept.
     expect(JSON.stringify(a)).not.toContain('000123');
+  });
+
+  it('2.37 applies ASSA ABLOY\'s flag rule: new batteries under 4.5 V or less than 0.5 V higher leave the low-battery warning on', () => {
+    const lines = [HEAD,
+      row('3/20/2026 9:00 AM', 'Alert, Battery level low (0304)', 'Staff'),
+      row('3/12/2026 9:00 AM', 'Battery level below 4.6 volts (1080)', 'Door Unit Internal'),
+      row('3/12/2026 8:59 AM', 'Battery exchanged (0528)', 'Door Unit Internal'),
+      row('3/10/2026 9:00 AM', 'Battery level below 4.2 volts (1078)', 'Door Unit Internal'),
+      row('3/1/2026 9:00 AM', 'Battery level below 4.4 volts (1079)', 'Door Unit Internal'),
+      row('2/1/2026 9:00 AM', 'Battery level below 4.6 volts (1080)', 'Door Unit Internal')];
+    const a = analyseLockReport(parseLockReport(utf16(lines)), Date.parse('2026-03-25T00:00:00Z'));
+    const f = a.findings.find((x) => /^Low-battery warning still shown after new batteries/.test(x.title));
+    expect(f).toBeTruthy();
+    expect(f!.detail).toContain('4.2 V before, 4.6 V after');
+    expect(f!.action).toContain('Varta Industrial 4006');
   });
 });

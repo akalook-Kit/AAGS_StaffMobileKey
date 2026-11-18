@@ -165,9 +165,14 @@ export async function noteChange(c: pg.PoolClient, hotelId: string, doorId: stri
     details: { at: at.toISOString(), source, detail } });
 }
 
-export const REPROGRAM_ADVICE = 'The batteries were changed but the lock still reports a battery alarm. Program the lock and upload its firmware with the '
-  + 'service tool (portable programming unit / LockLink), then check that the alarm has cleared. Changing batteries in good time, before '
-  + 'they are critically low, avoids this.';
+// 2.37 ASSA ABLOY's rule (case CS0055208): the lock clears its LOW/CRITICAL flag only when the new batteries measure
+// more than 4.5 V AND at least 0.5 V more than the previous measurement.
+export const REPROGRAM_ADVICE = 'The batteries were changed but the lock still reports a battery alarm. The lock clears its low-battery flag only when '
+  + 'the new batteries measure more than 4.5 V and at least 0.5 V more than before (ASSA ABLOY): batteries that are not fresh leave it on. '
+  + '1) Fit fresh industrial alkaline batteries from one pack (Varta Industrial 4006 or Panasonic Industrial LR6). '
+  + '2) If the alarm stays, clear the flag with Lock Service 3G: Configure lock, "9V battery, 9V lock case", Set, remove and re-insert the '
+  + 'service cable, "4.5V battery, 4.5V lock case", Set, remove the cable, present a staff card, then a parameter read-out. '
+  + '3) If it keeps coming back, program the lock and upload its firmware. Changing batteries before they are critically low avoids this.';
 
 async function raiseReprogram(c: pg.PoolClient, hotelId: string, doorId: string, doorName: string, group: string | null, cur: any, code: number, at: Date, alert: any) {
   if (cur.reprogram_ticket_id) {

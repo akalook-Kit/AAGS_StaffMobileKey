@@ -201,7 +201,7 @@ Security fixes from the review of 2.12 are listed in [SECURITY-REVIEW-2.13.md](S
 | Keycards behind lock events | **Event log** → Person / card column; filter *Keycard: No matching keycard* | Holder, group, issued by, badges *No matching keycard*, *Not valid then*, *Deadbolt override*. |
 | Card lookup | **Visionline cards & people → Card lookup** | Type `135800`. With Settings → Reports & sync → Encoders (pilot) on and `fd1` listed, place a card in the simulator (`POST http://localhost:14444/sim/encoder {"encoder":"fd1","regNo":"135800"}`) and press **Read card on fd1**. |
 | Whose cards are read | **Settings → Reports & sync** | Everyone / staff groups / chosen groups (with people per group), at most N people, deadbolt privilege. |
-| Licence | **Settings → Licence** | The test setup runs as a trial; the on-premises installer turns licence checks on. See [LICENSING.md](LICENSING.md). |
+| Licence | **Settings → Licence** | The test setup runs as a trial; the on-premises installer turns licence checks on. Licence keys come from the vendor licensing kit (kept by the vendor, not in this repository). |
 | Look and feel | Everywhere | Grouped menu (folds away on phones), Settings sections on the left, **Worth a look** on the Overview, search with **Ctrl K**, fonts served by the platform. |
 
 ### New in 2.11 — platform off port 4000, Breakfast

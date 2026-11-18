@@ -1164,7 +1164,7 @@ async function main() {
     const rp = await until('206 reprogram', () => bd('206'), (d) => d?.reprogram);
     ok(rp?.state === 'GOOD' && !rp.alert && rp.reprogram?.number > 0, `alarm after the change -> request #${rp?.reprogram?.number} "program the lock and upload firmware", no battery alarm`, rp);
     const rt = (await call('GET', `${H}/maintenance/tickets/${rp?.reprogram?.ticketId}`, maint15)).json;
-    ok(/Program lock and upload firmware/.test(rt.title) && /service tool/.test(rt.description) && rt.category === 'lock', 'the request tells the technician to program the lock and upload the firmware', rt.title);
+    ok(/Program lock and upload firmware/.test(rt.title) && /Lock Service 3G/.test(rt.description) && /4.5 V and at least 0.5 V more/.test(rt.description) && rt.category === 'lock', 'the request tells the technician to program the lock and upload the firmware', rt.title);
     await bat('206', { kind: 'low' });
     await new Promise((r) => setTimeout(r, 2500));
     const tickets = (await call('GET', `${H}/maintenance/tickets?status=open`, maint15)).json;
@@ -1401,7 +1401,7 @@ async function main() {
     const sv = (await call('POST', `${H}/lock-reports`, maint19, { fileName: '205-new.xls', data, doorId: pv.suggestedDoor.id, lockModel: 'signature-rfid' })).json;
     const rep = (await call('GET', `${H}/lock-reports/${sv.id}`, tech19)).json;
     ok(rep.lockModelName === 'VingCard Signature RFID', `the report says which lock it is: ${rep.doorName}, ${rep.lockModelName}`);
-    ok(rep.analysis.findings.some((f: any) => /firmware fault/.test(f.title)) && rep.analysis.battery.firmwareAlarms.length === 1 && rep.analysis.battery.alarms.length === 0,
+    ok(rep.analysis.findings.some((f: any) => /^Low-battery warning still shown after new batteries/.test(f.title)) && rep.analysis.battery.firmwareAlarms.length === 1 && rep.analysis.battery.alarms.length === 0,
       'the battery alarm after new batteries is a firmware finding, not a battery alarm');
     ok(rep.analysis.steps?.length === 10 && rep.analysis.steps.find((x: any) => x.id === 'firmware')?.suggests === 'likely', 'ten elimination steps, firmware marked likely');
     ok((await call('PUT', `${H}/lock-reports/${sv.id}/checks/batteries`, tech19, { result: 'ok', note: 'New Energizer, same pack' })).status === 200, 'a technician marks "batteries" ruled out');

@@ -634,6 +634,19 @@ or on the locks of the hotel), the locks whose batteries last the least, and the
 
 Each entry can carry up to 6 photos or screenshots (paper log, multimeter, battery holder, Visionline).
 
+**ASSA ABLOY's battery rules** (2.37, from case CS0055208):
+- *Low-battery warning after new batteries*: the lock clears its low-battery flag only when the new batteries measure
+  more than 4.5 V **and** at least 0.5 V more than the previous measurement. Batteries from stock that read 4.4–4.6 V
+  run the lock but leave the warning on. Fit fresh industrial alkaline batteries (Varta Industrial 4006 or Panasonic
+  Industrial LR6); if the warning stays, clear it with Lock Service 3G (Configure lock → "9V battery, 9V lock case" →
+  Set → re-insert the cable → "4.5V battery, 4.5V lock case" → Set → staff card → parameter read-out).
+- *Rest and load*: more than 0.5 V between the voltage at rest and under load is a bad connection between the batteries
+  and the battery cassette: the lock's plan then starts with "Replace the battery cassette", until a holder is replaced.
+- *Current consumption test*: Record work has fields for the current in µA (whole lock, LCA only, LCA + LCU, with and
+  without the online end node, cassette bypassed). The plan names the part whose connection makes the current jump.
+  ASSA ABLOY called 468–633 µA abnormally high.
+- Readings on both the 4.5 V and 9 V scales mean the lock was set as a 9 V lock case: set it back to 4.5 V.
+
 **Compare locks** (Lock troubleshooting, 2.36): every lock with a report, side by side, from its latest report, the
 locks that need work first. Each lock gets one status, with the reasons:
 - *Draining batteries*: a set lasts 90 days or less.

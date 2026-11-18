@@ -15,7 +15,7 @@ interface Part { id: string; name: string; group: string; novel?: boolean; notNo
 interface Catalogue { models: { id: string; name: string }[]; parts: Part[]; groups: { id: string; name: string; why: string }[]; batteryTypes: { id: string; name: string }[]; recommended: string }
 interface Rate { per30Days: number; days: number; readings: number; lifeDays: number | null }
 interface WorkRow { id: string; on: string; parts: string[]; partNames: string[]; otherPart: string | null; batteryTypeName: string | null; batteryBrand: string | null; notes: string | null; by: string | null; recordedBy: string | null;
-  voltsIdle?: number | null; voltsLoaded?: number | null; swappedFrom?: string | null; files?: number;
+  voltsIdle?: number | null; voltsLoaded?: number | null; swappedFrom?: string | null; files?: number; currentUa?: Record<string, number> | null;
   verdict: 'waiting' | 'fixed' | 'better' | 'ok' | 'watch' | 'same' | 'worse' | 'draining'; title: string; detail: string; before: Rate | null; after: Rate | null; againInDays: number | null; alarmsAfter: number; waitUntil: string | null }
 interface History {
   door: { id: string; name: string; group: string | null; online: boolean | null; floor?: string | null }; lockModel: string | null; lockModelName: string | null; novel: boolean;
@@ -39,6 +39,9 @@ export const STATE: Record<History['elimination']['state'], { cls: string; label
 };
 const day = (d: string | null | undefined) => (d ? new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString(undefined, { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 /** 2.34 "in 5 days" / "3 days ago" / "today" for an expected low-battery date. */
+/** 2.37 The current consumption test readings (ASSA ABLOY manual 66 1100 042-0). */
+export const CURRENT_TESTS: [string, string][] = [['lock', 'Whole lock'], ['lcaOnly', 'LCA only'], ['lcaLcu', 'LCA + LCU'], ['endNodeIn', 'With the online end node'], ['endNodeOut', 'End node removed'], ['cassetteOut', 'Battery cassette bypassed']];
+export const currentText = (c: Record<string, number>) => CURRENT_TESTS.filter(([k]) => c[k] != null).map(([k, l]) => `${l} ${c[k]} µA`).join(' · ');
 export const lowIn = (f?: Forecast | null) => (f?.basis === 'outlived' ? 'outlived its usual set' : !f?.expectedLowOn || f.daysLeft == null ? '—' : f.daysLeft === 0 ? 'today' : f.daysLeft > 0 ? `in ${f.daysLeft} days` : `${-f.daysLeft} days ago`);
 export const lowCls = (f?: Forecast | null) => (f?.basis === 'outlived' ? 'warn' : f?.daysLeft == null ? '' : f.daysLeft <= 0 ? 'bad' : f.daysLeft <= 7 ? 'warn' : 'ok');
 const rate = (r: Rate | null) => (r ? `${r.per30Days.toFixed(2)} V/30 d${r.lifeDays != null ? ` · ~${r.lifeDays} d a set` : ' · no drop'}` : '—');
@@ -253,7 +256,7 @@ export function DoorHistoryPage() {
           <tbody>{[...x.work].reverse().map((w) => (
             <tr key={w.id}>
               <td className="nowrap">{day(w.on)}{w.by && <div className="small muted">{w.by}</div>}</td>
-              <td className="small">{w.partNames.map((t) => tr(t)).join(', ')}{w.batteryTypeName && <div className={w.batteryTypeName.startsWith('Industrial') ? 'muted' : 'warn-text'}>Batteries: {w.batteryTypeName}{w.batteryBrand ? `, ${w.batteryBrand}` : ''}</div>}{(w as any).voltsBefore != null || (w as any).voltsAfter != null ? <div className="muted">Pack: {(w as any).voltsBefore ?? '—'} V → {(w as any).voltsAfter ?? '—'} V</div> : null}{(w as any).batteryBatch && <div className="muted">Batch {(w as any).batteryBatch}</div>}{(w.voltsIdle != null || w.voltsLoaded != null) && <div className="muted">At rest {w.voltsIdle ?? '—'} V · under load {w.voltsLoaded ?? '—'} V</div>}{w.swappedFrom && <div className="muted">Swapped with door {w.swappedFrom}</div>}{w.notes && <div className="muted">{w.notes}</div>}{(w.files ?? 0) > 0 && <button className="linklike small no-print" onClick={() => setPhotos({ id: w.id, title: `${day(w.on)}: ${w.partNames.map((t) => tr(t)).join(', ')}` })}>Photos ({w.files})</button>}</td>
+              <td className="small">{w.partNames.map((t) => tr(t)).join(', ')}{w.batteryTypeName && <div className={w.batteryTypeName.startsWith('Industrial') ? 'muted' : 'warn-text'}>Batteries: {w.batteryTypeName}{w.batteryBrand ? `, ${w.batteryBrand}` : ''}</div>}{(w as any).voltsBefore != null || (w as any).voltsAfter != null ? <div className="muted">Pack: {(w as any).voltsBefore ?? '—'} V → {(w as any).voltsAfter ?? '—'} V</div> : null}{(w as any).batteryBatch && <div className="muted">Batch {(w as any).batteryBatch}</div>}{(w.voltsIdle != null || w.voltsLoaded != null) && <div className="muted">At rest {w.voltsIdle ?? '—'} V · under load {w.voltsLoaded ?? '—'} V</div>}{w.swappedFrom && <div className="muted">Swapped with door {w.swappedFrom}</div>}{w.currentUa && <div className="muted">{`Current: ${currentText(w.currentUa)}`}</div>}{w.notes && <div className="muted">{w.notes}</div>}{(w.files ?? 0) > 0 && <button className="linklike small no-print" onClick={() => setPhotos({ id: w.id, title: `${day(w.on)}: ${w.partNames.map((t) => tr(t)).join(', ')}` })}>Photos ({w.files})</button>}</td>
               <td className="small"><span className={`badge ${WORK_VERDICT[w.verdict].cls}`}>{WORK_VERDICT[w.verdict].label}</span> <strong>{w.title}</strong><div className="muted">{w.detail}</div></td>
               <td className="small nowrap">{rate(w.before)}<br />→ {rate(w.after)}{w.againInDays != null && <div className="muted">new batteries again after {w.againInDays} d</div>}</td>
               <td>{can('battery.manage') && <button className="btn small ghost no-print" onClick={() => void del(w.id)}>Remove</button>}</td>
@@ -378,6 +381,7 @@ function RecordWork({ doorId, doorName, model, initialParts = [], onClose, onDon
   const [other, setOther] = useState('');
   const [btype, setBtype] = useState('industrial-alkaline');
   const [brand, setBrand] = useState('');
+  const [cur, setCur] = useState<Record<string, string>>({});
   const [by, setBy] = useState('');
   const [batch, setBatch] = useState('');
   const [vb, setVb] = useState('');
@@ -401,7 +405,8 @@ function RecordWork({ doorId, doorName, model, initialParts = [], onClose, onDon
     try {
       const num = (v: string) => (v ? Number(v.replace(',', '.')) : undefined);
       const r = await api<{ id: string }>(`${base}/lock-history/${encodeURIComponent(door)}/work`, { body: { doneOn: on, parts, otherPart: other || undefined, batteryType: parts.includes('batteries') ? btype : undefined, batteryBrand: brand || undefined, batteryBatch: batch || undefined,
-        voltsBefore: num(vb), voltsAfter: num(va), voltsIdle: num(vIdle), voltsLoaded: num(vLoad), swappedFrom: swapping ? swap || undefined : undefined,
+        voltsBefore: num(vb), voltsAfter: num(va), voltsIdle: num(vIdle), voltsLoaded: num(vLoad),
+        currentUa: Object.values(cur).some(Boolean) ? Object.fromEntries(Object.entries(cur).filter(([, v]) => v).map(([k, v]) => [k, Number(v.replace(',', '.'))])) : undefined, swappedFrom: swapping ? swap || undefined : undefined,
         firmwareVersion: fwv || undefined, doneBy: by || undefined, notes: notes || undefined, lockModel: lockModel || undefined } });
       try { if (lockModel) localStorage.setItem('smk.lockModel', lockModel); } catch { /* private window */ }
       for (const f of files) { await api(`${base}/lock-history/${encodeURIComponent(door)}/work/${r.id}/files`, { body: { name: f.name.slice(0, 160), dataUrl: await photoDataUrl(f) } }); setSent((n) => n + 1); }
@@ -434,19 +439,28 @@ function RecordWork({ doorId, doorName, model, initialParts = [], onClose, onDon
         <div className="field-row">
           <div className="field"><label htmlFor="rw-bt">Batteries fitted</label><select id="rw-bt" value={btype} onChange={(e) => setBtype(e.target.value)}>{(c?.batteryTypes ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
             {btype !== 'industrial-alkaline' && <span className="hint warn-text">Industrial alkaline AA batteries are recommended.</span>}</div>
-          <div className="field"><label htmlFor="rw-brand">Brand (optional)</label><input id="rw-brand" value={brand} maxLength={60} onChange={(e) => setBrand(e.target.value)} /></div>
+          <div className="field"><label htmlFor="rw-brand">Brand (optional)</label><input id="rw-brand" list="rw-brands" value={brand} maxLength={60} onChange={(e) => setBrand(e.target.value)} />
+            <datalist id="rw-brands"><option value="Varta Industrial 4006" /><option value="Panasonic Industrial LR6 (GWE)" /></datalist>
+            <span className="hint">Recommended by ASSA ABLOY: Varta Industrial 4006 or Panasonic Industrial LR6.</span></div>
         </div>
       )}
       {parts.includes('batteries') && <div className="field"><label htmlFor="rw-batch">Batch / expiry on the pack (optional)</label><input id="rw-batch" value={batch} maxLength={60} onChange={(e) => setBatch(e.target.value)} /></div>}
       <div className="field-row">
         <div className="field"><label htmlFor="rw-vi">Battery voltage at rest (V)</label><input id="rw-vi" inputMode="decimal" value={vIdle} onChange={(e) => setVIdle(e.target.value)} placeholder="e.g. 4.7" /></div>
         <div className="field"><label htmlFor="rw-vl">Under load (V, while the lock opens)</label><input id="rw-vl" inputMode="decimal" value={vLoad} onChange={(e) => setVLoad(e.target.value)} placeholder="e.g. 4.3" />
-          {vIdle && vLoad && Number(vIdle.replace(',', '.')) - Number(vLoad.replace(',', '.')) > 0.6 && <span className="hint warn-text">A drop of more than 0.6 V when the lock opens points to weak batteries, a rusty holder or a bad contact.</span>}</div>
+          {vIdle && vLoad && Number(vIdle.replace(',', '.')) - Number(vLoad.replace(',', '.')) > 0.5 && <span className="hint warn-text">More than 0.5 V between rest and load: a bad connection between the batteries and the battery cassette (rust, loose contact). Replace the cassette and measure again (ASSA ABLOY).</span>}</div>
       </div>
+      <details className="field" open={Object.values(cur).some(Boolean)}>
+        <summary className="small">Current consumption test (µA, optional)</summary>
+        <p className="hint">ASSA ABLOY's test (manual 66 1100 042-0): measure the current with the parts connected one at a time; the part that makes it jump is the faulty one. ASSA ABLOY called 468 to 633 µA abnormally high.</p>
+        <div className="field-row" style={{ flexWrap: 'wrap' }}>
+          {CURRENT_TESTS.map(([k, label]) => <div key={k} className="field" style={{ minWidth: 150 }}><label htmlFor={`rw-cur-${k}`}>{label}</label><input id={`rw-cur-${k}`} inputMode="decimal" value={cur[k] ?? ''} onChange={(e) => setCur((m) => ({ ...m, [k]: e.target.value }))} placeholder="µA" /></div>)}
+        </div>
+      </details>
       {!onlySeen && <div className="field-row">
         <div className="field"><label htmlFor="rw-vb">Pack voltage before (V, multimeter)</label><input id="rw-vb" inputMode="decimal" value={vb} onChange={(e) => setVb(e.target.value)} placeholder="e.g. 3.8" /></div>
         <div className="field"><label htmlFor="rw-va">Pack voltage after (V)</label><input id="rw-va" inputMode="decimal" value={va} onChange={(e) => setVa(e.target.value)} placeholder="e.g. 4.8" />
-          {parts.includes('batteries') && va && Number(va.replace(',', '.')) < 4.6 && Number(va.replace(',', '.')) > 3 && <span className="hint warn-text">A new pack of 3 alkaline cells reads about 4.8 V: under 4.6 V is old or weak stock.</span>}</div>
+          {parts.includes('batteries') && va && Number(va.replace(',', '.')) < 4.6 && Number(va.replace(',', '.')) > 3 && <span className="hint warn-text">A new pack of 3 alkaline cells reads about 4.8 V: under 4.6 V is old or weak stock, and the lock keeps its low-battery warning (it clears only when new batteries read more than 4.5 V and 0.5 V more than before).</span>}</div>
       </div>}
       {parts.includes('firmware') && <div className="field"><label htmlFor="rw-fw">Firmware version now on the lock</label><input id="rw-fw" value={fwv} maxLength={40} onChange={(e) => setFwv(e.target.value)} /></div>}
       <div className="field"><label htmlFor="rw-by">Done by (technician)</label><input id="rw-by" value={by} maxLength={80} onChange={(e) => setBy(e.target.value)} /></div>

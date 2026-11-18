@@ -122,7 +122,7 @@ replace the placeholder names. See **Visionline cards & people** in the portal a
 SYSTEM) and is the easiest way to hand the platform to a hotel's IT. New installations run as a 60-day trial;
 the licence key goes into **Settings → Licence**. Licence checks are switched on by the installer
 (`SMK_LICENSING=on`); existing installations start their trial on upgrade, so nothing locks. See
-[LICENSING.md](LICENSING.md).
+the vendor licensing kit (kept by the vendor, not in this repository).
 
 ## New in 2.13
 

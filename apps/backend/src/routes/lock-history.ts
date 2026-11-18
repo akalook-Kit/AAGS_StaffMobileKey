@@ -182,6 +182,28 @@ function buildHistory(doorId: string, D: Data, tz: string, siteLife: number | nu
   if (elimination.state === 'draining' && (nextG === 'lca' || nextG === 'lcu') && (!dropDay || reportAfterDrop(dropDay)))
     plan.push({ kind: 'check', priority: 3, due: null, title: `Swap the ${nextG.toUpperCase()} with a lock that works`,
       detail: `${nextG === 'lca' ? 'LCA (lock case adapter)' : 'LCU (lock controller unit)'}: take it from a lock whose batteries last, fit it here (and this one there), record the door it came from, and monitor both locks for 3 weeks.` });
+  // 2.37 ASSA ABLOY (case CS0055208): a drop of more than 0.5 V between rest and load comes from a bad connection
+  // between the batteries and the battery cassette (rust, loose contact); swapping the cassette removed it. Until the
+  // holder is replaced (or cleaned) after that measurement, it is the first thing to do.
+  const devRow = [...allRows].filter((w) => w.volts_idle != null && w.volts_loaded != null && Number(w.volts_idle) - Number(w.volts_loaded) > 0.5 + 1e-6).sort((x, y) => (x.day < y.day ? -1 : 1)).pop();
+  if (devRow && !allRows.some((w) => w.day >= devRow.day && w !== devRow && w.parts.some((p: string) => ['battery-holder', 'holder-cleaned', 'contacts-cleaned'].includes(p))))
+    plan.push({ kind: 'check', priority: 1, due: null, title: 'Replace the battery cassette (holder)',
+      detail: `${devRow.day}: ${Number(devRow.volts_idle).toFixed(2)} V at rest, ${Number(devRow.volts_loaded).toFixed(2)} V under load, a drop of ${(Number(devRow.volts_idle) - Number(devRow.volts_loaded)).toFixed(2)} V. Over 0.5 V comes from a bad connection between the batteries and the cassette (rust or a loose contact): replace the cassette, then measure again.` });
+  // 2.37 Current consumption test: ASSA ABLOY called 468 to 633 µA "abnormally high" (case CS0055208). The part whose
+  // connection makes the current jump is the one to change.
+  const curRow = [...allRows].filter((w) => w.current_ua).sort((x, y) => (x.day < y.day ? -1 : 1)).pop();
+  if (curRow) {
+    const c = curRow.current_ua as Record<string, number>;
+    const hits: string[] = [];
+    if (c.endNodeIn != null && c.endNodeOut != null && c.endNodeIn - c.endNodeOut >= 100) hits.push(`the online end node adds ${Math.round(c.endNodeIn - c.endNodeOut)} µA (${c.endNodeIn} with it, ${c.endNodeOut} without)`);
+    if (c.lcaLcu != null && c.lcaOnly != null && c.lcaLcu - c.lcaOnly >= 100) hits.push(`the LCU adds ${Math.round(c.lcaLcu - c.lcaOnly)} µA (${c.lcaOnly} LCA only, ${c.lcaLcu} LCA + LCU)`);
+    if (c.lcaOnly != null && c.lcaOnly >= 450) hits.push(`the LCA alone draws ${c.lcaOnly} µA`);
+    if (c.cassetteOut != null && c.lock != null && c.lock - c.cassetteOut >= 100) hits.push(`with the battery cassette bypassed the lock draws ${c.cassetteOut} µA instead of ${c.lock}: the cassette`);
+    const high = Math.max(...Object.values(c).filter((v) => typeof v === 'number'));
+    if (hits.length || high >= 450)
+      plan.push({ kind: 'check', priority: 2, due: null, title: hits.length ? 'Current test: change the part that draws the current' : `Current test: ${high} µA is abnormally high`,
+        detail: `${curRow.day}: ${hits.length ? hits.join('; ') : `${high} µA measured`}. ASSA ABLOY called 468 to 633 µA abnormally high. Change that part (swap it with a lock that works) and measure again.` });
+  }
   for (let i = plan.length - 1; i >= 0; i--) if (plan[i]!.kind === 'check' && plan[i]!.title.startsWith('Check:') && (nextG === 'lca' || nextG === 'lcu') && plan.some((x) => x.title.startsWith('Swap'))) plan.splice(i, 1);
   plan.sort((a, b) => a.priority - b.priority);
 
@@ -219,7 +241,7 @@ function buildHistory(doorId: string, D: Data, tz: string, siteLife: number | nu
       const w = workRows.find((x) => x.id === j.id)!;
       return { ...j, partNames: j.names ?? j.parts.map(partName), otherPart: w.other_part, batteryBrand: w.battery_brand, batteryBatch: w.battery_batch,
         voltsBefore: w.volts_before != null ? Number(w.volts_before) : null, voltsAfter: w.volts_after != null ? Number(w.volts_after) : null, batteryTypeName: BATTERY_TYPES.find((t) => t.id === w.battery_type)?.name ?? null,
-        recordedBy: w.recorded_by, recordedAt: w.created_at, voltsIdle: w.volts_idle != null ? Number(w.volts_idle) : null, voltsLoaded: w.volts_loaded != null ? Number(w.volts_loaded) : null,
+        recordedBy: w.recorded_by, recordedAt: w.created_at, voltsIdle: w.volts_idle != null ? Number(w.volts_idle) : null, voltsLoaded: w.volts_loaded != null ? Number(w.volts_loaded) : null, currentUa: w.current_ua ?? null,
         swappedFrom: w.swapped_from ?? null, files: Number(w.files ?? 0) };
     }),
     reports: reports.map((r) => ({ id: r.id, fileName: r.file_name, from: r.period_from, to: r.period_to, uploadedAt: r.uploaded_at, verdict: r.verdict })),
@@ -234,7 +256,7 @@ function buildHistory(doorId: string, D: Data, tz: string, siteLife: number | nu
     // would look worse than it is).
     changesPerYear: changeList.length >= 2 ? Math.round((changeList.length / Math.max(60, (Date.parse(today) - Date.parse(changeList[0]!.day)) / 86_400_000)) * 3650) / 10 : null,
     seen: seenRows.map((w) => ({ id: w.id as string, on: w.day as string, parts: w.parts as string[], partNames: (w.parts as string[]).map(partName), notes: w.notes as string | null, by: w.done_by as string | null,
-      voltsIdle: w.volts_idle != null ? Number(w.volts_idle) : null, voltsLoaded: w.volts_loaded != null ? Number(w.volts_loaded) : null, recordedBy: w.recorded_by as string | null, files: Number(w.files ?? 0) })),
+      voltsIdle: w.volts_idle != null ? Number(w.volts_idle) : null, voltsLoaded: w.volts_loaded != null ? Number(w.volts_loaded) : null, currentUa: w.current_ua ?? null, recordedBy: w.recorded_by as string | null, files: Number(w.files ?? 0) })),
   };
 }
 
@@ -311,6 +333,9 @@ export function lockHistoryRoutes(app: FastifyInstance) {
       voltsIdle: z.number().min(0).max(12).optional(),
       voltsLoaded: z.number().min(0).max(12).optional(),
       swappedFrom: z.string().trim().max(100).optional(),
+      /** 2.37 Current consumption test, µA (ASSA ABLOY manual 66 1100 042-0). */
+      currentUa: z.object({ lock: z.number().min(0).max(100000), lcaOnly: z.number().min(0).max(100000), lcaLcu: z.number().min(0).max(100000),
+        endNodeIn: z.number().min(0).max(100000), endNodeOut: z.number().min(0).max(100000), cassetteOut: z.number().min(0).max(100000) }).partial().optional(),
       firmwareVersion: z.string().trim().max(40).optional(),
       doneBy: z.string().trim().max(80).optional(),
       notes: z.string().trim().max(1000).optional(),
@@ -321,16 +346,18 @@ export function lockHistoryRoutes(app: FastifyInstance) {
     const parts = [...new Set(b.parts)];
     if (!parts.length && !b.otherPart) throw new ApiError(400, 'NO_PARTS', 'Choose at least one part or check, or describe the other part.');
     if (parts.includes('batteries') && !b.batteryType) throw new ApiError(400, 'BATTERY_TYPE', 'Say which batteries were fitted (industrial alkaline is recommended).');
-    if (parts.includes('measured') && b.voltsIdle == null && b.voltsLoaded == null) throw new ApiError(400, 'NO_VOLTS', 'Enter the voltage measured at rest or under load.');
+    const cur = b.currentUa && Object.keys(b.currentUa).length ? b.currentUa : null;
+    if (parts.includes('measured') && b.voltsIdle == null && b.voltsLoaded == null && !cur) throw new ApiError(400, 'NO_VOLTS', 'Enter the voltage measured at rest or under load.');
     if (b.voltsIdle != null && b.voltsLoaded != null && b.voltsLoaded > b.voltsIdle + 0.2) throw new ApiError(400, 'VOLTS', 'Under load the voltage is lower than at rest: check the two readings.');
     const door = await one(pool, `SELECT 1 FROM resources WHERE hotel_id=$1 AND kind='door' AND external_id=$2`, [hotelId, doorId]);
     if (!door && !(await one(pool, `SELECT 1 FROM lock_reports WHERE hotel_id=$1 AND door_id=$2 LIMIT 1`, [hotelId, doorId]))) throw notFound('Door');
     const id = await tx(async (c) => {
-      const r = await c.query(`INSERT INTO lock_work (hotel_id, door_id, done_on, parts, other_part, battery_type, battery_brand, battery_batch, volts_before, volts_after, done_by, notes, created_by, firmware_version, volts_idle, volts_loaded, swapped_from)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`, [hotelId, doorId, b.doneOn, parts.length ? parts : ['other'], b.otherPart || null,
+      const r = await c.query(`INSERT INTO lock_work (hotel_id, door_id, done_on, parts, other_part, battery_type, battery_brand, battery_batch, volts_before, volts_after, done_by, notes, created_by, firmware_version, volts_idle, volts_loaded, swapped_from, current_ua)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`, [hotelId, doorId, b.doneOn, parts.length ? parts : ['other'], b.otherPart || null,
         parts.includes('batteries') ? b.batteryType : null, parts.includes('batteries') ? b.batteryBrand || null : null, parts.includes('batteries') ? b.batteryBatch || null : null,
         b.voltsBefore ?? null, b.voltsAfter ?? null, b.doneBy || null, b.notes || null, op.id, b.firmwareVersion || null, b.voltsIdle ?? null, b.voltsLoaded ?? null,
-        parts.some((p) => ['lca', 'lcu', 'classic-lockcase', 'lockcase', 'door-unit', 'reader', 'novel-inside', 'novel-reader'].includes(p)) ? b.swappedFrom || null : null]);
+        parts.some((p) => ['lca', 'lcu', 'classic-lockcase', 'lockcase', 'door-unit', 'reader', 'novel-inside', 'novel-reader'].includes(p)) ? b.swappedFrom || null : null,
+        cur ? JSON.stringify(cur) : null]);
       if (b.lockModel) await c.query(`INSERT INTO door_lock_models (hotel_id, door_id, model, updated_by) VALUES ($1,$2,$3,$4)
         ON CONFLICT (hotel_id, door_id) DO UPDATE SET model=EXCLUDED.model, updated_by=EXCLUDED.updated_by, updated_at=now()`, [hotelId, doorId, b.lockModel, op.id]);
       // New batteries also count as a battery change of the door (Battery status and the battery sets use it).
@@ -409,7 +436,7 @@ export function lockHistoryRoutes(app: FastifyInstance) {
         kind: w.parts.every((p: string) => isObservation(p)) ? (w.parts.includes('issue-reported') ? 'problem' : 'measured') : 'work',
         parts: (w.parts as string[]).map((p) => (p === 'other' ? w.other_part ?? 'other part' : partName(p))),
         batteries: w.parts.includes('batteries') ? BATTERY_TYPES.find((t) => t.id === w.battery_type)?.name ?? null : null,
-        voltsIdle: w.volts_idle != null ? Number(w.volts_idle) : null, voltsLoaded: w.volts_loaded != null ? Number(w.volts_loaded) : null,
+        voltsIdle: w.volts_idle != null ? Number(w.volts_idle) : null, voltsLoaded: w.volts_loaded != null ? Number(w.volts_loaded) : null, currentUa: w.current_ua ?? null,
         voltsBefore: w.volts_before != null ? Number(w.volts_before) : null, voltsAfter: w.volts_after != null ? Number(w.volts_after) : null,
         swappedFrom: w.swapped_from ?? null, by: w.done_by ?? null, notes: w.notes ?? null, files: Number(w.files ?? 0), state: h.elimination.state });
       for (const c of h.batteries.changes) if (inRange(c.day) && !c.sources.includes('work recorded'))

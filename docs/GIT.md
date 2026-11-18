@@ -153,6 +153,36 @@ git tag --list "v2.2*"
 
 Only the newest zip is needed if the older ones are no longer at hand (each zip is the whole project).
 
+## 2.37.1 (17 Nov 2026): private repository, licensing kept by the vendor
+
+**Make the repository private first** (it was public): github.com/akalook-Kit/AAGS_StaffMobileKey → **Settings** →
+**General** → at the bottom, *Danger Zone* → **Change visibility** → **Change to private** → confirm. Releases and
+their .msi files become private too. Check: signed out (or in a private window) the page must show *404*.
+
+The License Manager, its source and LICENSING.md are no longer in the project: they are in the vendor licensing kit
+(`AMT-Vendor-Licensing-Kit.zip`), kept by the vendor only. `.gitignore` refuses them, the signing key and `.smklic`
+files. Older commits still contain the License Manager (never the private key): the repository being private is what
+keeps them from others.
+
+Versions not yet on GitHub on 17 Nov 2026: 2.35.0, 2.35.1, 2.36.0 and 2.37.1 (2.37.0 is replaced by 2.37.1). Put the
+four project zips in one folder, then run the catch-up from the newest one (it adds one commit and tag per version,
+skips those already there and pushes):
+
+```powershell
+$from = "$env:USERPROFILE\Downloads\amt-zips"
+Expand-Archive "$from\access-monitoring-tool-project-2.37.1.zip" "$env:TEMP\amt-2.37.1" -Force
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\amt-2.37.1\access-monitoring-tool-project-2.37.1\scripts\git-catch-up.ps1" `
+  -Repo C:\khb\staff-mobile-key\staff-mobile-key -From $from
+```
+
+Then the release: Releases → **Draft a new release** → tag `v2.37.1` → attach the four 2.37.1 .msi files and
+`SHA256SUMS-2.37.1.txt` → **Publish release**.
+
+## 2.37.0 (17 Nov 2026): ASSA ABLOY's battery rules (case CS0055208)
+
+Four installers, same names with 2.37.0. Same commands with `$v = '2.37.0'`; attach the four .msi files and
+`SHA256SUMS-2.37.0.txt` to the release `v2.37.0`. Database migration 035 runs by itself.
+
 ## 2.36.0 (16 Nov 2026): Compare locks, power cuts, card-writing errors, .txt read-outs
 
 Four installers, same names as 2.35.1 with 2.36.0: `AccessMonitoringTool-Server-KHotelDouala-2.36.0.msi`,
