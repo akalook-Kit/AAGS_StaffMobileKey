@@ -24,7 +24,7 @@ async function refreshOld(hotelId: string, onlyId?: string) {
   if (refreshing.has(hotelId)) return;
   refreshing.add(hotelId);
   try {
-    const rows = await many(pool, `SELECT id, lock_events, analysis->'quality' AS q FROM lock_reports WHERE hotel_id=$1 AND ($2::uuid IS NULL OR id=$2) AND analysis->'battery'->'frequency' IS NULL ORDER BY uploaded_at DESC LIMIT 20`, [hotelId, onlyId ?? null]);
+    const rows = await many(pool, `SELECT id, lock_events, analysis->'quality' AS q FROM lock_reports WHERE hotel_id=$1 AND ($2::uuid IS NULL OR id=$2) AND analysis->'health' IS NULL ORDER BY uploaded_at DESC LIMIT 20`, [hotelId, onlyId ?? null]);
     if (!rows.length) return;
     const opt = await analysisOptions(hotelId);
     for (const r of rows) {
@@ -107,6 +107,45 @@ export function lockReportRoutes(app: FastifyInstance) {
       return row!;
     });
     return { id: r.id, uploadedAt: r.uploaded_at };
+  });
+
+  /**
+   * 2.36 Every lock side by side, from the latest report of each door (Armel, 16 Nov: "a realistic view on the locks
+   * draining batteries"): how long a set lasts and how many openings it gives, the changes a year, power cuts, resets
+   * on low batteries, card-writing errors, and how each lock compares with the hotel's usual.
+   */
+  app.get(`${P}/hotels/:hotelId/lock-reports/compare`, async (req) => {
+    const hotelId = hid(req);
+    await requirePerm(req, hotelId, 'battery.read');
+    await refreshOld(hotelId);
+    const rows = await many(pool, `SELECT DISTINCT ON (r.door_id) r.id, r.door_id, r.door_name, r.lock_model, r.period_from, r.period_to, r.events, r.uploaded_at,
+        r.analysis->'health' AS health, r.analysis->'battery'->'frequency' AS freq, r.analysis->'battery'->'lastReading' AS last_reading,
+        r.analysis->'usage'->'perDay' AS per_day, r.analysis->'cards' AS cards, r.analysis->'actions' AS actions, d.data->>'doorGroup' AS door_group
+      FROM lock_reports r LEFT JOIN resources d ON d.hotel_id=r.hotel_id AND d.kind='door' AND d.external_id=r.door_id
+      WHERE r.hotel_id=$1 ORDER BY r.door_id, r.period_to DESC NULLS LAST, r.uploaded_at DESC`, [hotelId]);
+    const med = (a: number[]) => { const v = a.filter((x) => Number.isFinite(x)).sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[(v.length - 1) / 2]! : (v[v.length / 2 - 1]! + v[v.length / 2]!) / 2) : null; };
+    const perSet = med(rows.map((r) => Number(r.freq?.openingsPerSet)).filter((x) => x > 0));
+    const life = med(rows.map((r) => Number(r.freq?.medianDays)).filter((x) => x > 0));
+    const perDay = med(rows.map((r) => Number(r.per_day)).filter((x) => x >= 0));
+    const RANK: Record<string, number> = { draining: 0, power: 1, 'card-writing': 2, watch: 3, 'no-data': 4, fixed: 5, ok: 6 };
+    const locks = rows.map((r) => {
+      const f = r.freq ?? {};
+      const ops = f.openingsPerSet ?? null;
+      return {
+        doorId: r.door_id, door: r.door_name, group: r.door_group ?? null, lockModel: r.lock_model, reportId: r.id, from: r.period_from, to: r.period_to, events: r.events,
+        status: r.health?.status ?? 'no-data', reasons: r.health?.reasons ?? [],
+        openingsPerDay: r.per_day ?? null, batteryChanges: f.changes ?? 0, reportDays: f.reportDays ?? null,
+        setDays: f.medianDays ?? null, openingsPerSet: ops, changesPerYear: f.perYearRate ?? null, estimatedPerYear: f.perYearRate == null ? f.estimatedPerYear ?? null : null,
+        powerCuts: f.powerCuts ?? 0, lowResets: f.brownoutResets ?? 0, writeErrorShare: r.cards?.writeErrorShare ?? null,
+        lastReading: r.last_reading ?? null, fixedSince: f.fixedSince?.since ?? null,
+        // Battery used per opening against the hotel's usual: below 1 = fewer openings from a set than usual.
+        openingsVsHotel: ops && perSet ? Math.round((ops / perSet) * 100) / 100 : null,
+        todo: r.health?.todo ?? (r.actions ?? [])[0]?.text ?? null,
+      };
+    }).sort((a, b) => (RANK[a.status] ?? 9) - (RANK[b.status] ?? 9) || (a.setDays ?? 9e9) - (b.setDays ?? 9e9) || String(a.door).localeCompare(String(b.door), undefined, { numeric: true }));
+    const counts: Record<string, number> = {};
+    for (const l of locks) counts[l.status] = (counts[l.status] ?? 0) + 1;
+    return { hotel: { openingsPerSet: perSet != null ? Math.round(perSet) : null, setDays: life != null ? Math.round(life) : null, openingsPerDay: perDay != null ? Math.round(perDay * 10) / 10 : null }, counts, locks };
   });
 
   app.get(`${P}/hotels/:hotelId/lock-reports`, async (req) => {

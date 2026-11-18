@@ -90,6 +90,14 @@ export function parseLockReport(buf: Buffer, order?: DateOrder): ParsedLockRepor
     if (event < 0 && share(i, (v) => CODE.test(v)) > 0.6) event = i;
     if (time < 0 && !/read-?\s?out/i.test(head[i] ?? '') && share(i, (v) => dateParts(v) != null) > 0.6) time = i;
   }
+  // 2.36 The .txt export of Visionline's "Read events" window: "Event name" and "Event code" in two columns
+  // ("Staff card accepted" / "64"), the "(*)" mark in the name.
+  let codeCol = -1;
+  if (event < 0) {
+    const c = head.findIndex((h, i) => /^event ?code$|^code$/i.test(h.trim()) && share(i, (v) => /^\d{1,4}$/.test(v.trim())) > 0.6);
+    const n = head.findIndex((h) => /^event( ?name)?$|^description$/i.test(h.trim()));
+    if (c >= 0) { codeCol = c; event = n >= 0 ? n : c; }
+  }
   if (event < 0) event = col(/^event/);
   if (time < 0) time = col(/time|date/);
   if (event < 0 || time < 0) throw new Error('This does not look like a lock event report: no event column (e.g. "The door is opened (0912)") or no time column.');
@@ -102,7 +110,9 @@ export function parseLockReport(buf: Buffer, order?: DateOrder): ParsedLockRepor
   let invalidTimes = 0, duplicates = 0;
   const seen = new Set<string>();
   for (const r of rows) {
-    const m = CODE.exec((r[event] ?? '').trim());
+    const m = codeCol >= 0
+      ? (/^\d{1,4}$/.test((r[codeCol] ?? '').trim()) ? ['', (r[codeCol] ?? '').trim(), /\(\*\)/.test(r[event] ?? '') ? '*' : undefined] as unknown as RegExpExecArray : null)
+      : CODE.exec((r[event] ?? '').trim());
     if (!m) continue;
     const t = localTime(r[time] ?? '', dateOrder);
     const sq = seq >= 0 && /^\d+$/.test((r[seq] ?? '').trim()) ? Number(r[seq]) : null;
@@ -112,7 +122,7 @@ export function parseLockReport(buf: Buffer, order?: DateOrder): ParsedLockRepor
       seen.add(k);
     }
     if (!t) invalidTimes++;
-    const name = (r[event] ?? '').trim().replace(CODE, '').trim();
+    const name = (codeCol >= 0 && event !== codeCol ? (r[event] ?? '').replace(/\(\*\)/, '') : (r[event] ?? '').replace(CODE, '')).trim();
     events.push({ t, code: Number(m[1]), name: name.slice(0, 120), mark: Boolean(m[2]), card: card >= 0 ? (r[card] ?? '').slice(0, 40) : '', seq: sq });
     const rm = room >= 0 ? (r[room] ?? '').trim() : '';
     if (rm && rm.toLowerCase() !== 'n/a') rooms.set(rm, (rooms.get(rm) ?? 0) + 1);
@@ -276,7 +286,9 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
 
   // ---- Battery -----------------------------------------------------------------------------------------------------
   // Readings taken while the lock is being programmed or restarting are not reliable (e.g. "below 8.6 V" on a 4.8 V lock).
-  const busy = ev.filter((e) => isIn(e.code, [85, 86, 95, 577, 578, 592])).map((e) => ms(e.t!));
+  // 2.36 Not "Door unit started" (577): the reading the lock takes when it powers up is the battery voltage it started
+  // with (K Hotel Douala HK Room 6th Floor: 4.2 V at power-up on 26 Oct, 4.8 V on 12 Nov = new batteries).
+  const busy = ev.filter((e) => isIn(e.code, [85, 86, 95, 578, 592])).map((e) => ms(e.t!));
   const nearBusy = (t: string) => busy.some((b) => Math.abs(ms(t) - b) <= 10 * MIN);
   const raw = ev.filter((e) => batteryVoltsBelow(e.code) != null).map((e) => ({ t: e.t!, volts: batteryVoltsBelow(e.code)! }));
   const mainScale = raw.filter((r) => r.volts < 6).length >= raw.filter((r) => r.volts >= 6).length ? 'low' : 'high';
@@ -294,7 +306,35 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
     if (((isTop && r.volts - prev.volts >= 0.4 - 1e-9) || r.volts - prev.volts >= 0.8 - 1e-9) && !exchanges.some((x) => Math.abs(ms(x.t) - ms(r.t)) < 2 * DAY))
       exchanges.push({ t: r.t, how: `Reading rose from ${prev.volts.toFixed(1)} V to ${r.volts.toFixed(1)} V` });
   }
+  // 2.36 The lock started again ("Door unit started") and its next reading, within 10 days, is 0.4 V or more higher
+  // than before: new batteries went in at the power-up (K Hotel Douala HK Room 9th: 4.2 V, then 4.6 V).
+  for (const e of recent.filter((x) => isIn(x.code, [577]))) {
+    if (exchanges.some((x) => Math.abs(ms(x.t) - ms(e.t!)) < 2 * DAY)) continue;
+    // The reading before the power cut, the one the lock took at power-up, and the next one.
+    const prev = [...raw].reverse().find((r) => ms(r.t) < ms(e.t!) - 10 * MIN && (r.volts >= 6) === scaleHigh)?.volts ?? null;
+    const atUp = raw.find((r) => Math.abs(ms(r.t) - ms(e.t!)) <= 10 * MIN && (r.volts >= 6) === scaleHigh)?.volts ?? null;
+    const after = readings.find((r) => ms(r.t) > ms(e.t!) + 10 * MIN && ms(r.t) <= ms(e.t!) + 10 * DAY) ?? null;
+    const base = prev ?? atUp, high = Math.max(prev != null ? (atUp ?? -1) : -1, after?.volts ?? -1);
+    if (base != null && high - base >= 0.4 - 1e-9 && !(after && exchanges.some((x) => Math.abs(ms(x.t) - ms(after.t)) < 2 * DAY))) {
+      // When the power-up reading is still the old level, the new set starts just after it.
+      const t = atUp != null && after && atUp < after.volts ? new Date(ms(e.t!) + 11 * MIN).toISOString().slice(0, 16) : e.t!;
+      exchanges.push({ t, how: `Lock started again with new batteries: ${base.toFixed(1)} V before, ${high.toFixed(1)} V after` });
+    }
+  }
   exchanges.sort((a, b) => (a.t < b.t ? -1 : 1));
+  // 2.36 Power-ups that are not battery changes: the lock lost its power and started again without new batteries
+  // (batteries taken out and put back, a loose holder or contact, or batteries too weak to start). The reading the
+  // lock took then, and the next one, tell which.
+  const readingAt = (t: string) => [...raw].reverse().find((r) => ms(r.t) <= ms(t) + 10 * MIN && ms(r.t) >= ms(t) - 10 * MIN)?.volts ?? null;
+  // A program upload, an initialisation or a factory reset restarts the lock too: not a power cut.
+  const serviceAt = ev.filter((e) => isIn(e.code, [85, 86, 92, 93, 94, 95, 578, 592])).map((e) => ms(e.t!));
+  const powerCuts = recent.filter((e) => isIn(e.code, [577]) && !exchanges.some((x) => Math.abs(ms(x.t) - ms(e.t!)) < 2 * DAY) && !serviceAt.some((b) => Math.abs(ms(e.t!) - b) <= 30 * MIN))
+    .map((e) => ({ t: e.t!, volts: readingAt(e.t!) ?? [...readings].reverse().find((r) => r.t <= e.t!)?.volts ?? null }));
+  // Resets "nothing changed" away from battery changes and programming: when they bunch up while the batteries are at
+  // or under 4.4 V, the voltage collapses when the motor runs (weak batteries, a bad contact or a rusty holder).
+  const lowAt = (t: string) => { const r = [...readings].reverse().find((x) => x.t <= t); return r ? r.volts : null; };
+  const resets576 = recent.filter((e) => isIn(e.code, [576]) && !exchanges.some((x) => Math.abs(ms(x.t) - ms(e.t!)) < 30 * MIN) && !busy.some((b) => Math.abs(ms(e.t!) - b) <= 10 * MIN));
+  const brownouts = resets576.filter((e) => { const v = lowAt(e.t!); return v != null && v <= (scaleHigh ? 8.4 : 4.4) + 1e-6; }).map((e) => e.t!);
   // Restarts right after new batteries are expected (the lock starts again when the batteries go in).
   const nearChange = (t: string) => exchanges.some((x) => ms(t) >= ms(x.t) - 15 * MIN && ms(t) <= ms(x.t) + 15 * MIN);
   // 2.19 (Armel, 27 Oct) A battery alarm after new batteries, even a single one, is a firmware fault unless a reading
@@ -325,7 +365,9 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
     // Consumption: from the first reading to the moment the lowest level was first reached.
     let drop: number | null = null, per1000: number | null = null;
     const dd = first && lowest ? (ms(lowest.t) - ms(first.t)) / DAY : 0;
-    if (first && lowest && lowest.volts < first.volts && dd >= 1) {
+    // 2.36 One 0.2 V step a day after new batteries is the lock settling, not a rate (HK Room 6th: "4.81 V per 30
+    // days"): at least a week, or two steps over two days.
+    if (first && lowest && lowest.volts < first.volts && (dd >= 7 || (first.volts - lowest.volts >= 0.4 - 1e-9 && dd >= 2))) {
       drop = r2(((first.volts - lowest.volts) / dd) * 30);
       const opBetween = recent.filter((e) => e.t! >= first.t && e.t! <= lowest.t && isOpening(e)).length;
       per1000 = opBetween >= 20 ? r2(((first.volts - lowest.volts) / opBetween) * 1000) : null;
@@ -371,12 +413,19 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   const frequency = {
     changes: exchanges.length, firstChange, lastChange,
     daysSinceLast: lastChange && to ? Math.round((ms(to) - ms(lastChange)) / DAY) : null,
-    perYearRate: spanForRate >= 60 ? r1(exchanges.length / (spanForRate / 365)) : null,
+    perYearRate: spanForRate >= 180 ? r1(exchanges.length / (spanForRate / 365)) : null,
     last365: to ? exchanges.filter((x) => ms(x.t) > ms(to) - 365 * DAY).length : 0,
     medianDays: setMedian != null ? r1(setMedian) : null, shortestDays: setDays.length ? r1(Math.min(...setDays)) : null, longestDays: setDays.length ? r1(Math.max(...setDays)) : null,
     trend: setDays.length >= 4 && early && late ? (late <= early * 0.7 ? 'shortening' as const : late >= early * 1.4 ? 'lengthening' as const : 'stable' as const) : null,
     earlyAvgDays: setDays.length >= 4 && early ? r1(early) : null, lateAvgDays: setDays.length >= 4 && late ? r1(late) : null,
     perYear: [...years.values()].sort((a, b) => (a.year < b.year ? -1 : 1)).map((y) => ({ year: y.year, changes: y.changes, avgDays: y.days.length ? r1(avg(y.days)!) : null })),
+    /** 2.36 Openings each finished set gave (median): a busy door empties a set faster, a faulty lock gives few openings. */
+    openingsPerSet: (() => { const v = med(periods.filter((x) => x.startedBy !== 'report' && cuts.indexOf(x.from) < cuts.length - 1 && x.openings > 0).map((x) => x.openings)); return v != null ? Math.round(v) : null; })(),
+    /** When the report is too short for a yearly count: 365 / the set life (an estimate). */
+    estimatedPerYear: setMedian != null && setMedian > 0 ? r1(365 / setMedian) : null,
+    reportDays: from && to ? Math.round((ms(to) - ms(from)) / DAY) : null,
+    // Last 12 months of the report (older ones are history).
+    powerCuts: powerCuts.filter((x) => !to || ms(x.t) > ms(to) - 365 * DAY).length, brownoutResets: brownouts.filter((t) => !to || ms(t) > ms(to) - 365 * DAY).length,
     fixedSince: setDays.length >= 3 && setMedian != null && setMedian <= 60 && currentSet != null && currentSet >= Math.max(90, setMedian * 3) && lastChange
       ? { since: lastChange, days: Math.round(currentSet), before: r1(setMedian) } : null,
   };
@@ -469,7 +518,7 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
       detail: `${unnamed.length ? `Events with no name in this Visionline: ${unnamed.slice(0, 6).map((c) => `(${String(c).padStart(4, '0')})`).join(', ')} (logged by a newer firmware than Visionline knows). ` : ''}${unknownCmd ? `"Error, Unknown command (1121)" ${unknownCmd} time(s): the lock did not understand the service device. ` : ''}${prog.length ? `Program loaded on ${[...new Set(prog)].slice(-4).join(', ')}. ` : ''}Compare the lock firmware with the firmware pack of Visionline and the service device; if battery life fell after a firmware upgrade, give ASSA ABLOY these dates and the battery sets.`,
       action: 'Check the firmware version of the lock (service device: read lock information) and of Visionline/the service device; ask ASSA ABLOY whether the version is known to drain batteries on this lock model.' });
   }
-  if (clockLost) f.push({ area: 'lock', level: 'medium', title: 'The lock lost its clock', detail: `${clockLost} event(s) are dated before 2000: the lock restarted without its time, which happens when the batteries run flat or are removed.`,
+  if (clockLost) f.push({ area: 'lock', level: all.some((e) => isIn(e.code, C.coldStart)) ? 'info' : 'medium', title: 'The lock lost its clock', detail: `${clockLost} event(s) are dated before 2000: the lock restarted without its time, which happens when the batteries run flat or are removed.`,
     action: 'Set the time with the service device after every battery change.' });
   if (faults.restarts >= 5) f.push({ area: 'lock', level: 'medium', title: `The lock restarted ${faults.restarts} times`, detail: `${faults.coldStarts} cold start(s) included; ${faults.restartsAfterBatteryChange} restart(s) right after a battery change are normal and not counted. Frequent restarts point to loose battery contacts or weak batteries.`, action: 'Check the battery holder, its springs and contacts, and the cable to the door unit.' });
   if (faults.cardReading >= 5) f.push({ area: 'lock', level: 'medium', title: `Card reading errors ${faults.cardReading} times`, detail: 'The reader could not read or write a card.', action: 'Clean the reader; if it continues for different cards, check the reader. Replace damaged cards.' });
@@ -502,6 +551,60 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
       detail: `${frequency.medianDays != null ? `A set lasted ${Math.round(frequency.medianDays)} days (median), from ${Math.round(frequency.shortestDays!)} to ${Math.round(frequency.longestDays!)} days. ` : ''}Last change ${dt(frequency.lastChange!)}, ${frequency.daysSinceLast} days before the end of the report. A healthy lock with industrial alkaline batteries goes a year or more on one set. Year by year: see "Battery change frequency" below.`,
       ...(often ? { action: 'Follow the steps below in order (cables and alignment, battery holder, batteries, then the LCA and the LCU swapped with a lock that works) and record each one on the lock, so the next report shows which one fixed it.' } : {}) });
   }
+  // 2.36 What the K Hotel Douala staff-door logs showed (16 Nov 2026).
+  let writeShare = 0, writePaired = 0, acceptedN = 0;
+  // Power cuts and low-battery days of the last 12 months only: older ones are history (K Hotel Douala 508, 702).
+  const yearAgo = to ? ms(to) - 365 * DAY : 0;
+  const cutsRecent = powerCuts.filter((x) => ms(x.t) > yearAgo);
+  if (cutsRecent.length) {
+    const powerCuts = cutsRecent;
+    const weak = powerCuts.filter((x) => x.volts != null && x.volts <= (scaleHigh ? 8.4 : 4.2) + 1e-6).length;
+    f.push({ area: 'battery', level: powerCuts.length >= 2 ? 'high' : 'medium', title: `The lock lost its power ${powerCuts.length} time${powerCuts.length === 1 ? '' : 's'} without new batteries`,
+      detail: `${powerCuts.slice(-6).map((x) => `${dt(x.t)}${x.volts != null ? ` (batteries at ${x.volts.toFixed(1)} V)` : ''}`).join('; ')}. "Door unit started" means the lock had no power and started again, and no higher battery reading followed: the batteries were taken out and put back, a contact or the battery holder opened, or ${weak ? 'the batteries were too weak to keep the lock running' : 'a cable is loose'}.`,
+      action: 'Check the battery holder (springs, rust, contacts) and the cables first. If the lock keeps losing its power with good batteries and a clean holder, swap the LCA, then the LCU.' });
+  }
+  const brownoutsRecent = brownouts.filter((t) => ms(t) > yearAgo);
+  if (brownoutsRecent.length >= 3) {
+    const brownouts = brownoutsRecent;
+    const bdays = new Set(brownouts.map((t) => t.slice(0, 10))).size;
+    f.push({ area: 'battery', level: brownouts.length >= 8 ? 'high' : 'medium', title: `The lock reset ${brownouts.length} times on ${bdays} day${bdays === 1 ? '' : 's'} while its batteries were low`,
+      detail: `"Door unit reset, nothing changed" with the batteries at ${scaleHigh ? '8.4' : '4.4'} V or less (last ${dt(brownouts[brownouts.length - 1]!)}). The voltage collapses when the motor runs and the lock starts again: weak batteries, a rusty battery holder or a bad contact. Each restart also uses battery.`,
+      action: 'Change the batteries and clean or replace the battery holder. If the resets continue with new batteries, check that the door does not press on the lock (alignment, closer), then swap the LCA and the LCU.' });
+  }
+  {
+    // Low-battery warnings while staff kept using the lock: how long it ran low before the batteries were changed.
+    const lows = recent.filter((e) => isIn(e.code, C.cardLowAlert) && ms(e.t!) > yearAgo);
+    const lowDays = new Set(lows.map((e) => e.t!.slice(0, 10)));
+    const lowN = lows.length;
+    if (lowN >= 20 && lowDays.size >= 3)
+      f.push({ area: 'battery', level: 'medium', title: `Ran on low batteries for ${lowDays.size} days (${lowN} low-battery warnings)`,
+        detail: 'Each card used on the lock while its batteries were low showed the warning. A lock left low for days refuses cards, restarts and can lose its time: change the batteries the day the first warning shows.',
+        action: 'Have the battery alarms of this lock sent to the technicians (Battery status page) and change the batteries the same day.' });
+  }
+  {
+    // The card is accepted, then "Error, Smart Card reading/writing" for the same card in the same minute: the lock
+    // fails to write to the card (not a bad read). On every opening this keeps the radio on longer.
+    const accepted = recent.filter((e) => isIn(e.code, [...C.staffAccepted, ...C.guestAccepted]));
+    const accKeys = new Set(accepted.map((e) => `${e.t}|${e.card}`));
+    const errKeys = new Set(recent.filter((e) => isIn(e.code, [1178])).map((e) => `${e.t}|${e.card}`));
+    const paired = accepted.filter((e) => errKeys.has(`${e.t}|${e.card}`)).length;
+    void accKeys;
+    const share = accepted.length ? paired / accepted.length : 0;
+    writeShare = share; writePaired = paired; acceptedN = accepted.length;
+    if (accepted.length >= 50 && share >= 0.3) {
+      for (let i = f.length - 1; i >= 0; i--) if (/^Card reading errors/.test(f[i]!.title)) f.splice(i, 1);
+      f.push({ area: 'lock', level: share >= 0.6 ? 'high' : 'medium', title: `The lock fails to write to the card on ${Math.round(share * 100)}% of openings`,
+        detail: `${paired} of ${accepted.length} accepted cards were followed in the same minute by "Error, Smart Card reading/writing". The card opens the door, but the lock cannot write back to it, and it tries on every opening. When the same cards work without this error on other doors, it is this lock (its reader, the LCA on Classic locks, or its settings), not the cards.`,
+        action: 'Compare this lock with a door where the same cards give no error (Compare locks tab). Reprogram the lock with the service device; if the errors continue, swap the reader (or the LCA) with a lock that works.' });
+    }
+  }
+  if (all.some((e) => isIn(e.code, C.coldStart)) && all.length < 200)
+    f.push({ area: 'data', level: 'info', title: 'The lock was reset to factory settings and initialised again',
+      detail: `${all.some((e) => isIn(e.code, C.data)) ? 'A "Decryption failed" error came first. ' : ''}Events before the time was set carry the lock's start date (1996 or 2000). With only ${all.length} events this read-out says nothing yet about the batteries.`,
+      action: 'Read the lock again once it has been used for a few weeks.' });
+  if (frequency.perYearRate == null && frequency.estimatedPerYear != null && frequency.reportDays != null && frequency.reportDays < 120)
+    f.push({ area: 'battery', level: frequency.estimatedPerYear >= 6 ? 'high' : 'info', title: `About ${Math.round(frequency.estimatedPerYear)} battery changes a year at this rate`,
+      detail: `The report covers only ${frequency.reportDays} days (${all.length} events: a busy door fills the lock's memory quickly). A set lasted ${Math.round(frequency.medianDays!)} days${frequency.openingsPerSet != null ? ` and gave about ${frequency.openingsPerSet} openings` : ''}. Read the lock again every few weeks and upload each read-out: the history adds up.` });
   if (frequency.trend === 'shortening' && !frequency.fixedSince)
     f.push({ area: 'battery', level: 'high', title: `Each set lasts less: from ${Math.round(frequency.earlyAvgDays!)} to ${Math.round(frequency.lateAvgDays!)} days`,
       detail: 'The first sets in the report lasted much longer than the last ones. Batteries of the same type do not do that: a fault in the lock is getting worse (a contact, the LCA or LCU, the reader or Bluetooth module keeping the lock awake).',
@@ -581,6 +684,31 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
       x.level = 'info'; x.title = `Before ${fx.slice(0, 10)}: ${x.title[0]!.toLowerCase()}${x.title.slice(1)}`; delete x.action;
     }
   }
+  /**
+   * 2.36 One status per lock for the hotel-wide comparison (Armel: "a realistic view on the locks draining batteries"):
+   * the worst that applies, with every reason that applies, so a busy door, a power problem and a lock that cannot write
+   * to cards are not all called "draining".
+   */
+  const health = () => {
+    const reasons: { id: string; text: string }[] = [];
+    const life = frequency.medianDays, est = frequency.estimatedPerYear;
+    const draining = !frequency.fixedSince && ((life != null && life <= 90) || (lasted.currentDays == null && est != null && est >= 4) || alarmDays >= 7 && to != null && alarms.some((a) => ms(a.t) > ms(to) - 60 * DAY));
+    if (draining) reasons.push({ id: 'draining', text: life != null ? `A set lasts ${Math.round(life)} days${frequency.openingsPerSet != null ? ` (${frequency.openingsPerSet} openings)` : ''}` : 'Battery alarms on many days' });
+    if (cutsRecent.length) reasons.push({ id: 'power', text: `Lost its power ${cutsRecent.length} time${cutsRecent.length === 1 ? '' : 's'} without new batteries` });
+    const lowResetsRecent = brownouts.filter((t) => ms(t) > yearAgo).length;
+    if (lowResetsRecent >= 3) reasons.push({ id: 'power', text: `Reset ${lowResetsRecent} times while the batteries were low` });
+    if (writeShare >= 0.3 && acceptedN >= 50) reasons.push({ id: 'card-writing', text: `Fails to write to the card on ${Math.round(writeShare * 100)}% of openings` });
+    if (low30 != null && lasted.currentDays != null && lasted.currentDays >= 300 && low30 <= (scaleHigh ? 8.4 : 4.4) + 1e-6) reasons.push({ id: 'old-set', text: `Set in for ${Math.round(lasted.currentDays)} days, dipping to ${low30.toFixed(1)} V` });
+    if (frequency.fixedSince) reasons.push({ id: 'fixed', text: `Fixed since ${frequency.fixedSince.since.slice(0, 10)}` });
+    const noData = (!readings.length && !exchanges.length) || all.length < 100;
+    const status = reasons.some((r) => r.id === 'draining') ? 'draining' : reasons.some((r) => r.id === 'power') ? 'power' : reasons.some((r) => r.id === 'card-writing') ? 'card-writing'
+      : reasons.some((r) => r.id === 'old-set') ? 'watch' : noData ? 'no-data' : frequency.fixedSince ? 'fixed' : 'ok';
+    const pick = (re: RegExp) => f.find((x) => re.test(x.title) && x.action)?.action ?? null;
+    const todo = status === 'draining' ? pick(/^Each set lasts less/) ?? 'Follow the steps in order: cables and alignment, battery holder, batteries, then swap the LCA and the LCU with a lock that works.'
+      : status === 'power' ? pick(/lost its power|while its batteries were low/) : status === 'card-writing' ? pick(/fails to write/) : status === 'watch' ? pick(/^Old set/)
+      : status === 'no-data' ? pick(/no battery readings|initialised again/) ?? 'Read the lock with the service device and upload all its events.' : null;
+    return { status, reasons: reasons.map((r) => r.text), todo };
+  };
   const order = { high: 0, medium: 1, info: 2 };
   f.sort((a, b) => order[a.level] - order[b.level]);
 
@@ -633,6 +761,8 @@ export function analyseLockReport(p: Pick<ParsedLockReport, 'events'> & Partial<
   for (const e of all) { const k = String(e.code); const x = byName.get(k) ?? { code: e.code, name: e.name, n: 0, last: null, meaning: meaning(e.code), internal: /door unit internal/i.test(e.card) }; x.n++; if (e.t && !bogus(e.t) && (!x.last || e.t > x.last)) x.last = e.t; byName.set(k, x); }
   return {
     period: { from, to, days: from && to ? r1((ms(to) - ms(from)) / DAY) : 0 }, window, events: all.length, clockLost, verdict, actions,
+    cards: { accepted: acceptedN, writeErrors: writePaired, writeErrorShare: Math.round(writeShare * 100) / 100 },
+    health: health(),
     quality: { duplicates: p.duplicates ?? 0, invalidTimes: p.invalidTimes ?? 0, clockLost, future, dateOrder: p.dateOrder ?? null, ignoredReadings },
     usage, refusedBy, door, faults, service, online, battery, weekly, daily: days, findings: f, steps,
     eventTypes: [...byName.values()].sort((a, b) => b.n - a.n).slice(0, 120),

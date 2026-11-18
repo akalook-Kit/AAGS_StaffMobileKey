@@ -153,6 +153,12 @@ git tag --list "v2.2*"
 
 Only the newest zip is needed if the older ones are no longer at hand (each zip is the whole project).
 
+## 2.36.0 (16 Nov 2026): Compare locks, power cuts, card-writing errors, .txt read-outs
+
+Four installers, same names as 2.35.1 with 2.36.0: `AccessMonitoringTool-Server-KHotelDouala-2.36.0.msi`,
+`AccessMonitoringTool-Server-2.36.0.msi`, `AccessMonitoringTool-Light-2.36.0.msi`, `AccessMonitoringTool-Light-KHotelDouala-2.36.0.msi`.
+Same commands with `$v = '2.36.0'`; attach the four .msi files and `SHA256SUMS-2.36.0.txt` to the release `v2.36.0`.
+
 ## 2.35.1 (16 Nov 2026): K Hotel Douala full version, every lock in the register
 
 Four installers from the same commit: `AccessMonitoringTool-Server-KHotelDouala-2.35.1.msi` (full version, K Hotel logo

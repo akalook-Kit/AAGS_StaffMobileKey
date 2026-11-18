@@ -140,4 +140,38 @@ describe('VingCard Classic report without a door sensor (2.31)', () => {
     expect(a.steps[0]!.id).toBe('contacts');
     expect(a.steps.findIndex((x) => x.id === 'electronics')).toBeLessThan(a.steps.findIndex((x) => x.id === 'reader'));
   });
+
+  it('2.36 reads the .txt export (event code in its own column), finds power cuts, battery changes at power-up and card-writing errors', () => {
+    const L: string[] = ['Time\tReg #\tBlocking group\tCard name\tEvent name\tEvent code', ''];
+    const at = (d: string, h: number, m: number) => { const [y, mo, da] = d.split('-').map(Number); return `${mo}/${da}/${y} ${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+    const ev: [string, string, string, string][] = [];
+    // 60 days of staff openings, each followed by a writing error in the same minute (the lock cannot write to the card).
+    for (let d = 1; d <= 60; d++) {
+      const day = new Date(Date.UTC(2026, 8, d)).toISOString().slice(0, 10);
+      for (const h of [8, 12, 16]) { ev.push([at(day, h, 5), 'Staff (SC)', 'Staff card accepted', '64']); ev.push([at(day, h, 5), 'Staff (SC)', 'Error, Smart Card reading/writing (*)', '1178']); }
+    }
+    ev.push([at('2026-09-02', 9, 0), 'Door Unit Internal', 'Battery level below 4.4 volts', '1079']);
+    // Power cut with the same level: not new batteries.
+    ev.push([at('2026-09-20', 10, 0), 'Door Unit Internal', 'Door unit started', '577']);
+    ev.push([at('2026-09-20', 10, 0), 'Door Unit Internal', 'Battery level below 4.4 volts', '1079']);
+    ev.push([at('2026-10-05', 9, 0), 'Door Unit Internal', 'Battery level below 4.2 volts', '1078']);
+    // Power-up with a higher level: new batteries at the power-up.
+    ev.push([at('2026-10-10', 10, 0), 'Door Unit Internal', 'Door unit started', '577']);
+    ev.push([at('2026-10-10', 10, 0), 'Door Unit Internal', 'Battery level below 4.8 volts', '1081']);
+    const lines = [...L, ...[...ev].reverse().map(([t, card, name, code]) => `${t}\t000123\tn/a\t${card}\t${name}\t${code}`)];
+    const p = parseLockReport(Buffer.from(lines.join('\r\n'), 'utf8'));
+    expect(p.events.length).toBe(ev.length);
+    expect(p.events.find((e) => e.code === 1178)!.mark).toBe(true);
+    expect(p.events.find((e) => e.code === 1178)!.name).toBe('Error, Smart Card reading/writing');
+    const a = analyseLockReport(p, Date.parse('2026-11-01T00:00:00Z'));
+    expect(a.battery.exchanges.map((x) => x.t.slice(0, 10))).toEqual(['2026-10-10']);
+    expect(a.battery.frequency.powerCuts).toBe(1);
+    expect(a.cards.writeErrorShare).toBe(1);
+    expect(a.findings.some((f) => /fails to write to the card on 100%/.test(f.title))).toBe(true);
+    expect(a.findings.some((f) => /lost its power 1 time/.test(f.title))).toBe(true);
+    expect(a.health.status).toBe('power');
+    expect(a.health.reasons.length).toBe(2);
+    // No personal names kept.
+    expect(JSON.stringify(a)).not.toContain('000123');
+  });
 });

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { api } from '../api';
+import { api, saveCsv } from '../api';
 import { useHotel } from '../App';
 import { Columns, DataTable, Kpi, NoData, VizCard, useWidth } from '../components/charts';
 import { Drawer, ErrorNote, PageHead, fmt, useApi } from '../ui';
@@ -72,7 +72,7 @@ function ReportList() {
   const { base, can, me } = useHotel();
   const light = me.edition?.id === 'light';
   const [sp, setSp] = useSearchParams();
-  const tab = (['todo', 'locks', 'day', 'reports', 'how'] as const).find((t) => t === sp.get('tab')) ?? 'todo';
+  const tab = (['todo', 'locks', 'compare', 'day', 'reports', 'how'] as const).find((t) => t === sp.get('tab')) ?? 'todo';
   // 2.34 Light edition: every lock of the hotel is listed (with its floor and when its batteries are expected low).
   // 2.35 Every lock of the hotel in both editions (Armel: "ensure I can see all the locks").
   const hist = useApi<LockList>(`${base}/lock-history?all=1`, []);
@@ -87,6 +87,7 @@ function ReportList() {
   const TABS: [typeof tab, string, string][] = [
     ['todo', `To do${hist.data ? ` (${hist.data.locks.reduce((n, l) => n + l.plan.filter((p) => p.priority <= 5).length, 0)})` : ''}`, 'What to do on which lock, in order: the technicians\' round. Printable.'],
     ['locks', `Locks${hist.data ? ` (${hist.data.total})` : ''}`, 'Every lock with a history: floor, state, battery changes, last set, when the batteries are expected low, last work.'],
+    ['compare', 'Compare locks', 'Every lock with a report, side by side: how long a set lasts and how many openings it gives, power cuts, resets on low batteries, card-writing errors, and what to do. The locks that need work first.'],
     ['day', 'Day report', 'What was done and seen on a day or a period: floor, door, parts changed, batteries, voltages, state. Printable and for Excel.'],
     ['reports', 'Lock reports', 'The event reports uploaded, newest first.'],
     ['how', 'How it works', 'The method, step by step.'],
@@ -107,6 +108,7 @@ function ReportList() {
       </div>
       {tab === 'todo' && hist.data && <LockTodo data={hist.data} />}
       {tab === 'locks' && hist.data && <LocksTable data={hist.data} />}
+      {tab === 'compare' && <CompareLocks />}
       {tab === 'day' && <DayReport />}
       {tab === 'how' && <HowItWorks />}
       {tab === 'reports' && <>
@@ -486,5 +488,68 @@ function Frequency({ f, sets, exchanges, current, lt }: { f: Frequency; sets: { 
         <DataTable head={['Year', 'Changes', 'Sets ending that year lasted (average days)']} numeric={[1, 2]} rows={f.perYear.map((y) => [y.year, y.changes, y.avgDays != null ? Math.round(y.avgDays) : '—'])} />
       </>}
       table={<DataTable head={['Changed on', 'How the portal knows', 'Days the set lasted']} numeric={[2]} rows={[...rows].reverse()} />} />
+  );
+}
+
+/**
+ * 2.36 Every lock side by side, from the latest report of each door (Armel, 16 Nov 2026: "a realistic view on the locks
+ * draining batteries"). A busy door, a lock that loses its power and a lock that cannot write to cards are told apart.
+ */
+interface CompareRow { doorId: string; door: string; group: string | null; lockModel: string | null; reportId: string; from: string | null; to: string | null; events: number;
+  status: 'draining' | 'power' | 'card-writing' | 'watch' | 'no-data' | 'fixed' | 'ok'; reasons: string[]; openingsPerDay: number | null; batteryChanges: number; reportDays: number | null;
+  setDays: number | null; openingsPerSet: number | null; changesPerYear: number | null; estimatedPerYear: number | null; powerCuts: number; lowResets: number; writeErrorShare: number | null;
+  lastReading: { t: string; volts: number } | null; fixedSince: string | null; openingsVsHotel: number | null; todo: string | null }
+const HEALTH: Record<CompareRow['status'], { cls: string; label: string; tip: string }> = {
+  draining: { cls: 'bad', label: 'Draining batteries', tip: 'Sets last 90 days or less, or battery alarms on many days lately.' },
+  power: { cls: 'bad', label: 'Power problem', tip: 'The lock lost its power without new batteries, or reset again and again while its batteries were low: battery holder, contacts, cables.' },
+  'card-writing': { cls: 'warn', label: 'Card-writing errors', tip: 'The lock opens for the card but cannot write to it, on most openings.' },
+  watch: { cls: 'warn', label: 'Plan batteries', tip: 'An old set dipping to 4.4 V.' },
+  'no-data': { cls: '', label: 'Not enough data', tip: 'Too few events or no battery readings: read the lock and upload all its events.' },
+  fixed: { cls: 'ok', label: 'Fixed', tip: 'Sets used to last weeks and now last months.' },
+  ok: { cls: 'ok', label: 'OK', tip: 'Nothing wrong found in the latest report.' },
+};
+function CompareLocks() {
+  const { base, hotel } = useHotel();
+  const r = useApi<{ hotel: { openingsPerSet: number | null; setDays: number | null; openingsPerDay: number | null }; counts: Record<string, number>; locks: CompareRow[] }>(`${base}/lock-reports/compare`, []);
+  const [only, setOnly] = useState<'' | CompareRow['status']>('');
+  const x = r.data;
+  const rows = (x?.locks ?? []).filter((l) => !only || l.status === only);
+  const yearly = (l: CompareRow) => (l.changesPerYear != null ? String(l.changesPerYear) : l.estimatedPerYear != null ? `≈ ${Math.round(l.estimatedPerYear)}` : '—');
+  const exportCsv = () => x && saveCsv(['Door', 'Group', 'Status', 'Why', 'Report from', 'Report to', 'Events', 'Openings a day', 'Battery changes in the report', 'A set lasts (days)', 'Openings per set', 'Battery changes a year', 'Power cuts (12 months)', 'Resets on low batteries (12 months)', 'Card-writing errors (% of openings)', 'Last reading (V)', 'What to do'],
+    rows.map((l) => [l.door, l.group, HEALTH[l.status].label, l.reasons.join('; '), l.from?.slice(0, 10), l.to?.slice(0, 10), l.events, l.openingsPerDay, l.batteryChanges, l.setDays != null ? Math.round(l.setDays) : '', l.openingsPerSet, yearly(l), l.powerCuts, l.lowResets, l.writeErrorShare != null ? Math.round(l.writeErrorShare * 100) : '', l.lastReading?.volts, l.todo]),
+    `${hotel.slug}-locks-compared.csv`);
+  return (
+    <div>
+      <p className="small muted">From the latest lock report of each door. A busy door empties a set faster than a quiet one: look at the openings a day next to how long a set lasts. Upload a report for each lock you read (Lock reports tab) and this view fills in.</p>
+      <ErrorNote error={r.error} />
+      {x && <>
+        <div className="row no-print" style={{ gap: 6, flexWrap: 'wrap', margin: '8px 0' }}>
+          {(['draining', 'power', 'card-writing', 'watch', 'no-data', 'fixed', 'ok'] as const).map((k) => (
+            <button key={k} className={`btn small ${only === k ? 'primary' : ''}`} data-tip={HEALTH[k].tip} onClick={() => setOnly(only === k ? '' : k)}>
+              <span className={`badge ${HEALTH[k].cls}`}>{x.counts[k] ?? 0}</span> {HEALTH[k].label}</button>
+          ))}
+          {only && <button className="btn small ghost" onClick={() => setOnly('')}>{`Show all (${x.locks.length})`}</button>}
+          <span style={{ marginLeft: 'auto' }} />
+          <button className="btn small" onClick={exportCsv}>Excel (CSV)</button>
+        </div>
+        {x.hotel.openingsPerDay != null && <p className="small muted">{`A lock here is opened ${x.hotel.openingsPerDay} times a day (median of the locks compared).`}</p>}
+        <div className="panel" style={{ padding: 0 }}><div className="table-scroll"><table className="grid lh-compare">
+          <thead><tr><th>Door</th><th>Status and why</th><th className="num">Openings a day</th><th className="num">Battery changes</th><th className="num" data-tip="How long a set lasted (median) and how many openings it gave.">A set lasts</th><th className="num" data-tip="Last 12 months: times the lock lost its power without new batteries · resets while its batteries were low.">Power cuts · resets</th><th className="num">Card-writing errors</th></tr></thead>
+          {!rows.length ? <tbody><tr><td colSpan={7} className="empty">No lock report yet. Upload one from the Lock reports tab.</td></tr></tbody> : rows.map((l) => (
+            <tbody key={l.doorId} className="lh-compare-lock">
+              <tr>
+                <td className="nowrap"><Link to={`/lock-troubleshoot/${l.reportId}`}><strong>{l.door}</strong></Link>{l.group && <div className="small muted">{l.group}</div>}<div className="small muted">{`${l.reportDays ?? 0} days · ${l.events} events`}</div></td>
+                <td><span className={`badge ${HEALTH[l.status].cls}`} data-tip={HEALTH[l.status].tip}>{HEALTH[l.status].label}</span>{l.reasons.map((t, i) => <div key={i} className="small muted">{t}</div>)}</td>
+                <td className="num">{l.openingsPerDay ?? '—'}</td>
+                <td className="num">{l.batteryChanges}{yearly(l) !== '—' && <div className="small muted">{`${yearly(l)} a year`}</div>}</td>
+                <td className="num">{l.setDays != null ? `${Math.round(l.setDays)} d` : '—'}{l.openingsPerSet != null && <div className="small muted">{`${l.openingsPerSet} openings`}</div>}</td>
+                <td className="num">{`${l.powerCuts} · ${l.lowResets}`}</td>
+                <td className="num">{l.writeErrorShare != null ? `${Math.round(l.writeErrorShare * 100)}%` : '—'}</td>
+              </tr>
+              {l.todo && <tr className="lh-compare-todo"><td colSpan={7} className="small"><strong>What to do: </strong>{l.todo}</td></tr>}
+            </tbody>))}
+        </table></div></div>
+      </>}
+    </div>
   );
 }

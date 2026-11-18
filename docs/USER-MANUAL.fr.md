@@ -738,6 +738,19 @@ jeu par année.
 
 Chaque entrée peut porter jusqu'à 6 photos ou captures (carnet papier, multimètre, porte-piles, Visionline).
 
+**Comparer les serrures** (Diagnostic des serrures, 2.36) : toutes les serrures avec un relevé, côte à côte, d'après
+leur dernier relevé, celles à traiter en premier. Chaque serrure reçoit un état, avec les raisons :
+- *Piles qui se vident* : un jeu dure 90 jours ou moins.
+- *Problème d'alimentation* : la serrure a perdu son alimentation sans piles neuves (« Door unit started » sans relevé
+  plus élevé ensuite), ou a redémarré à répétition avec des piles faibles. Voir le porte-piles, les contacts et les câbles.
+- *Erreurs d'écriture carte* : la carte ouvre la porte mais la serrure ne peut pas écrire dessus (« Error, Smart Card
+  reading/writing » dans la même minute) sur la plupart des ouvertures. Si les mêmes cartes fonctionnent ailleurs, c'est
+  la serrure.
+- *Prévoir les piles*, *Pas assez de données*, *Réglé*, *OK*.
+Elle montre aussi les ouvertures par jour, les changements de piles (et une estimation annuelle si le relevé est court),
+la durée d'un jeu et le nombre d'ouvertures qu'il a données, et que faire. Excel (CSV) l'exporte. Les relevés enregistrés
+en .txt depuis la fenêtre d'événements de Visionline (code dans sa propre colonne) sont acceptés.
+
 **Fréquence de changement des piles** (chaque relevé de serrure, 2.35) : combien de fois les piles ont été changées,
 combien par an et sur les 12 derniers mois, la durée d'un jeu (médiane, plus courte, plus longue), année par année,
 et si chaque jeu dure moins que le précédent (une panne qui s'aggrave : échangez le LCA, puis le LCU, au lieu de

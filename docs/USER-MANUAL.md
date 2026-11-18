@@ -634,6 +634,18 @@ or on the locks of the hotel), the locks whose batteries last the least, and the
 
 Each entry can carry up to 6 photos or screenshots (paper log, multimeter, battery holder, Visionline).
 
+**Compare locks** (Lock troubleshooting, 2.36): every lock with a report, side by side, from its latest report, the
+locks that need work first. Each lock gets one status, with the reasons:
+- *Draining batteries*: a set lasts 90 days or less.
+- *Power problem*: the lock lost its power without new batteries ("Door unit started" with no higher reading after),
+  or reset again and again while its batteries were low. Look at the battery holder, the contacts and the cables.
+- *Card-writing errors*: the card opens the door but the lock cannot write to it ("Error, Smart Card
+  reading/writing" in the same minute) on most openings. When the same cards work on other doors, it is the lock.
+- *Plan batteries*, *Not enough data*, *Fixed*, *OK*.
+It also shows openings a day, battery changes (and a yearly estimate when the report is short), how long a set lasts and
+how many openings it gave, and what to do. Excel (CSV) exports it. Read-outs saved as .txt from Visionline's event
+window (event code in its own column) are accepted.
+
 **Battery change frequency** (every lock report, 2.35): how many times the batteries were changed, how many a year
 and in the last 12 months, how long a set lasted (median, shortest, longest), year by year, and whether each set
 lasts less than the one before (a fault getting worse: swap the LCA, then the LCU, instead of changing batteries

@@ -1021,3 +1021,8 @@ tr.row-warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .lh-day .lh-kpis { margin: 8px 0; }
 .print-title { margin-top: 10px; }
 @media print { .lh-day .table-scroll { overflow: visible; } }
+
+/* 2.36 Compare locks: one block per lock, "What to do" on its own row */
+.lh-compare .lh-compare-lock + .lh-compare-lock tr:first-child td { border-top: 2px solid var(--line, #ddd); }
+.lh-compare .lh-compare-todo td { border-top: 0; padding-top: 0; }
+.lh-compare td { vertical-align: top; }
