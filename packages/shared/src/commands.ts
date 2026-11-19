@@ -174,7 +174,19 @@ export const DirectoryChunk = z.object({
 });
 export type DirectoryChunk = z.infer<typeof DirectoryChunk>;
 
-export const CommandType = z.enum(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'DISCOVER_RESOURCES', 'VALIDATE_SETUP', 'SET_PROPERTY_CREDENTIALS', 'VERIFY_OPERATOR_CREDENTIALS', 'CREATE_USER_GROUP', 'SYNC_DIRECTORY', 'READ_CARD', 'ENCODE_KEYCARD', 'CANCEL_KEYCARD', 'DOOR_COMMANDS', 'LIST_ENCODERS', 'COUNT_GUEST_CARDS']);
+/** 2.38 One Visionline alarm as the connector reads it [Web API §5.4.2]. */
+export const VisionlineAlarm = z.object({
+  id: z.string().min(1).max(64), alarmType: z.string().max(64).nullable(), alarmTypeName: z.string().max(200).nullable(), alarmText: z.string().max(500).nullable(),
+  alarmTime: z.string().max(40).nullable(), door: z.string().max(100).nullable(), cardHolder: z.string().max(200).nullable(),
+  completed: z.boolean(), completionTime: z.string().max(40).nullable(), updateTime: z.string().max(40).nullable(),
+});
+export type VisionlineAlarm = z.infer<typeof VisionlineAlarm>;
+/** 2.38 Read the alarms updated since a moment (every 15 minutes) [§5.3 GET /alarms?updatedSince, §5.4 GET /alarms/{id}]. */
+export const ReadAlarmsPayload = z.object({ since: z.string().datetime(), max: z.number().int().min(1).max(500).default(300) });
+/** 2.38 Mark alarms completed [§5.4.1 POST /alarms/{id}, "completed": true]: battery alarms once new batteries are in. */
+export const CompleteAlarmsPayload = z.object({ alarmIds: z.array(z.string().min(1).max(64)).min(1).max(50), reason: z.string().min(1).max(200) });
+
+export const CommandType = z.enum(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'DISCOVER_RESOURCES', 'VALIDATE_SETUP', 'SET_PROPERTY_CREDENTIALS', 'VERIFY_OPERATOR_CREDENTIALS', 'CREATE_USER_GROUP', 'SYNC_DIRECTORY', 'READ_CARD', 'ENCODE_KEYCARD', 'CANCEL_KEYCARD', 'DOOR_COMMANDS', 'LIST_ENCODERS', 'COUNT_GUEST_CARDS', 'READ_ALARMS', 'COMPLETE_ALARMS']);
 export type CommandType = z.infer<typeof CommandType>;
 
 export const PAYLOAD_SCHEMAS = {
@@ -193,6 +205,8 @@ export const PAYLOAD_SCHEMAS = {
   LIST_ENCODERS: z.object({}),
   /** 2.14 Valid guest keycards per room [Web API §5.9.3 guestDoor + validTime], for the Accounts report. */
   COUNT_GUEST_CARDS: z.object({ rooms: z.array(z.string().min(1).max(100)).min(1).max(1000) }),
+  READ_ALARMS: ReadAlarmsPayload,
+  COMPLETE_ALARMS: CompleteAlarmsPayload,
 } as const;
 
 export const CommandEnvelope = z.object({

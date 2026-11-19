@@ -153,6 +153,16 @@ git tag --list "v2.2*"
 
 Only the newest zip is needed if the older ones are no longer at hand (each zip is the whole project).
 
+## 2.38.1 (18 Nov 2026): accept Visionline's exact expired certificate
+
+Four installers, same names with 2.38.1 (connector 0.17.1). Same steps with `$v = '2.38.1'`; 2.38.1 includes 2.38.0.
+
+## 2.38.0 (18 Nov 2026): Visionline alarms every 15 minutes, card alarms, battery alarms closed
+
+Four installers, same names with 2.38.0 (connector 0.17.0 inside). Database migration 036 runs by itself. Put
+`access-monitoring-tool-project-2.38.0.zip` with the others in the zips folder and run the catch-up from it
+(`$v = '2.38.0'`), then the release `v2.38.0` with the four .msi files and `SHA256SUMS-2.38.0.txt`.
+
 ## 2.37.1 (17 Nov 2026): private repository, licensing kept by the vendor
 
 **Make the repository private first** (it was public): github.com/akalook-Kit/AAGS_StaffMobileKey → **Settings** →

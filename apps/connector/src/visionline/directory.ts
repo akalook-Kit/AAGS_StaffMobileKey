@@ -135,32 +135,8 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
   // ---- alarms (needs the Visionline option "Web service for checking and confirming alarms")
   const alarms: DirectoryChunk['alarms'] = [];
   if (p.includeAlarms && !p.userIds?.length) {
-    try {
-      const types = new Map<string, string>();
-      try { for (const t of (await vl.request<any[]>('GET', '/alarmTypes', undefined, LOW)) ?? []) { const k = firstText(t?.id); if (k) types.set(k, firstText(t?.name) ?? k); } } catch (e) { if (!isNotFound(e)) throw e; }
-      const since = new Date(p.alarmsSince ?? Date.now() - 30 * 86_400_000);
-      // updatedSince is UTC [§5.3.2], with the "Z" (without it Visionline answers "Time must be in UTC.").
-      const list = (await withTimeForms('alarms.updatedSince', utcForms(Number.isNaN(since.getTime()) ? new Date(Date.now() - 30 * 86_400_000) : since),
-        (t) => vl.request<{ id: unknown }[]>('GET', `/alarms?updatedSince=${t}`, undefined, LOW)).catch((e) => where('/alarms?updatedSince=…', e))) ?? [];
-      const idsA = list.map((a) => firstText(a.id)).filter((x): x is string => Boolean(x)).slice(-1500);
-      if (list.length > idsA.length) notes.push(`${list.length} alarms since the last sync; the newest 1500 were read.`);
-      await pool(idsA, 2, async (aid) => {
-        let a: any;
-        try { a = await vl.request<any>('GET', `/alarms/${encodeURIComponent(aid)}`, undefined, LOW); } catch (e) { if (isNotFound(e)) return; throw e; }
-        const type = firstText(a?.alarmType);
-        alarms.push({
-          id: aid, alarmType: type, alarmTypeName: type ? types.get(type) ?? null : null, alarmText: firstText(a?.alarmText)?.slice(0, 500) ?? null,
-          alarmTime: firstText(a?.alarmTime), door: firstText(a?.door?.id, a?.door), cardHolder: firstText(a?.cardHolder?.id, a?.cardHolder),
-          completed: bool(a?.completed), completionTime: firstText(a?.completionTime), updateTime: firstText(a?.updateTime),
-        });
-        counts.alarms++;
-      }, pause);
-    } catch (e) {
-      // Alarms never spoil the people and keycards read: a problem here becomes a note in the sync result.
-      if (!(e instanceof VisionlineApiError) || e.status === 0 || e.status === 401) throw e;
-      if (isNotFound(e) || e.status === 403) notes.push('Lock alarms are not available from this Visionline (option "Web service for checking and confirming alarms" not licensed).');
-      else notes.push(`Lock alarms could not be read: ${e.message}`);
-    }
+    const r = await readAlarms(vl, p.alarmsSince ?? null, 1500, pause);
+    alarms.push(...r.alarms); counts.alarms += r.alarms.length; notes.push(...r.notes);
   }
   // Last part carries the alarms and the notes, and tells the platform the snapshot is complete.
   for (let i = 0; i < alarms.length || i === 0; i += CHUNK) {
@@ -169,4 +145,50 @@ export async function readDirectory(vl: VisionlineClient, p: SyncDirectoryPayloa
     else await send({ final: false, users: [], cards: [], alarms: alarms.slice(i, i + CHUNK), notes: [] });
   }
   return { ...counts, notes };
+}
+
+/**
+ * 2.38 The alarms updated since a moment [§5.1 GET /alarmTypes, §5.3 GET /alarms?updatedSince, §5.4 GET /alarms/{id}],
+ * for the people read and for the 15-minute alarm read. Needs the Visionline option "Web service for checking and
+ * confirming alarms"; without it the result is a note, never a failure.
+ */
+export async function readAlarms(vl: VisionlineClient, sinceIso: string | null, max: number, pause = 0) {
+  const alarms: DirectoryChunk['alarms'] = [];
+  const notes: string[] = [];
+  try {
+    const types = new Map<string, string>();
+    try { for (const t of (await vl.request<any[]>('GET', '/alarmTypes', undefined, LOW)) ?? []) { const k = firstText(t?.id); if (k) types.set(k, firstText(t?.name) ?? k); } } catch (e) { if (!isNotFound(e)) throw e; }
+    const since = new Date(sinceIso ?? Date.now() - 30 * 86_400_000);
+    // updatedSince is UTC [§5.3.2], with the "Z" (without it Visionline answers "Time must be in UTC.").
+    const list = (await withTimeForms('alarms.updatedSince', utcForms(Number.isNaN(since.getTime()) ? new Date(Date.now() - 30 * 86_400_000) : since),
+      (t) => vl.request<{ id: unknown }[]>('GET', `/alarms?updatedSince=${t}`, undefined, LOW)).catch((e) => where('/alarms?updatedSince=…', e))) ?? [];
+    const idsA = list.map((a) => firstText(a.id)).filter((x): x is string => Boolean(x)).slice(-max);
+    if (list.length > idsA.length) notes.push(`${list.length} alarms since the last read; the newest ${max} were read.`);
+    await pool(idsA, 2, async (aid) => {
+      let a: any;
+      try { a = await vl.request<any>('GET', `/alarms/${encodeURIComponent(aid)}`, undefined, LOW); } catch (e) { if (isNotFound(e)) return; throw e; }
+      const type = firstText(a?.alarmType);
+      alarms.push({
+        id: aid, alarmType: type, alarmTypeName: type ? types.get(type) ?? null : null, alarmText: firstText(a?.alarmText)?.slice(0, 500) ?? null,
+        alarmTime: firstText(a?.alarmTime), door: firstText(a?.door?.id, a?.door), cardHolder: firstText(a?.cardHolder?.id, a?.cardHolder),
+        completed: bool(a?.completed), completionTime: firstText(a?.completionTime), updateTime: firstText(a?.updateTime),
+      });
+    }, pause);
+  } catch (e) {
+    // Alarms never spoil the rest: a problem here becomes a note.
+    if (!(e instanceof VisionlineApiError) || e.status === 0 || e.status === 401) throw e;
+    if (isNotFound(e) || e.status === 403) notes.push('Lock alarms are not available from this Visionline (option "Web service for checking and confirming alarms" not licensed).');
+    else notes.push(`Lock alarms could not be read: ${e.message}`);
+  }
+  return { alarms, notes };
+}
+
+/** 2.38 Mark alarms completed [§5.4.1 POST /alarms/{id} with "completed": true], one by one; each answer is kept. */
+export async function completeAlarms(vl: VisionlineClient, ids: string[]) {
+  const results: { id: string; ok: boolean; error?: string }[] = [];
+  for (const id of ids) {
+    try { await vl.request('POST', `/alarms/${encodeURIComponent(id)}`, { completed: true }); results.push({ id, ok: true }); }
+    catch (e) { if (e instanceof VisionlineApiError && (e.status === 0 || e.status === 401)) throw e; results.push({ id, ok: false, error: (e as Error).message.slice(0, 200) }); }
+  }
+  return { results };
 }

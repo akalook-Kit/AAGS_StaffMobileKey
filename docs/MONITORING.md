@@ -15,7 +15,8 @@ connector or Visionline down) and stays red until the problem is fixed.
 | Gateway back | No alarm names it any more and one of its locks reports again - the alert closes | - | Doors and gateways offline |
 | Keycards in a generic name (2.20) | Valid staff keycards held under a name that is not a person ("Staff", "HK 2", "Spare", a number). 2.21: the site's administrators also get an e-mail for each new one (each card once) | warning | Lock alarms and batteries |
 | First entrance at a watched door | First entrance each day (or every entrance, or the first only) at a door you chose | notice | Watched doors (VIP) |
-| Lock alarm | Open Visionline alarm in the last 24 h (from the Visionline read in Reports & sync) | critical | Lock alarms and batteries |
+| Lock alarm | Open Visionline alarm in the last 24 h (read every 15 minutes since 2.38, and with the people in Reports & sync) | critical | Lock alarms and batteries |
+| Excessive card usage (2.38) | Open Visionline alarm "Excessive card usage" in the last 24 h: a card used many times in a short time. Shown as a band at the top of every page for everyone signed in | warning | Card alarms (excessive card usage) |
 | Battery critically low | Battery module | critical | Lock alarms and batteries |
 | Connector offline | No contact for 10 minutes | critical | System |
 | Visionline not reachable | The connector has not reached the Web API for **3 minutes** (2.21; one dropped connection no longer raises it) | critical | System |
@@ -119,3 +120,30 @@ alerts. On the same page **Lock offline / online** sends any lock event code to 
 the codes, e.g. 9001 / 9002, in Settings -> Alert thresholds first, then wait a minute for the connector).
 Note: in the Docker test setup the platform measures the disk of Docker's virtual machine, not C:. The real C:
 is measured by the connector when it runs as a Windows service, and by the platform on the on-premises server.
+
+## Visionline alarms every 15 minutes (2.38)
+
+The connector (0.17.0) reads Visionline's alarms on their own every 15 minutes (Settings → Reports & sync →
+*Visionline alarms*; 5 minutes at least, 0 = off). Only what changed since the last read is asked
+(`GET /alarms?updatedSince=…`, Web API §5.3), so Visionline is hardly loaded. It needs the Visionline option
+*"Web service for checking and confirming alarms"*. Alarm reads run beside key issuing and never hold it up.
+
+**Excessive card usage.** Each open alarm becomes a *Card alarm* (warning), named after the card holder:
+
+- everyone signed in sees a band at the top of the portal (*Hide* hides it in that browser until a newer alarm);
+- Monitoring → **Visionline alarms** lists every alarm with its kind, door, card holder and status;
+- e-mail / SMS go to the contacts who ticked **Card alarms** (Settings → Alerts & notifications): add the security or
+  front office team there. Existing contacts are not changed; new contacts get every kind by default.
+
+The portal never completes Excessive card usage alarms: someone checks with the card holder and completes them in
+Visionline.
+
+**Battery alarms closed automatically.** When the portal sees new batteries in a lock (event 528 *battery
+exchanged*, a voltage jump, or *New batteries* recorded in the portal) after that lock's battery alarm, and the lock
+no longer reports low batteries, it marks the alarm completed in Visionline (`POST /alarms/{id}` with
+`"completed": true`, Web API §5.4.1). The reason and the time are kept (Monitoring → Visionline alarms: *Closed by the
+portal*) and each completion is in the audit trail (`visionline.alarm_completed`). An alarm stays open while the lock
+still says low: ASSA ABLOY's rule is that the lock clears its flag only when the new batteries measure over 4.5 V and
+at least 0.5 V more than before. If Visionline refuses, the reason is shown and the portal asks again a day later.
+A connector installed read-only (`-ReadOnly`, e.g. on a Visionline the hotel does not own) never writes: there the
+alarms are only read. Switch it off in Settings → Reports & sync.

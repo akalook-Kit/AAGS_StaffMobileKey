@@ -817,3 +817,13 @@ Le portail est un client Visionline discipliné :
 | « Licence requise » | *Paramètres → Licence*, saisissez la nouvelle clé de votre fournisseur. |
 | La page de configuration demande un code | Menu Démarrer → *Access Monitoring Tool - setup code* (en tant qu'administrateur). |
 | Les cartes d'identité s'impriment trop petites ou décentrées | Fenêtre d'impression : taille réelle / 100 %, aucune marge, format du papier = le CR80 de l'imprimante à cartes. |
+
+## Alarmes Visionline (2.38)
+
+Les alarmes sont lues dans Visionline toutes les 15 minutes. **Utilisation excessive de badge** (un badge utilisé de
+nombreuses fois en peu de temps) s'affiche en bandeau en haut de chaque page et dans Alertes → **Alarmes Visionline**,
+et part par e-mail / SMS aux contacts qui ont choisi **Alarmes de badges** dans Paramètres → Alertes et notifications
+(votre équipe sécurité ou réception). Vérifiez auprès du titulaire, puis clôturez l'alarme dans Visionline. Les
+**alarmes de piles** sont clôturées dans Visionline par le portail dès que des piles neuves sont en place et que la
+serrure ne signale plus de piles faibles. Paramètres → Rapports et synchronisation → *Alarmes Visionline* règle la
+fréquence de lecture et active ou non chaque partie.

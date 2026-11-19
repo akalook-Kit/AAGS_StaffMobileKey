@@ -1,3 +1,4 @@
+import { onCompleteAlarmsResult, onReadAlarmsResult } from './alarms.ts';
 import { ApiError } from './lib/errors.ts';
 import { onKeycardCommandResult } from './routes/keycards.ts';
 import { randomUUID } from 'node:crypto';
@@ -33,7 +34,7 @@ export async function lease(connector: { id: string; hotel_id: string }, max: nu
     pool,
     `UPDATE commands SET status='LEASED', leased_by=$2, attempts=attempts+1,
         -- A directory sync runs for minutes in the background on the connector: keep it leased meanwhile.
-        lease_until=now() + CASE WHEN type='SYNC_DIRECTORY' THEN interval '35 minutes' ELSE interval '90 seconds' END
+        lease_until=now() + CASE WHEN type='SYNC_DIRECTORY' THEN interval '35 minutes' WHEN type IN ('READ_ALARMS','COMPLETE_ALARMS') THEN interval '10 minutes' ELSE interval '90 seconds' END
       WHERE id IN (
         SELECT id FROM commands
          WHERE hotel_id=$1 AND expires_at > now()
@@ -59,7 +60,9 @@ export async function complete(connector: { id: string; hotel_id: string }, comm
     }
     await c.query(`UPDATE commands SET status=$2, result=$3, error=$4, completed_at=now(), lease_until=NULL WHERE id=$1`,
       [cmd.id, result.status, result.result ?? null, result.error ?? null]);
-    await audit(c, { hotelId: cmd.hotel_id, actorType: 'connector', actorId: connector.id, action: `command.${result.status.toLowerCase()}`, targetType: 'command', targetId: cmd.id, correlationId: cmd.correlation_id, details: { type: cmd.type, attempt: cmd.attempts, result: result.result, error: result.error } });
+    await audit(c, { hotelId: cmd.hotel_id, actorType: 'connector', actorId: connector.id, action: `command.${result.status.toLowerCase()}`, targetType: 'command', targetId: cmd.id, correlationId: cmd.correlation_id, details: { type: cmd.type, attempt: cmd.attempts,
+      // 2.38 Alarm reads every 15 minutes: only the count in the audit trail, not the card holders.
+      result: cmd.type === 'READ_ALARMS' ? { alarms: (result.result as any)?.alarms?.length ?? 0, notes: (result.result as any)?.notes } : result.result, error: result.error } });
     await applyResult(c, cmd, result);
     return { status: 200 as const };
   });
@@ -108,6 +111,8 @@ async function applyResult(c: pg.PoolClient, cmd: any, result: CommandResult) {
       return;
     }
     case 'SYNC_DIRECTORY': return onDirectorySyncResult(c, cmd, result);
+    case 'READ_ALARMS': return onReadAlarmsResult(c, cmd, result);
+    case 'COMPLETE_ALARMS': return onCompleteAlarmsResult(c, cmd, result);
     case 'SET_PROPERTY_CREDENTIALS':
       // 2.10 With a working Visionline account, read doors and groups straight away (people follow on the minute).
       if (result.status === 'SUCCEEDED') await requestDiscovery(c, cmd.hotel_id, null, 'Visionline account set');

@@ -45,7 +45,7 @@ import { DoorHistoryPage } from './pages/LockHistory';
 import { LightHome } from './pages/LightHome';
 import { LightSetupPage } from './pages/LightSetup';
 import { TipLayer } from './components/Tips';
-import { LANGS, hasLangChoice, lang, langChoice, setLang, tr, type LangChoice } from './i18n';
+import { LANGS, hasLangChoice, lang, langChoice, setLang, tr, trf, type LangChoice } from './i18n';
 
 export interface Me {
   id: string; email: string; displayName: string; isPlatformAdmin: boolean; mfaEnabled: boolean;
@@ -60,6 +60,28 @@ export interface Me {
 interface Ctx { me: Me; hotel: Me['hotels'][number]; can: (p: Permission) => boolean; branding: any; reloadBranding: () => void; base: string; pages: { to: string; label: string }[]; setPrefs: (p: NonNullable<Me['prefs']>) => void }
 const HotelCtx = createContext<Ctx | null>(null);
 export const useHotel = () => useContext(HotelCtx)!;
+
+/**
+ * 2.38 "Excessive card usage" read from Visionline: a band for everyone signed in (Armel, 18 Nov 2026: "notify the logged
+ * in user"). Hide keeps it hidden in this browser until a newer alarm comes; the alert stays in Monitoring.
+ */
+function CardAlarmBanner({ alarms }: { alarms?: { open: number; latest: { id: string; title: string; at: string }[] } }) {
+  const KEY = 'smk.cardAlarmSeen';
+  const [seen, setSeen] = useState<string>(() => { try { return localStorage.getItem(KEY) ?? ''; } catch { return ''; } });
+  const latest = alarms?.latest ?? [];
+  if (!alarms?.open || !latest.length) return null;
+  const newest = latest[0]!;
+  if (seen === newest.id) return null;
+  const hide = () => { setSeen(newest.id); try { localStorage.setItem(KEY, newest.id); } catch { /* private window */ } };
+  return (
+    <div className="sys-banner warn no-print" role="status">
+      <strong>{alarms.open === 1 ? newest.title : trf('{n} Excessive card usage alarms', { n: alarms.open })}</strong>
+      <span>{alarms.open === 1 ? tr('Visionline saw this card used many times in a short time. Check with the card holder.') : newest.title}</span>
+      <NavLink to="/monitoring?tab=vlalarms">{tr('See alarms')} →</NavLink>
+      <button type="button" className="btn small" onClick={hide}>{tr('Hide')}</button>
+    </div>
+  );
+}
 /** 2.16 Words that depend on the organisation: a hotel or an institution. Elsewhere the portal stays neutral. */
 export function termsFor(kind: string | undefined) {
   const inst = kind === 'institution';
@@ -270,6 +292,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         <main className="content" id="main" tabIndex={-1} key={hotel.id}>
           {hotel.demo ? <div className="demo-band no-print" role="note"><strong>{tr('Demo Hotel')}</strong><span>{tr('Made-up doors, people and keycards for trying the portal. Nothing is real and nothing is sent to Visionline.')}{me.accessUntil ? ` Your test access ends ${new Date(me.accessUntil).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.` : ''}</span></div> : <LicenceBanner />}
           {hotel.mfaRequired && <div className="sys-banner no-print" role="alert"><strong>Two-step sign-in is required for administrators.</strong><span>Settings, Users and Branding open once it is on.</span><NavLink to="/account?tab=mfa">Turn it on →</NavLink></div>}
+          <CardAlarmBanner alarms={attention.data?.cardAlarms} />
           {(banner.data ?? []).map((a) => (
             <div key={a.id} className="sys-banner no-print" role="alert"><strong>{a.title}</strong><span>{a.detail}</span><NavLink to="/monitoring?tab=system">Monitoring →</NavLink></div>
           ))}

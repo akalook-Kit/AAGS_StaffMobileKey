@@ -1785,6 +1785,45 @@ async function main() {
     await call('PUT', `${API}/api/v1/me/prefs`, issuer, { hiddenNav: [], theme: 'system', lang: 'en' });
   }
 
+  console.log('\n2.38 Visionline alarms every 15 minutes: excessive card usage, battery alarms closed after new batteries');
+  {
+    const vlc = (await call('GET', `${H}/config/visionline`, admin)).json.data;
+    ok(vlc.alarms?.readEveryMinutes === 15 || vlc.alarms == null, 'alarms are read every 15 minutes by default');
+    ok((await call('PUT', `${H}/config/visionline`, admin, { ...vlc, alarms: { readEveryMinutes: 3, completeBatteryAlarms: true, excessiveCardUsage: true } })).status === 400, 'at least 5 minutes between alarm reads');
+    ok((await call('PUT', `${H}/config/visionline`, admin, { ...vlc, alarms: { readEveryMinutes: 15, completeBatteryAlarms: true, excessiveCardUsage: true } })).status === 200, 'alarm settings saved (15 minutes, close battery alarms, alert on excessive card usage)');
+    const ex = (await call('POST', `${SIM}/sim/alarms/excessive-card-usage`, undefined, { cardHolder: 'vl-fo-01' })).json;
+    await battery({ kind: 'low' }, '306');
+    const sim306 = async () => ((await call('GET', `${SIM}/sim/alarms`)).json as any[]).filter((a) => a.door === '306');
+    const lowAlarm = (await sim306()).at(-1);
+    ok((await call('POST', `${H}/monitoring/visionline-alarms/read`, issuer, {})).status === 403, 'only people who manage alerts ask for a read now');
+    ok((await call('POST', `${H}/monitoring/visionline-alarms/read`, admin, {})).status === 200, '"Read alarms now" asks the connector');
+    const va = await until('alarms read', async () => (await call('GET', `${H}/monitoring/visionline-alarms`, admin)).json, (d) => d.alarms?.some((a: any) => a.id === ex.id) && d.alarms?.some((a: any) => a.id === lowAlarm?.id), 60_000);
+    const exRow = va.alarms?.find((a: any) => a.id === ex.id);
+    ok(exRow?.kind === 'card' && !exRow.completed && va.connector?.canRead && va.connector?.canComplete, 'the excessive card usage alarm is read from Visionline and shown as a card alarm', exRow);
+    ok(va.alarms?.find((a: any) => a.id === lowAlarm?.id)?.kind === 'battery', 'the low-battery alarm of room 306 is read as a battery alarm');
+    await call('POST', `${H}/monitoring/check`, admin, {});
+    const ca = (await call('GET', `${H}/monitoring/alerts?kind=card_alarm`, admin)).json.find((a: any) => a.subject === ex.id);
+    ok(ca?.severity === 'warning' && /^Excessive card usage: /.test(ca.title) && !ca.resolved_at, `an open "Excessive card usage" alert (${ca?.title})`, ca);
+    const att = (await call('GET', `${H}/attention`, issuer)).json;
+    ok(att.cardAlarms?.open >= 1 && att.cardAlarms.latest.some((x: any) => x.id === ca?.id), 'everyone signed in sees it (banner on every page)', att.cardAlarms);
+    const cts = (await call('GET', `${H}/monitoring/contacts`, admin)).json;
+    ok(cts.categories.some((c: any) => c.id === 'cards'), 'security or front office contacts can choose "Card alarms" for e-mail / SMS');
+    const fo = await call('POST', `${H}/monitoring/contacts`, admin, { name: 'Front office (test)', email: 'fo@khb.test', byEmail: true, bySms: false, categories: ['cards'], active: true });
+    ok(fo.status === 200 || fo.status === 201, 'a front office contact for card alarms only', fo.json);
+    // Not completed while the lock still reports low batteries.
+    ok(!(await sim306()).find((a) => a.id === lowAlarm.id)?.completed, 'a battery alarm stays open in Visionline before new batteries');
+    await battery({ kind: 'exchanged' }, '306');
+    await until('306 GOOD', () => bdoor('306'), (d) => d?.state === 'GOOD');
+    const done = await until('alarm completed in Visionline', sim306, (l) => Boolean(l.find((a) => a.id === lowAlarm.id)?.completed), 90_000);
+    ok(done.find((a) => a.id === lowAlarm.id)?.completed, 'after new batteries (event 528) the portal marks the battery alarm completed in Visionline (POST /alarms/{id})');
+    const after = await until('portal shows closed', async () => (await call('GET', `${H}/monitoring/visionline-alarms`, admin)).json, (d) => d.alarms?.find((a: any) => a.id === lowAlarm.id)?.byPortal, 20_000);
+    const lr = after.alarms?.find((a: any) => a.id === lowAlarm.id);
+    ok(lr?.completed && lr.byPortal && /New batteries/.test(lr.reason ?? ''), 'the portal shows it as "Closed by the portal" with the reason', lr);
+    ok(!((await call('GET', `${SIM}/sim/alarms`)).json as any[]).find((a) => a.id === ex.id)?.completed, 'excessive card usage alarms are never completed by the portal');
+    const trailC = await fetch(`${H}/audit/export`, { headers: { authorization: `Bearer ${auditor}` } }).then((r) => r.text());
+    ok(/visionline\.alarm_completed/.test(trailC), 'each completion is in the audit trail');
+  }
+
   console.log('\nGate: every request is traceable without exposing secrets');
   const trail = (await call('GET', `${H}/keys/${keyId}`, issuer)).json;
   const kt = await call('GET', `${H}/keys/${keyId}`, auditor);

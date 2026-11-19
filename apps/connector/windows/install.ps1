@@ -23,6 +23,9 @@
   -CaFile          Certificate that Visionline's certificate must chain to (see VISIONLINE-PROBE in the docs).
   -ServerName      Name in Visionline's certificate, when it is not the host name in -VisionlineUrl.
   -PinSha256       Optional SHA-256 fingerprint the Visionline certificate must also match.
+  -AcceptExpiredSha256  2.38.1 Accept the exact Visionline certificate in -CaFile although it has expired (its SHA-256).
+                   Use Trust-Visionline-Certificate.cmd -AcceptExpired, which checks it first. A new -CaFile without
+                   it clears the acceptance.
   -AdminPort       Port of the local status page on 127.0.0.1. Default 8090.
   -ReadOnly        Never change Visionline (no issue/revoke/user groups). For trying it against a live system.
   -ReadWrite       Switch read-only mode off again.
@@ -42,6 +45,7 @@ param(
   [string]$CaFile = '',
   [string]$ServerName = '',
   [string]$PinSha256 = '',
+  [string]$AcceptExpiredSha256 = '',
   [int]$AdminPort = 0,
   [switch]$ReadOnly,
   [switch]$ReadWrite,
@@ -139,6 +143,8 @@ $cfg = [ordered]@{
     caFile         = Pick $b.ContainsKey('CaFile') $CaFile $(if ($old -and $old.visionline) { $old.visionline.caFile }) ''
     pinSha256      = Pick $b.ContainsKey('PinSha256') $PinSha256 $(if ($old -and $old.visionline) { $old.visionline.pinSha256 }) ''
     servername     = Pick $b.ContainsKey('ServerName') $ServerName $(if ($old -and $old.visionline) { $old.visionline.servername }) ''
+    # 2.38.1 Kept on upgrades; a new certificate file without it ends the acceptance.
+    acceptExpiredSha256 = $(if ($b.ContainsKey('AcceptExpiredSha256')) { $AcceptExpiredSha256 } elseif ($b.ContainsKey('CaFile')) { '' } elseif ($old -and $old.visionline -and $old.visionline.acceptExpiredSha256) { $old.visionline.acceptExpiredSha256 } else { '' })
     revokeStrategy = Pick $false '' $(if ($old -and $old.visionline) { $old.visionline.revokeStrategy }) 'checkoutPerDoor'
     watch          = $watchValue
     readOnly       = $readOnlyValue
@@ -149,6 +155,7 @@ Write-Utf8NoBom $cfgFile ($cfg | ConvertTo-Json -Depth 5)
 Write-Host "  Platform:   $($cfg.platformUrl)$(if ($cfg.platformCaFile) { "  (trusting $($cfg.platformCaFile))" })"
 Write-Host "  Visionline: $($cfg.visionline.baseUrl)$(if ($cfg.visionline.caFile) { "  (trusting $($cfg.visionline.caFile))" })"
 Write-Host "  Status page: http://127.0.0.1:$($cfg.localAdmin.port)/"
+if ($cfg.visionline.acceptExpiredSha256) { Write-Host "  Visionline certificate: EXPIRED, accepted by the administrator for this exact certificate only. Have it renewed (ASSA ABLOY)." -ForegroundColor Yellow }
 if (-not $watchValue) { Write-Host "  Visionline watch: OFF (no cancelled-card, wrong-door or battery events are read)." -ForegroundColor Yellow }
 if ($readOnlyValue) { Write-Host "  READ-ONLY: the connector will not issue, revoke or create anything in Visionline." -ForegroundColor Yellow }
 

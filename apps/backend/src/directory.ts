@@ -77,17 +77,7 @@ export async function applyDirectoryChunk(hotelId: string, ch: DirectoryChunk) {
         [hotelId, k.regNo, k.cardHolder, k.format, toUtc(k.startTime, tz), toUtc(k.expireTime, tz), k.cancelled, k.discarded, k.overridden, k.expired, k.notIssued, k.issuedCount,
           k.doors.length, k.doors, k.doorGroups, k.timeSchedule, ch.syncId, k.operations ?? [], k.deadboltOverride ?? null, k.mobile ?? null]);
     }
-    if (ch.alarms.length) {
-      const resolve = await doorResolver(c, hotelId);
-      for (const a of ch.alarms) {
-        await c.query(`INSERT INTO vl_alarms (hotel_id, alarm_id, alarm_type, type_name, alarm_text, alarm_at, door_id, door_raw, card_holder, completed, completed_at, updated_at)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-          ON CONFLICT (hotel_id, alarm_id) DO UPDATE SET completed=EXCLUDED.completed, completed_at=EXCLUDED.completed_at, updated_at=EXCLUDED.updated_at, alarm_text=EXCLUDED.alarm_text,
-            type_name=COALESCE(EXCLUDED.type_name, vl_alarms.type_name), received_at=now()`,
-          [hotelId, a.id, a.alarmType, a.alarmTypeName, a.alarmText, toUtc(a.alarmTime, tz), a.door ? resolve(a.door)?.id ?? null : null, a.door, a.cardHolder, a.completed,
-            toUtc(a.completionTime, tz), fromUtcCompact(a.updateTime)]);
-      }
-    }
+    if (ch.alarms.length) await upsertAlarms(c, hotelId, ch.alarms, tz);
     await c.query(`UPDATE directory_syncs SET users=users+$2, cards=cards+$3, alarms=alarms+$4 WHERE id=$1`, [ch.syncId, ch.users.length, ch.cards.length, ch.alarms.length]);
 
     if (ch.final && sync.partial) {
@@ -127,6 +117,19 @@ async function discoverNewGroups(c: import('pg').PoolClient, hotelId: string) {
 /** Command result: only a failure needs recording here (the final part already completed a successful sync). */
 export async function onDirectorySyncResult(c: import('pg').PoolClient, cmd: any, result: { status: string; error?: { message?: string } }) {
   if (result.status === 'FAILED') await c.query(`UPDATE directory_syncs SET status='FAILED', finished_at=now(), error=$2 WHERE id=$1 AND status='RUNNING'`, [cmd.id, result.error?.message ?? 'failed']);
+}
+
+/** Visionline alarms into vl_alarms (the people read and, 2.38, the 15-minute alarm read). */
+export async function upsertAlarms(c: import('pg').PoolClient, hotelId: string, alarms: DirectoryChunk['alarms'], tz: string) {
+  const resolve = await doorResolver(c, hotelId);
+  for (const a of alarms) {
+    await c.query(`INSERT INTO vl_alarms (hotel_id, alarm_id, alarm_type, type_name, alarm_text, alarm_at, door_id, door_raw, card_holder, completed, completed_at, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      ON CONFLICT (hotel_id, alarm_id) DO UPDATE SET completed=EXCLUDED.completed, completed_at=EXCLUDED.completed_at, updated_at=EXCLUDED.updated_at, alarm_text=EXCLUDED.alarm_text,
+        type_name=COALESCE(EXCLUDED.type_name, vl_alarms.type_name), card_holder=COALESCE(EXCLUDED.card_holder, vl_alarms.card_holder), received_at=now()`,
+      [hotelId, a.id, a.alarmType, a.alarmTypeName, a.alarmText, toUtc(a.alarmTime, tz), a.door ? resolve(a.door)?.id ?? null : null, a.door, a.cardHolder, a.completed,
+        toUtc(a.completionTime, tz), fromUtcCompact(a.updateTime)]);
+  }
 }
 
 /** Scheduled syncs, every `everyHours` per hotel that switched it on. */

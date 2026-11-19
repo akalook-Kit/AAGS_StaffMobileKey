@@ -36,7 +36,11 @@ function args() {
     uuid: get('uuid') ? Number(get('uuid')) : 9,
     out: get('out') ?? 'visionline-probe-report',
     saveCert: get('save-cert'),
+    /** 2.38.1 Save the server's own certificate (not the top of the chain): for trusting it exactly. */
+    saveLeaf: a.includes('--save-leaf'),
     tlsOnly: a.includes('--tls-only'),
+    /** 2.38.1 SHA-256 of an expired certificate the administrator accepts (only with --ca holding that certificate). */
+    acceptExpired: get('accept-expired') ?? process.env.VL_ACCEPT_EXPIRED_SHA256,
     encoder: get('encoder'),
   };
 }
@@ -67,7 +71,7 @@ async function askHidden(question: string): Promise<string> {
  * checks whether it is trusted under the configured trust. Inspection only: all Visionline traffic later
  * uses the normal client, which always verifies the certificate.
  */
-function inspectCertificate(url: URL, ca: Buffer | undefined, servername?: string) {
+function inspectCertificate(url: URL, ca: Buffer | undefined, servername?: string, acceptExpiredSha256?: string) {
   const port = Number(url.port || 443);
   const peek = () => new Promise<tls.DetailedPeerCertificate>((res, rej) => {
     const s = tls.connect({ host: url.hostname, port, servername: servername ?? (/^[\d.]+$/.test(url.hostname) ? undefined : url.hostname), rejectUnauthorized: false, minVersion: 'TLSv1.2' }, () => { const c = s.getPeerCertificate(true); s.end(); res(c); });
@@ -76,7 +80,12 @@ function inspectCertificate(url: URL, ca: Buffer | undefined, servername?: strin
   });
   const verify = () => new Promise<string | null>((res) => {
     let t: ReturnType<typeof visionlineTrust>;
-    try { t = visionlineTrust(ca, { servername }); } catch (e) { res((e as Error).message); return; }
+    try { t = visionlineTrust(ca, { servername, acceptExpiredSha256 }); } catch (e) { res((e as Error).message); return; }
+    const sn = servername ?? (/^[\d.]+$/.test(url.hostname) ? undefined : url.hostname);
+    if (t.createConnection) {
+      t.createConnection({ host: url.hostname, port, servername: sn, minVersion: 'TLSv1.2', ...t.tlsOptions } as tls.ConnectionOptions, (err, sock) => { if (err) res(err.message); else { sock!.end(); res(null); } });
+      return;
+    }
     const s = tls.connect({ host: url.hostname, port, servername: servername ?? (/^[\d.]+$/.test(url.hostname) ? undefined : url.hostname), minVersion: 'TLSv1.2', ...t.tlsOptions } as tls.ConnectionOptions, () => { s.end(); res(null); });
     s.setTimeout(10_000, () => s.destroy(new Error('timed out')));
     s.on('error', (e) => res(e.message));
@@ -97,14 +106,16 @@ async function main() {
   const ca = o.ca ? readFileSync(o.ca) : undefined;
   let trusted = false;
   try {
-    const [cert, verifyError] = await inspectCertificate(url, ca, o.servername);
+    const [cert, verifyError] = await inspectCertificate(url, ca, o.servername, o.acceptExpired);
     const fp = cert.fingerprint256;
     add('INFO', 'TLS', 'Certificate presented by the server', {
       subject: cert.subject, issuer: cert.issuer, subjectAltName: cert.subjectaltname ?? null,
       validFrom: cert.valid_from, validTo: cert.valid_to, sha256: fp, selfSigned: JSON.stringify(cert.subject) === JSON.stringify(cert.issuer),
     });
     console.log(`         SHA-256 fingerprint: ${fp}`);
-    if (new Date(cert.valid_to) < new Date()) add('FAIL', 'TLS', `The certificate expired on ${cert.valid_to}. Renew it on the Visionline server.`);
+    const expired = new Date(cert.valid_to) < new Date();
+    if (expired && o.acceptExpired) add('WARN', 'TLS', `The certificate expired on ${cert.valid_to}. Accepted by the administrator for this exact certificate only; have it renewed on the Visionline server (ASSA ABLOY).`);
+    else if (expired) add('FAIL', 'TLS', `The certificate expired on ${cert.valid_to}. Renew it on the Visionline server, or accept this exact certificate with Trust-Visionline-Certificate.cmd -AcceptExpired.`);
     else if (new Date(cert.valid_to).getTime() - Date.now() < 30 * 86400_000) add('WARN', 'TLS', `The certificate expires soon (${cert.valid_to}).`);
     // The chain the server sent: leaf first. A trust file must hold the top (self-signed) certificate.
     const chain: tls.DetailedPeerCertificate[] = [];
@@ -113,8 +124,8 @@ async function main() {
     const topSelfSigned = JSON.stringify(top.subject) === JSON.stringify(top.issuer);
     if (chain.length > 1) add('INFO', 'TLS', `The server sent ${chain.length} certificates; top: ${top.subject?.CN ?? JSON.stringify(top.subject)}${topSelfSigned ? ' (root)' : ''}.`);
     if (o.saveCert) {
-      writeFileSync(o.saveCert, toPem(top.raw));
-      if (!topSelfSigned) add('WARN', 'TLS', 'The server did not send its root certificate. Export the issuing CA certificate from the Visionline server and use that file with --ca instead.');
+      writeFileSync(o.saveCert, toPem(o.saveLeaf ? cert.raw : top.raw));
+      if (!topSelfSigned && !o.saveLeaf) add('WARN', 'TLS', 'The server did not send its root certificate. Export the issuing CA certificate from the Visionline server and use that file with --ca instead.');
       add('INFO', 'TLS', `Saved the ${chain.length > 1 ? 'top certificate of the chain' : 'certificate'} to ${resolve(o.saveCert)}. Trust it only after confirming its SHA-256 fingerprint (${top.fingerprint256}) matches the certificate installed on the Visionline server (docs/VISIONLINE-PROBE.md explains how).`);
     }
     if (o.pin && fp.replace(/:/g, '').toLowerCase() !== o.pin.replace(/:/g, '').toLowerCase()) add('FAIL', 'TLS', 'The certificate does not match the pinned fingerprint (--pin).');
@@ -123,7 +134,7 @@ async function main() {
         { fix: ca ? 'Check that --ca points to the Visionline certificate (or its issuing CA) and that the host name matches its subject/SAN; use --servername if Visionline’s certificate is issued to another name.' : 'Export the Visionline server certificate (or its CA) to a .crt file and pass it with --ca, or run with --save-cert to capture it and verify the fingerprint first.' });
     } else {
       trusted = true;
-      const mode = visionlineTrust(ca, { servername: o.servername }).mode;
+      const mode = visionlineTrust(ca, { servername: o.servername, acceptExpiredSha256: o.acceptExpired }).mode;
       add('PASS', 'TLS', mode === 'exact'
         ? `Visionline's own certificate in ${o.ca} is trusted exactly (fingerprint match; its issuing CA is not needed).`
         : `Certificate trusted${ca ? ` via ${o.ca}` : ' by the Node.js trust store'}; host name matches.`);
@@ -148,7 +159,7 @@ async function main() {
     try { clientUuid = readFileSync(f, 'utf8').trim(); } catch { clientUuid = randomUUID(); writeFileSync(f, clientUuid); }
   }
   if (o.accessId) add('INFO', 'Web client', `Signing in with access ID "${o.accessId}" and uuid ${clientUuid}. If Visionline answers 40318, allow this uuid in Visionline: Lists → Web clients → Allow (and set Ignore operator card).`);
-  const vl = new VisionlineClient(o.url, { caFile: o.ca, pinSha256: o.pin, servername: o.servername },
+  const vl = new VisionlineClient(o.url, { caFile: o.ca, pinSha256: o.pin, servername: o.servername, acceptExpiredSha256: o.acceptExpired },
     () => ({ username, password, accessId: o.accessId, clientUuid: clientUuid ?? randomUUID() }));
   try {
     const resources = ((await vl.request<{ id: string }[]>('GET', VL.paths.resources)) ?? []).map((r) => r.id);

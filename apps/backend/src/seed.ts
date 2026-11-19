@@ -85,7 +85,7 @@ await cfg(khb, 'credential_services', { baseUrl: process.env.CS_BASE_URL ?? 'htt
     sms: { enabled: true, provider: 'android-gateway', url: `http://${simHost}:8444/sms-gateway`, username: 'sms', secretRef: 'SMS_API_KEY' },
   });
   if (!(await one(pool, `SELECT 1 FROM alert_contacts WHERE hotel_id=$1`, [khb]))) {
-    await pool.query(`INSERT INTO alert_contacts (hotel_id, name, email, phone, by_email, by_sms, categories) VALUES ($1,'Duty manager (test)','duty@khb.test','+237600000001',true,true,$2)`, [khb, ['doors', 'vip', 'locks', 'system']]);
+    await pool.query(`INSERT INTO alert_contacts (hotel_id, name, email, phone, by_email, by_sms, categories) VALUES ($1,'Duty manager (test)','duty@khb.test','+237600000001',true,true,$2)`, [khb, ['doors', 'vip', 'locks', 'cards', 'system']]);
   }
 }
 await cfg(khb, 'app_policy', { privacyText: 'K Hotel Bana uses your work account to deliver door keys to this phone. No location is collected.', supportEscalation: 'Call the duty manager if a door will not open.', partnerLinks: [], allowedLinkHosts: [] });

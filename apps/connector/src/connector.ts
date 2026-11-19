@@ -13,12 +13,12 @@ import { SecretStore } from './secret-store.ts';
 import { VisionlineClient, VisionlineApiError } from './visionline/client.ts';
 import { WebApiAdapter, toErrorInfo, ADAPTER_VERSION, type VisionlineAdapter } from './visionline/adapter.ts';
 import { VisionlineWatch } from './watch.ts';
-import { readDirectory } from './visionline/directory.ts';
+import { completeAlarms, readAlarms, readDirectory } from './visionline/directory.ts';
 
 /** Commands that change Visionline; refused in read-only mode. */
-const WRITES = new Set(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'CREATE_USER_GROUP', 'ENCODE_KEYCARD', 'CANCEL_KEYCARD', 'DOOR_COMMANDS']);
+const WRITES = new Set(['ISSUE_STAFF_KEY', 'REVOKE_STAFF_KEY', 'CREATE_USER_GROUP', 'ENCODE_KEYCARD', 'CANCEL_KEYCARD', 'DOOR_COMMANDS', 'COMPLETE_ALARMS']);
 
-export const CONNECTOR_VERSION = '0.16.2';
+export const CONNECTOR_VERSION = '0.17.1';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -126,7 +126,7 @@ export class Connector {
       visionlineWatch: this.watch.status,
       readOnly: this.cfg.visionline.readOnly,
       // Battery alarms ride on the Visionline watch; without the watch there are none to report.
-      capabilities: ['encoder-read', 'encode-keycard', 'encode-operations', 'door-commands', ...(this.cfg.visionline.watch ? ['battery-events', 'entrance-events', 'directory-sync', 'directory-sync-users'] : [])],
+      capabilities: ['encoder-read', 'encode-keycard', 'encode-operations', 'door-commands', ...(this.cfg.visionline.watch ? ['battery-events', 'entrance-events', 'directory-sync', 'directory-sync-users', 'alarms-read'] : []), ...(this.cfg.visionline.watch && !this.cfg.visionline.readOnly ? ['alarms-complete'] : [])],
       directorySync: this.directorySync,
       ...(this.disk ? { disk: this.disk } : {}),
     };
@@ -245,6 +245,19 @@ export class Connector {
         case 'COUNT_GUEST_CARDS':
           result = { status: 'SUCCEEDED', result: await this.adapter.countGuestCards(payload.rooms) };
           break;
+        case 'READ_ALARMS': {
+          const r = await readAlarms(this.vl, payload.since, payload.max);
+          // Visionline busy or down: FAILED (shown in Monitoring), the next read in 15 minutes picks everything up.
+          const problem = r.notes.find((n) => n.startsWith('Lock alarms could not be read'));
+          result = problem && !r.alarms.length ? { status: 'FAILED', result: r, error: { code: 'ALARMS_NOT_READ', message: problem, retryable: true } } : { status: 'SUCCEEDED', result: r };
+          break;
+        }
+        case 'COMPLETE_ALARMS': {
+          const r = await completeAlarms(this.vl, payload.alarmIds);
+          result = { status: r.results.some((x) => x.ok) ? 'SUCCEEDED' : 'FAILED', result: r,
+            ...(r.results.every((x) => !x.ok) ? { error: { code: 'ALARMS_NOT_COMPLETED', message: r.results[0]?.error ?? 'Visionline did not complete the alarms', retryable: false } } : {}) };
+          break;
+        }
         case 'LIST_ENCODERS':
           result = { status: 'SUCCEEDED', result: await this.adapter.listEncoders() };
           break;
@@ -323,6 +336,8 @@ export class Connector {
         for (const cmd of commands) {
           console.log(`[connector] ${cmd.type} ${cmd.id} (attempt ${cmd.attempt}, ${cmd.correlationId})`);
           if (cmd.type === 'SYNC_DIRECTORY') { this.startSync(cmd); continue; }
+          // 2.38 Alarm reads and completions never hold up key issuing: they run beside the other commands.
+          if (cmd.type === 'READ_ALARMS' || cmd.type === 'COMPLETE_ALARMS') { this.startAside(cmd); continue; }
           const result = await this.execute(cmd);
           console.log(`[connector] ${cmd.type} ${cmd.id} -> ${result.status}${result.error ? ` ${result.error.code}` : ''}`);
           try { await this.report(cmd.id, result); } catch { /* stays in outbox */ }
@@ -338,6 +353,19 @@ export class Connector {
         backoff = Math.min(backoff * 2, 60_000);
       }
     }
+  }
+
+  private aside = new Set<string>();
+  private startAside(cmd: CommandEnvelope) {
+    if (this.aside.has(cmd.id)) return;
+    this.aside.add(cmd.id);
+    void (async () => {
+      try {
+        const result = await this.execute(cmd);
+        console.log(`[connector] ${cmd.type} ${cmd.id} -> ${result.status}${result.error ? ` ${result.error.code}` : ''}`);
+        try { await this.report(cmd.id, result); } catch { /* stays in outbox */ }
+      } finally { this.aside.delete(cmd.id); }
+    })();
   }
 
   /** Reads Visionline's people, valid keycards and alarms in the background and streams them to the platform. */

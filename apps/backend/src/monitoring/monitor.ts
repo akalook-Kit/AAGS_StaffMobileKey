@@ -1,3 +1,4 @@
+import { isBatteryAlarm, isExcessiveCardUsage } from '../alarms.ts';
 import { statfs } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { pool, many, one } from '../db.ts';
@@ -17,14 +18,15 @@ import { maskRecipient, sendEmail, sendSms, type Channels } from './channels.ts'
  *           gateway_offline     a gateway of the online locks is offline (2.19; see gateways.ts)
  *   vip     vip_entrance        first entrance at a watched door
  *   locks   lock_alarm, battery_critical
+ *   cards   card_alarm          Visionline "Excessive card usage" (2.38; security / front office)
  *   system  connector_offline, visionline_unreachable, disk_low (red until fixed), db_large
  */
-export const CATEGORIES = ['doors', 'vip', 'locks', 'system'] as const;
+export const CATEGORIES = ['doors', 'vip', 'locks', 'cards', 'system'] as const;
 export type Category = (typeof CATEGORIES)[number];
-export const CATEGORY_LABELS: Record<Category, string> = { doors: 'Doors and gateways offline', vip: 'Watched doors (VIP)', locks: 'Lock alarms and batteries', system: 'System (server, disk, database, connector)' };
+export const CATEGORY_LABELS: Record<Category, string> = { doors: 'Doors and gateways offline', vip: 'Watched doors (VIP)', locks: 'Lock alarms and batteries', cards: 'Card alarms (excessive card usage)', system: 'System (server, disk, database, connector)' };
 const KIND_CATEGORY: Record<string, Category> = {
-  door_offline: 'doors', gateway_offline: 'doors', vip_entrance: 'vip', lock_alarm: 'locks', battery_critical: 'locks', generic_keycards: 'locks',
-  connector_offline: 'system', visionline_unreachable: 'system', disk_low: 'system', db_large: 'system', test: 'system',
+  door_offline: 'doors', gateway_offline: 'doors', vip_entrance: 'vip', lock_alarm: 'locks', card_alarm: 'cards', battery_critical: 'locks', generic_keycards: 'locks',
+  connector_offline: 'system', visionline_unreachable: 'system', visionline_cert_expired: 'system', disk_low: 'system', db_large: 'system', test: 'system',
 };
 export const categoryOf = (kind: string): Category => KIND_CATEGORY[kind] ?? 'system';
 
@@ -183,6 +185,16 @@ export async function checkHotel(hotelId: string, now = new Date()) {
       }
     } else vlFirstDown.delete(c.id);
   }
+  // 2.38.1 Visionline's certificate has expired and the administrator accepted it anyway: a warning until renewed.
+  const certExpired: string[] = [];
+  for (const c of conns) {
+    const m = /EXPIRED on (\d{4}-\d{2}-\d{2}), accepted by the administrator/.exec(String(c.health?.tlsTrust ?? ''));
+    if (!m) continue;
+    certExpired.push(c.id);
+    await raise(hotelId, { kind: 'visionline_cert_expired', subject: c.id, severity: 'warning', title: `Visionline's certificate expired on ${m[1]} (accepted for now)`,
+      detail: 'The connector trusts exactly this certificate although it has expired (Trust-Visionline-Certificate). Ask ASSA ABLOY to renew the Visionline Web Service certificate, then run "Access Monitoring Tool - Visionline certificate" on the server again.' });
+  }
+  await clearOthers(hotelId, 'visionline_cert_expired', certExpired);
   await clearOthers(hotelId, 'connector_offline', offline);
   await clearOthers(hotelId, 'visionline_unreachable', vlDown);
 
@@ -225,13 +237,25 @@ export async function checkHotel(hotelId: string, now = new Date()) {
   await checkGenericCards(hotelId);
 
   // Lock alarms (Visionline) and critical batteries
-  const alarms = await many(pool, `SELECT alarm_id, COALESCE(type_name, alarm_type, 'Alarm') AS t, alarm_text, COALESCE(door_id, door_raw) AS door FROM vl_alarms
-    WHERE hotel_id=$1 AND NOT completed AND COALESCE(alarm_at, received_at) > now() - interval '24 hours'`, [hotelId]);
+  const alarms = await many(pool, `SELECT a.alarm_id, COALESCE(a.type_name, a.alarm_type, 'Alarm') AS t, a.alarm_text, COALESCE(a.door_id, a.door_raw) AS door, a.card_holder, a.alarm_at,
+      NULLIF(trim(concat_ws(' ', u.given_name, u.surname)), '') AS holder_name
+    FROM vl_alarms a LEFT JOIN vl_users u ON u.hotel_id=a.hotel_id AND u.user_id=a.card_holder
+    WHERE a.hotel_id=$1 AND NOT a.completed AND COALESCE(a.alarm_at, a.received_at) > now() - interval '24 hours'`, [hotelId]);
   const names = await doorNames(hotelId);
   // Battery alarms are covered by the battery module (one alert per door), so they are not repeated here.
   const battOn = Boolean((await getConfig(pool, hotelId, 'features'))?.batteryMonitoring);
-  const lockAlarms = alarms.filter((a) => !(battOn && /battery/i.test(`${a.t} ${a.alarm_text ?? ''}`)));
-  for (const a of lockAlarms) await raise(hotelId, { kind: 'lock_alarm', subject: a.alarm_id, severity: 'critical', title: `Lock alarm at ${names.get(a.door) ?? a.door ?? 'a door'}: ${a.t}`, detail: a.alarm_text ?? null });
+  // 2.38 "Excessive card usage" is about a card (a person), not a lock: its own alert for security / front office.
+  const cardOn = (await getConfig(pool, hotelId, 'visionline'))?.alarms?.excessiveCardUsage !== false;
+  const cardAlarms = cardOn ? alarms.filter((a) => isExcessiveCardUsage(a.t, a.alarm_text)) : [];
+  for (const a of cardAlarms) {
+    const who = a.holder_name ?? a.card_holder ?? 'unknown card holder';
+    await raise(hotelId, { kind: 'card_alarm', subject: a.alarm_id, severity: 'warning', title: `Excessive card usage: ${who}${a.door ? ` at ${names.get(a.door) ?? a.door}` : ''}`,
+      detail: [a.alarm_text, 'Visionline saw this card used many times in a short time. Check with the card holder; the card may be lost, shared or copied.'].filter(Boolean).join(' '),
+      data: { holder: who, at: a.alarm_at } });
+  }
+  await clearOthers(hotelId, 'card_alarm', cardAlarms.map((a) => a.alarm_id));
+  const lockAlarms = alarms.filter((a) => !isExcessiveCardUsage(a.t, a.alarm_text) && !(battOn && isBatteryAlarm(a.t, a.alarm_text)));
+  for (const a of lockAlarms) await raise(hotelId, { kind: 'lock_alarm', subject: a.alarm_id, severity: 'critical', title: a.door ? `Lock alarm at ${names.get(a.door) ?? a.door}: ${a.t}` : `Visionline alarm: ${a.t}`, detail: a.alarm_text ?? null });
   await clearOthers(hotelId, 'lock_alarm', lockAlarms.map((a) => a.alarm_id));
   const batt = await many(pool, `SELECT door_id FROM battery_alerts WHERE hotel_id=$1 AND severity='CRITICAL' AND status<>'RESOLVED'`, [hotelId]);
   for (const b of batt) await raise(hotelId, { kind: 'battery_critical', subject: b.door_id, severity: 'critical', title: `Battery critically low at ${names.get(b.door_id) ?? b.door_id}`, detail: 'The lock may stop opening. Replace the batteries.' });

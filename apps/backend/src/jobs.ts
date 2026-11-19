@@ -3,6 +3,7 @@ import { audit } from './audit.ts';
 import { enqueueIssue, notify, applyCredentialEvent, processPendingEvents, handleCsCallback } from './keys.ts';
 import { csForHotel, ensureCallbacks } from './credential-services.ts';
 import { scheduleDirectorySyncs } from './directory.ts';
+import { scheduleAlarmWork } from './alarms.ts';
 import { config } from './config.ts';
 import { runMonitoring } from './monitoring/monitor.ts';
 import { maybeDailyBackup } from './backup.ts';
@@ -153,6 +154,7 @@ export function startJobs() {
       else if (n % 12 === 0) await reconcile();
       if (n % 12 === 0) await ensureAllCallbacks();
       if (n % 12 === 6) await scheduleDirectorySyncs();
+      if (n % 12 === 7) await scheduleAlarmWork().catch((e) => console.error('[alarms]', (e as Error).message)); // 2.38 every minute
       if (n % 12 === 8) await scheduleDiscovery(); // 2.10 doors and user groups from Visionline, by themselves
       if (n % 12 === 3) await runMonitoring(); // every minute
       if (n % 12 === 9) await maybeDailyBackup().catch((e) => console.error('[backup]', (e as Error).message));

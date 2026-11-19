@@ -253,6 +253,15 @@ export function registerCredentialServices(app: FastifyInstance, st: SimState, o
     return { door: door.id, eventCode: code };
   });
   // Any other lock event, e.g. a hotel-specific "lock offline" / "lock online" code (2.7 monitoring tests).
+  // 2.38 An "Excessive card usage" alarm (no door; the card holder who used a card too often).
+  app.post('/sim/alarms/excessive-card-usage', async (req) => {
+    const b = (req.body ?? {}) as { cardHolder?: string };
+    const t = Date.now();
+    const a = { id: String(5000 + st.alarms.length), alarmType: '5', alarmText: 'Excessive card usage', at: t, door: null, cardHolder: b.cardHolder ?? '120204', completed: false, updatedAt: t };
+    st.alarms.push(a as any);
+    return { id: a.id };
+  });
+  app.get('/sim/alarms', async () => st.alarms);
   app.post('/sim/doors/:id/event', async (req, reply) => {
     const door = st.doors.find((d) => d.id === (req.params as any).id);
     if (!door) return reply.code(404).send({ code: 'UnknownDoor' });

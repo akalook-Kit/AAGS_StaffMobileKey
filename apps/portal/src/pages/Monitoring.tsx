@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
+import { tr, trf } from '../i18n';
 import { useHotel } from '../App';
 import { ErrorNote, PageHead, useApi } from '../ui';
 import { DataTable, Lines, NoData, SERIES } from '../components/charts';
@@ -9,7 +10,7 @@ import { DataTable, Lines, NoData, SERIES } from '../components/charts';
  * Monitoring (2.7): open alerts, doors online/offline, watched (VIP) doors, system health (database size, disk space,
  * connector, backups) and the messages sent. Everything refreshes by itself every 30 seconds.
  */
-const TABS = [{ id: 'alerts', l: 'Alerts' }, { id: 'doors', l: 'Doors online / offline' }, { id: 'vip', l: 'Watched doors (VIP)' }, { id: 'system', l: 'System health' }, { id: 'messages', l: 'Messages sent' }] as const;
+const TABS = [{ id: 'alerts', l: 'Alerts' }, { id: 'doors', l: 'Doors online / offline' }, { id: 'vip', l: 'Watched doors (VIP)' }, { id: 'vlalarms', l: 'Visionline alarms' }, { id: 'system', l: 'System health' }, { id: 'messages', l: 'Messages sent' }] as const;
 const SEV = { critical: 'Critical', warning: 'Warning', info: 'Notice' } as const;
 const MODE = { first_daily: 'First entrance each day', first_once: 'First entrance only, then stop', every: 'Every entrance' } as const;
 const GB = 1024 ** 3, MB = 1024 ** 2;
@@ -50,6 +51,7 @@ export function MonitoringPage() {
       {!d ? null : tab === 'alerts' ? <Alerts d={d} t={t} ack={ack} canAck={can('alerts.manage')} reload={() => void m.reload()} />
         : tab === 'doors' ? <Doors d={d} t={t} />
         : tab === 'vip' ? <Vip d={d} t={t} reload={m.reload} />
+        : tab === 'vlalarms' ? <VisionlineAlarms t={t} />
         : tab === 'system' ? <System d={d} t={t} />
         : <Messages d={d} t={t} />}
     </>
@@ -60,9 +62,11 @@ export function MonitoringPage() {
 const CLOSES: Record<string, string> = {
   connector_offline: 'Closes when the connector on the Visionline server reports again (check that its service runs).',
   visionline_unreachable: 'Closes when the connector reaches Visionline again.',
+  visionline_cert_expired: 'Closes when Visionline\'s certificate is renewed and trusted again (Start menu on the server: "Access Monitoring Tool - Visionline certificate").',
   disk_low: 'Closes when the disk has more free space than the limit (Settings → Alerts & notifications).',
   db_large: 'Closes when the database is below the limit, or after raising the limit in Settings → Alerts & notifications.',
   lock_alarm: 'Closes when the alarm is completed in Visionline (Alarms), or 24 hours after it was raised.',
+  card_alarm: 'Closes when the alarm is completed in Visionline (Alarms), or 24 hours after it was raised. Check with the card holder: the card may be lost, shared or copied.',
   battery_critical: 'Closes when the batteries are changed (Battery status → New batteries) or the lock reports a good battery.',
   door_offline: 'Closes when the door reports again (a keycard used there, or the lock back in contact). Door-silence alerts can be switched off in Settings → Alerts & notifications.',
   gateway_offline: 'Closes when the gateway is online again.',
@@ -113,7 +117,7 @@ function Alerts({ d, t, ack, canAck, reload }: { d: any; t: (v: string | null) =
     </>
   );
 }
-const KIND_LABEL: Record<string, string> = { connector_offline: 'Connector', visionline_unreachable: 'Visionline', disk_low: 'Disk', db_large: 'Database', lock_alarm: 'Lock alarms',
+const KIND_LABEL: Record<string, string> = { connector_offline: 'Connector', visionline_unreachable: 'Visionline', visionline_cert_expired: 'Visionline certificate', disk_low: 'Disk', db_large: 'Database', lock_alarm: 'Lock alarms', card_alarm: 'Card alarms',
   battery_critical: 'Batteries', door_offline: 'Doors offline', gateway_offline: 'Gateways', generic_keycards: 'Generic keycards' };
 
 function Doors({ d, t }: { d: any; t: (v: string | null) => string }) {
@@ -218,6 +222,46 @@ function System({ d, t }: { d: any; t: (v: string | null) => string }) {
   );
 }
 
+/** 2.38 Visionline alarms read every few minutes, and what the portal did with them. */
+const VL_KIND: Record<string, string> = { card: 'Excessive card usage', battery: 'Battery', lock: 'Lock' };
+function VisionlineAlarms({ t }: { t: (v: string | null) => string }) {
+  const { base, can } = useHotel();
+  const [kind, setKind] = useState<'all' | 'card' | 'battery' | 'lock'>('all');
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const r = useApi<any>(`${base}/monitoring/visionline-alarms?days=30`, [], 60_000);
+  const d = r.data;
+  const readNow = async () => { setBusy(true); setError(null); try { await api(`${base}/monitoring/visionline-alarms/read`, { body: {} }); setTimeout(() => void r.reload(), 4000); } catch (e) { setError(e); } finally { setBusy(false); } };
+  const rows = (d?.alarms ?? []).filter((a: any) => (kind === 'all' || a.kind === kind) && (!open || !a.completed));
+  const status = (a: any) => a.completed ? (a.byPortal ? <span key="s" className="sev ok" title={a.reason ?? ''}>Closed by the portal{a.completedAt ? ` ${t(a.completedAt)}` : ''}</span> : <span key="s" className="muted">Completed{a.completedAt ? ` ${t(a.completedAt)}` : ''}</span>)
+    : a.error ? <span key="s" className="bad-text" title={a.error}>{trf('Still open; closing failed: {e}', { e: a.error })}</span>
+    : a.requestedAt ? <span key="s">{trf('Still open; closing asked {t}', { t: t(a.requestedAt) })}</span>
+    : <span key="s" className={a.kind === 'card' ? 'sev warning' : ''}>{tr('Not completed yet')}</span>;
+  return (
+    <div className="panel">
+      <ErrorNote error={error ?? r.error} />
+      {d && <p className="small">
+        {d.settings.readEveryMinutes ? trf('Alarms are read every {n} minutes.', { n: d.settings.readEveryMinutes }) : tr('Alarms are read only with the people and keycards.')}{' '}
+        {d.lastRead ? trf('Last read: {t}.', { t: t(d.lastRead.at) }) : tr('Not read yet.')}
+        {d.lastRead && (d.lastRead.status === 'FAILED' || d.lastRead.status === 'EXPIRED') ? <b className="bad-text"> {d.lastRead.error ?? tr('The last read failed.')}</b> : null}<br />
+        {d.settings.excessiveCardUsage ? tr('Excessive card usage alerts are on.') : tr('Excessive card usage alerts are off.')}{' '}
+        {!d.settings.completeBatteryAlarms ? tr('Battery alarms are not closed by the portal.') : d.connector.canComplete ? tr('Battery alarms are closed in Visionline after new batteries.') : tr('Battery alarms would be closed after new batteries, but the connector is read-only or older than 0.17.0.')}
+        {!d.connector.canRead && <><br /><b className="bad-text">{tr('The connector does not read alarms yet: it is offline or older than 0.17.0.')}</b></>}
+        {' '}<Link to="/settings?tab=reports">{tr('Settings → Reports & sync')}</Link></p>}
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        <div className="seg" role="radiogroup" aria-label="Kind of alarm">
+          {(['all', 'card', 'battery', 'lock'] as const).map((k) => <button key={k} type="button" role="radio" aria-checked={kind === k} aria-pressed={kind === k} onClick={() => setKind(k)}>{k === 'all' ? 'All' : VL_KIND[k]}</button>)}
+        </div>
+        <label className="check" style={{ margin: 0 }}><input type="checkbox" checked={open} onChange={(e) => setOpen(e.target.checked)} /><span>Open only</span></label>
+        {can('alerts.manage') && <button className="btn" onClick={readNow} disabled={busy || !d?.connector.canRead}>{busy ? 'Asking…' : 'Read alarms now'}</button>}
+      </div>
+      {!d ? null : !rows.length ? <NoData text="No Visionline alarms in the last 30 days" hint="They appear here once the connector has read them." />
+        : <DataTable head={['When', 'Kind', 'Alarm', 'Door', 'Card holder', 'Status']} rows={rows.map((a: any) => [t(a.at), VL_KIND[a.kind] ?? a.kind, a.text ? `${a.type}: ${a.text}` : a.type, a.door ?? '—', a.holder ?? '—', status(a)])} />}
+    </div>
+  );
+}
+
 function Messages({ d, t }: { d: any; t: (v: string | null) => string }) {
   const ch = d.channels;
   return (
@@ -233,6 +277,7 @@ const MON_TIPS: Record<string, string> = {
   alerts: 'Open alerts, how each one closes, and Mark as seen.',
   doors: 'Which doors reported recently and which are silent.',
   vip: 'Be told when someone enters a door you choose (VIP room, cashier…).',
+  vlalarms: 'Alarms read from Visionline every 15 minutes: excessive card usage, lock alarms, and battery alarms the portal closed after new batteries.',
   system: 'Free disk space, database size, connector and Visionline.',
   messages: 'E-mails and SMS the portal sent about alerts.',
 };

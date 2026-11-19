@@ -177,6 +177,10 @@ VISIONLINE CERTIFICATE
   exactly that certificate (verification stays on). If Visionline runs on another computer or was not
   reachable, the installer says so: run connector\visionline-probe.ps1 -TlsOnly -SaveCert C:\vl.crt, check
   the fingerprint with the Visionline administrator, then Install.cmd -CaFile C:\vl.crt (see the guide).
+  After Visionline's certificate was renewed, or when it has EXPIRED: Start menu -> "Access Monitoring Tool -
+  Visionline certificate" (Trust-Visionline-Certificate.cmd). It shows the certificate Visionline presents and
+  trusts exactly that one. An expired certificate is trusted only after you type ACCEPT: any other certificate is
+  still refused, only its date is not checked, and the portal shows a warning until it is renewed (ASSA ABLOY).
 
 OUTSIDE ACCESS ("public IP + special pathway")
   1. On the hotel firewall/router: forward TCP <public IP>:443 to <server LAN IP>:9443. Nothing else.

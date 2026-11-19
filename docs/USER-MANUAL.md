@@ -704,3 +704,12 @@ The portal is a well-behaved Visionline client:
 | "Two-step sign-in is required" | *Your account → Two-step sign-in*, scan the code, enter it, sign in again. |
 | "Licence required" | *Settings → Licence*, enter the new key from your supplier. |
 | ID cards print too small or off-centre | Print window: actual size / 100 %, margins none, paper size = the card printer's CR80. |
+
+## Visionline alarms (2.38)
+
+Alarms are read from Visionline every 15 minutes. **Excessive card usage** (a card used many times in a short time)
+shows as a band at the top of every page and in Monitoring → **Visionline alarms**, and is sent by e-mail / SMS to the
+contacts who chose **Card alarms** in Settings → Alerts & notifications (your security or front office team). Check
+with the card holder, then complete the alarm in Visionline. **Battery alarms** are completed in Visionline by the
+portal once new batteries are in and the lock no longer reports low batteries. Settings → Reports & sync →
+*Visionline alarms* sets how often alarms are read and switches each part on or off.

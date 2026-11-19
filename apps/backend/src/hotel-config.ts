@@ -326,6 +326,19 @@ export const SCHEMAS = {
       everyHours: z.number().int().min(1).max(168).default(24),
       maxUsers: z.number().int().min(10).max(20000).default(3000),
     }).default({ enabled: false, scope: 'staffGroups', groups: [], quietHoursOnly: false, includeCards: true, includeAlarms: true, everyHours: 24, maxUsers: 3000 }),
+    /**
+     * 2.38 Visionline alarms on their own (Armel, 18 Nov 2026): read every few minutes, "Excessive card usage" told to
+     * the people chosen for card alarms and shown to everyone signed in, and battery alarms completed in Visionline
+     * once new batteries are in [Web API §5.4.1].
+     */
+    alarms: z.object({
+      /** Minutes between two alarm reads; 0 = only with the people and keycards read. */
+      readEveryMinutes: z.number().int().min(0).max(1440).refine((v) => v === 0 || v >= 5, 'At least 5 minutes, or 0 for off').default(15),
+      /** Complete a lock's battery alarms in Visionline when the portal sees new batteries (event or voltage jump). */
+      completeBatteryAlarms: z.boolean().default(true),
+      /** Raise "Excessive card usage" as its own alert (card alarms), shown in the portal and sent to its contacts. */
+      excessiveCardUsage: z.boolean().default(true),
+    }).default({ readEveryMinutes: 15, completeBatteryAlarms: true, excessiveCardUsage: true }),
     /** 2.12 pilot: read the keycard on a Visionline encoder (Visionline cards & people → Card lookup). */
     encoderRead: z.object({
       enabled: z.boolean().default(false),

@@ -3,6 +3,7 @@ import { LicencePanel } from '../components/Licence';
 import { sharedVisionlineOperator } from '@smk/shared';
 import { ConnectorSetupEditor, ConnectorsAside } from '../components/ConnectorSetup';
 import { ApiError, api, sealCredential } from '../api';
+import { tr, trf } from '../i18n';
 import { useHotel } from '../App';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { ErrorNote, PageHead, Status, fmt, useApi, waitForCommand } from '../ui';
@@ -305,6 +306,8 @@ function ConnectionPanel({ conn, canManage, onSaved }: { conn: any; canManage: b
           <dt>Connector</dt><dd>{conn.name} · version {h.connectorVersion ?? '—'} · seen {fmt.rel(conn.last_seen_at)}</dd>
         </dl>
       )}
+      {conn && /EXPIRED on/.test(h.tlsTrust ?? '') && <div className="alert warn">{trf('Visionline\'s certificate expired on {d}. The connector trusts exactly this certificate for now (accepted by an administrator on the server). Ask ASSA ABLOY to renew it, then run "Access Monitoring Tool - Visionline certificate" on the server again.', { d: /EXPIRED on (\S+?),/.exec(h.tlsTrust)?.[1] ?? '?' })}</div>}
+      {conn && !h.visionlineReachable && /expired/i.test(h.lastError ?? '') && !/EXPIRED on/.test(h.tlsTrust ?? '') && <div className="alert warn">{tr('Visionline\'s certificate has expired. Best: have it renewed (ASSA ABLOY). To work today: on the server, Start menu → "Access Monitoring Tool - Visionline certificate", check the certificate shown and type ACCEPT. Exactly that certificate is then trusted; the portal keeps a warning until it is renewed.')}</div>}
       {canManage && conn && (
         <>
           <h3 className="section-title">Change property credentials</h3>
@@ -579,6 +582,8 @@ function ReportsSync({ data, set }: { data: any; set: (patch: any) => void }) {
   const { base, can } = useHotel();
   const ds = { enabled: false, scope: 'staffGroups', groups: [] as string[], includeCards: true, includeAlarms: true, everyHours: 24, maxUsers: 3000, ...(data.directorySync ?? {}) };
   const setD = (patch: any) => set({ directorySync: { ...ds, ...patch } });
+  const al = { readEveryMinutes: 15, completeBatteryAlarms: true, excessiveCardUsage: true, ...(data.alarms ?? {}) };
+  const setA = (patch: any) => set({ alarms: { ...al, ...patch } });
   const er = { enabled: false, encoders: [] as string[], action: 'read', ...(data.encoderRead ?? {}) };
   const setE = (patch: any) => set({ encoderRead: { ...er, ...patch } });
   const [encText, setEncText] = useState((er.encoders ?? []).join(', '));
@@ -627,8 +632,19 @@ function ReportsSync({ data, set }: { data: any; set: (patch: any) => void }) {
         <p className="hint small">The connector shares Visionline politely: at most two requests at a time, key issuing first, and it slows down when Visionline is busy.</p>
         <h3 style={{ marginTop: 14 }}>What to read</h3>
         <label className="check"><input type="checkbox" checked={ds.includeCards} onChange={(e) => setD({ includeCards: e.target.checked })} /><span>Valid keycards of each person <span className="hint" style={{ display: 'block' }}>Validity, doors, door groups, time schedule and privileges such as deadbolt override (when Visionline reports them).</span></span></label>
-        <label className="check"><input type="checkbox" checked={ds.includeAlarms} onChange={(e) => setD({ includeAlarms: e.target.checked })} /><span>Lock alarms<span className="hint" style={{ display: 'block' }}>Needs the Visionline option "Web service for checking and confirming alarms". Alarms are only read, never marked completed.</span></span></label>
+        <label className="check"><input type="checkbox" checked={ds.includeAlarms} onChange={(e) => setD({ includeAlarms: e.target.checked })} /><span>Lock alarms<span className="hint" style={{ display: 'block' }}>Needs the Visionline option "Web service for checking and confirming alarms". Also read every few minutes on their own (Visionline alarms, below).</span></span></label>
       </fieldset>
+      <h3 style={{ marginTop: 22 }}>Visionline alarms</h3>
+      <p className="hint small">Read on their own, whatever is chosen above (GET /alarms, only what changed since the last read). Needs the Visionline option "Web service for checking and confirming alarms" and connector 0.17.0.</p>
+      <div className="field-row">
+        <div className="field"><label htmlFor="al-every">Read alarms every (minutes)</label>
+          <input id="al-every" type="number" min={0} max={1440} value={al.readEveryMinutes} onChange={(e) => setA({ readEveryMinutes: Number(e.target.value) })} />
+          <span className="hint">15 is recommended; at least 5. 0 = only with the people and keycards read.</span></div>
+      </div>
+      <label className="check"><input type="checkbox" checked={al.excessiveCardUsage} onChange={(e) => setA({ excessiveCardUsage: e.target.checked })} />
+        <span><strong>Alert on "Excessive card usage"</strong><span className="hint" style={{ display: 'block' }}>Shown at the top of the portal to everyone signed in, listed in Monitoring, and sent by e-mail or SMS to the contacts who chose <b>Card alarms</b> (Settings → Alerts &amp; notifications: add your security or front office team there).</span></span></label>
+      <label className="check"><input type="checkbox" checked={al.completeBatteryAlarms} onChange={(e) => setA({ completeBatteryAlarms: e.target.checked })} />
+        <span><strong>Close battery alarms in Visionline after new batteries</strong><span className="hint" style={{ display: 'block' }}>When the portal sees new batteries in a lock (battery-change event or a voltage jump) after its battery alarm, and the lock no longer reports low batteries, the alarm is marked completed in Visionline. An alarm stays open while the lock still says low (new batteries under 4.5 V or less than 0.5 V more than before). Not done by a read-only connector.</span></span></label>
       <h3 style={{ marginTop: 22 }}>Encoders <span className="badge">pilot</span></h3>
       <p className="hint small">Read the keycard lying on a Visionline encoder from <b>Visionline cards &amp; people → Card lookup</b>: whose card it is, its doors, who issued it and where it was used. Read-only. Needs connector 0.10.0; confirm on your Visionline before relying on it.</p>
       <label className="check"><input type="checkbox" checked={er.enabled} onChange={(e) => setE({ enabled: e.target.checked })} /><span>Allow reading cards at these encoders</span></label>
@@ -691,7 +707,7 @@ function ChannelsEditor({ data, set }: { data: any; set: (patch: any) => void })
 function AlertContacts() {
   const { base } = useHotel();
   const c = useApi<any>(`${base}/monitoring/contacts`);
-  const blank = { name: '', email: '', phone: '', byEmail: true, bySms: false, categories: ['doors', 'vip', 'locks', 'system'], active: true };
+  const blank = { name: '', email: '', phone: '', byEmail: true, bySms: false, categories: ['doors', 'vip', 'locks', 'cards', 'system'], active: true };
   const [f, setF] = useState<any>(null);
   const [error, setError] = useState<unknown>(null);
   const [msg, setMsg] = useState<string | null>(null);

@@ -5,12 +5,14 @@ import { z } from 'zod';
 import { pool, many, one } from '../db.ts';
 import { audit } from '../audit.ts';
 import { requirePerm } from '../auth.ts';
-import { badRequest, notFound } from '../lib/errors.ts';
+import { badRequest, conflict, notFound } from '../lib/errors.ts';
 import { getConfig } from '../hotel-config.ts';
 import { getSecret } from '../secret-store.ts';
 import { isOnline } from './portal.ts';
 import { CATEGORIES, CATEGORY_LABELS, checkHotel, channels, databaseInfo, defaultDiskPath, diskInfo, monitoringPolicy, sendTest } from '../monitoring/monitor.ts';
 import { normalisePhone } from '../monitoring/channels.ts';
+import { alarmOverview, maybeReadAlarms } from '../alarms.ts';
+import { readyConnector } from '../visionline-sync.ts';
 
 /** Monitoring (2.7): alerts, doors online/offline, watched (VIP) doors, system health, e-mail/SMS contacts. */
 const P = '/api/v1';
@@ -236,6 +238,26 @@ export function monitoringRoutes(app: FastifyInstance) {
       WHERE w.hotel_id=$1 AND w.active ORDER BY w.last_entrance_at DESC NULLS LAST LIMIT 6`, [hotelId]);
     const top = await many(pool, `SELECT id, kind, severity, title, opened_at FROM monitor_alerts WHERE hotel_id=$1 AND resolved_at IS NULL ORDER BY ${SEV_ORDER}, opened_at DESC LIMIT 5`, [hotelId]);
     return { alerts: a, doors: d, watched: w, top };
+  });
+
+  /** 2.38 Visionline alarms read every 15 minutes: the list, what the portal completed, and "Read now". */
+  app.get(`${P}/hotels/:hotelId/monitoring/visionline-alarms`, async (req) => {
+    const hotelId = hid(req);
+    await requirePerm(req, hotelId, 'alerts.read');
+    const q = z.object({ days: z.coerce.number().int().min(1).max(366).default(30) }).parse(req.query);
+    const conn = await readyConnector(pool, hotelId);
+    const caps: string[] = conn?.health?.capabilities ?? [];
+    return { ...(await alarmOverview(hotelId, q.days)), connector: { online: Boolean(conn), canRead: caps.includes('alarms-read'), canComplete: caps.includes('alarms-complete') } };
+  });
+  app.post(`${P}/hotels/:hotelId/monitoring/visionline-alarms/read`, async (req) => {
+    const hotelId = hid(req);
+    const op = await requirePerm(req, hotelId, 'alerts.manage');
+    const conn = await readyConnector(pool, hotelId);
+    if (!conn || !(conn.health?.capabilities ?? []).includes('alarms-read'))
+      throw conflict('CONNECTOR_CAPABILITY', 'Reading alarms needs the connector online with version 0.17.0 or newer (installed with the hotel\'s Visionline account).');
+    const cmd = await maybeReadAlarms(hotelId, 0, true);
+    await audit(null, { hotelId, actorType: 'operator', actorId: op.id, action: 'visionline.alarms_read_requested', targetType: 'command', targetId: cmd?.id ?? null });
+    return { ok: true, queued: Boolean(cmd) };
   });
 
   /** Small summary for every portal page: a red band while a critical system alert is open (disk, connector...). */

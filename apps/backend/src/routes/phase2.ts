@@ -75,6 +75,12 @@ export function phase2Routes(app: FastifyInstance) {
     }
     // 2.19 Locks and gateways offline right now (menu badge of Online locks & gateways).
     if (perms.has('resources.read')) out.offlineLocks = (await one(pool, `SELECT count(*)::int AS n FROM monitor_alerts WHERE hotel_id=$1 AND kind IN ('door_offline','gateway_offline') AND resolved_at IS NULL`, [hotelId]))?.n ?? 0;
+    // 2.38 Visionline "Excessive card usage" alarms still open: a banner for everyone signed in.
+    if (perms.has('resources.read')) {
+      const rows = await many(pool, `SELECT id, title, data, opened_at FROM monitor_alerts WHERE hotel_id=$1 AND kind='card_alarm' AND resolved_at IS NULL ORDER BY opened_at DESC LIMIT 5`, [hotelId]);
+      const n = (await one(pool, `SELECT count(*)::int AS n FROM monitor_alerts WHERE hotel_id=$1 AND kind='card_alarm' AND resolved_at IS NULL`, [hotelId]))?.n ?? 0;
+      out.cardAlarms = { open: n, latest: rows.map((r) => ({ id: r.id, title: r.title, holder: r.data?.holder ?? null, at: r.data?.at ?? r.opened_at })) };
+    }
     return out;
   });
 

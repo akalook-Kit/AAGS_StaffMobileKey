@@ -17,7 +17,7 @@ export class VisionlineApiError extends Error {
   constructor(public status: number, public code: number | undefined, message: string, public developerMessage?: string, public notSent = false) { super(message); }
 }
 
-export interface VlTrust { caFile?: string; pinSha256?: string; servername?: string }
+export interface VlTrust { caFile?: string; pinSha256?: string; servername?: string; acceptExpiredSha256?: string }
 /** 'emergency' (2.14, door commands during a confirmed emergency) is not queued behind anything. */
 export type VlPriority = 'emergency' | 'high' | 'normal' | 'low';
 
@@ -72,6 +72,8 @@ export class VisionlineClient {
   lastSessionAt: string | null = null;
   tlsState = 'unknown';
   trustMode: 'ca' | 'exact' | 'system' = 'system';
+  /** 2.38.1 The exact certificate is out of date and the administrator accepted it anyway. */
+  expiredAccepted: { validTo: string; fingerprint: string } | null = null;
 
   /** One limiter for the whole connector: the property client and every personal-credential client share it. */
   static idleSocketMs = Number(process.env.VL_IDLE_SOCKET_MS ?? 15_000);
@@ -81,12 +83,14 @@ export class VisionlineClient {
   constructor(baseUrl: string, private trust: VlTrust, private creds: () => VlCredentials | null) {
     this.base = new URL(baseUrl.replace(/\/$/, ''));
     if (this.base.protocol !== 'https:') throw new Error('Visionline Web API must be reached over HTTPS');
-    const t = visionlineTrust(trust.caFile ? readFileSync(trust.caFile) : undefined, { servername: trust.servername, pinSha256: trust.pinSha256 });
+    const t = visionlineTrust(trust.caFile ? readFileSync(trust.caFile) : undefined, { servername: trust.servername, pinSha256: trust.pinSha256, acceptExpiredSha256: trust.acceptExpiredSha256 });
+    this.expiredAccepted = t.expiredAccepted;
     this.trustMode = t.mode;
     // 2.21 An idle connection is closed by us after 15 s, before Visionline's own idle limit drops it: a request sent on
     // a connection Visionline has already closed fails with "read ECONNRESET" (the false "Visionline cannot be
     // reached" alarm at Bana, 31 Oct). Requests in progress keep their own timeout.
     this.agent = new https.Agent({ keepAlive: true, maxSockets: 4, timeout: VisionlineClient.idleSocketMs, minVersion: 'TLSv1.2', servername: trust.servername, ...t.tlsOptions } as https.AgentOptions);
+    if (t.createConnection) (this.agent as any).createConnection = t.createConnection;
   }
 
   /**
@@ -121,7 +125,9 @@ export class VisionlineClient {
         const chunks: Buffer[] = [];
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => {
-          this.tlsState = this.trustMode === 'exact' ? 'verified (exact certificate)' : 'verified';
+          this.tlsState = this.expiredAccepted && Date.parse(this.expiredAccepted.validTo) < Date.now()
+            ? `verified (exact certificate, EXPIRED on ${this.expiredAccepted.validTo.slice(0, 10)}, accepted by the administrator)`
+            : this.trustMode === 'exact' ? 'verified (exact certificate)' : 'verified';
           const text = Buffer.concat(chunks).toString('utf8');
           let parsed: any = {};
           try { parsed = text ? JSON.parse(text) : {}; } catch { parsed = { message: text.slice(0, 200) }; }

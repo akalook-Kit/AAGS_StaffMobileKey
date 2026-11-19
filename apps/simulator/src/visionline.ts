@@ -334,6 +334,15 @@ export function registerVisionline(app: FastifyInstance, st: SimState, opts: {
       door: a.door, completed: a.completed, completionTime: a.completedAt ? toVisionlineLocal(new Date(a.completedAt), opts.timeZone) : null, completionUser: a.completed ? 'sym' : null, updateTime: utcCompact(a.updatedAt) };
   });
 
+  // 2.38 [§5.4.1] POST - Mark an alarm as completed, by setting the completed property to true.
+  app.post(p('/alarms/:id'), async (req, reply) => {
+    const a = st.alarms.find((x) => x.id === (req.params as any).id);
+    if (!a) return fail(reply, E.resourceNotFound, 'The resource does not exist.');
+    if (J(req).completed !== true) return fail(reply, E.missingProperty, 'A mandatory property is missing in the request object.', 'completed');
+    if (!a.completed) { a.completed = true; a.completedAt = Date.now(); a.updatedAt = Date.now(); }
+    return { id: a.id, completed: true };
+  });
+
   // ---- callbacks [§7.14 set up, §7.15 remove, §7.16 long poll]
   app.post(p('/callback'), async (req, reply) => {
     const r = J(req).resources ?? {};

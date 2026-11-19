@@ -541,7 +541,7 @@ if ($installConnector) {
         $cargs.CaFile = $tmpCert
         Write-Host "  Visionline certificate read from $vlUrl and trusted (only this exact certificate)."
       } else {
-        $connectorNote = "Visionline at $vlUrl could not be reached or its certificate needs to be given by hand. The connector is installed; see 'Visionline certificate' in README.txt."
+        $connectorNote = "Visionline at $vlUrl could not be reached, or its certificate has expired or needs to be given by hand. The connector is installed; run Start menu -> 'Access Monitoring Tool - Visionline certificate' (see 'Visionline certificate' in README.txt)."
         Write-Host "  $connectorNote" -ForegroundColor Yellow
       }
     }

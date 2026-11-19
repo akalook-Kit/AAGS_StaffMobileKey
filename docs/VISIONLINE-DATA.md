@@ -10,7 +10,7 @@ requests only; nothing in Visionline is changed.
 | User groups and their doors | From the people in Visionline (every user carries a group), then each group is read for its doors. A group seen for the first time is read at once | **Visionline cards & people → User groups**; Settings → Visionline → Staff user groups |
 | People (name, user group) | Every 6 hours on new installations (Settings → Reports & sync) | **Visionline cards & people → People** |
 | Keycards (validity, doors, door groups) | With the people, and **within seconds** when a card is made, changed or cancelled at the Visionline desk (live feed, connector 0.9.0) | **Visionline cards & people → Keycards** |
-| Lock alarms | With the people (if Visionline has the alarms option) | Insights, Event log |
+| Lock alarms | Every 15 minutes on their own (2.38), and with the people (if Visionline has the alarms option) | Monitoring → Visionline alarms, Insights, Event log |
 
 **Refresh now** (Visionline cards & people) reads everything again straight away (administrators).
 
@@ -76,3 +76,10 @@ while idle.
 Installations whose Visionline settings were made by the installer or the setup page (never saved by a person)
 get the automatic sync switched on when 2.10 starts: every Visionline user, every 6 hours. Upgrade the connector at
 the same time (the on-premises `Install.cmd` does both) to get keycards recorded live.
+
+## What the portal writes to Visionline about alarms (2.38)
+
+Only one thing: a lock's **battery alarm** is marked completed (`POST /alarms/{id}`, `"completed": true`) once new
+batteries are seen in that lock after the alarm and the lock no longer reports low batteries. Nothing else is changed,
+other alarms (Excessive card usage included) are only read, and a read-only connector writes nothing. Switch it off in
+Settings → Reports & sync → *Close battery alarms in Visionline after new batteries*.

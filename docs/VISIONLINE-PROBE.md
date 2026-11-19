@@ -59,6 +59,43 @@ with the same SHA-256 fingerprint. The host name check is not needed then, becau
 is not a host name. This needs Node.js 22.9 or newer. When Visionline's certificate is renewed, save the
 new one and reinstall the connector with it.
 
+### When Visionline's certificate has expired (2.38.1)
+
+Visionline's own programs often do not check the date, so an expired certificate can go unnoticed for years; the
+connector refuses it ("certificate has expired"). The fix is to have it renewed on the Visionline server
+(ASSA ABLOY). To work meanwhile, run on the server **Start menu → Access Monitoring Tool - Visionline certificate**
+(`Trust-Visionline-Certificate.cmd`, as administrator). It reads the certificate Visionline presents, shows its name,
+dates and SHA-256, and after you type **ACCEPT** trusts exactly that certificate although it has expired:
+
+- only Visionline's own certificate (not a CA), and only the one with that SHA-256: any other is refused;
+- the connection is still encrypted and checked; only the expiry date is waived;
+- the connector checks the certificate before anything is sent (no password or session goes to another server);
+- the portal shows a warning (Settings → Visionline, and an alert *Visionline certificate*) until it is renewed.
+
+After the renewal, run the same shortcut again: the new certificate is trusted normally and the acceptance ends.
+
+**Renewing it (ASSA ABLOY FAQ "How to install a new SSL certificate for Visionline").** Visionline's Web API runs on
+Tomcat; its self-signed certificate (valid 1 year when Visionline is installed) is in the keystore
+`C:\ProgramData\ASSA ABLOY\Visionline\webserver\tomcat\conf\keystore`. A hotel that wants a certificate that stays
+the same for a long time can use its own domain certificate instead. Outline, best with the ASSA ABLOY technician and
+outside busy hours (the PMS interface and mobile access use the same Web API):
+
+1. Copy `tomcat\conf\keystore` and `tomcat\conf\server.xml` somewhere safe.
+2. In `server.xml`, the HTTPS `<Connector>` gives the keystore password (`keystorePass`) and, if set, `keyAlias`.
+3. With `keytool.exe` (from the Java that Visionline uses): `keytool -list -v -keystore "<keystore>"` shows the alias
+   and the expiry date.
+4. Keep the old entry under another name, then make the new one under the same alias, with the same password as the
+   keystore:
+   `keytool -changealias -alias <alias> -destalias <alias>-old -keystore "<keystore>"`
+   `keytool -genkeypair -alias <alias> -keyalg RSA -keysize 2048 -validity 1095 -dname "CN=Visionline WebService" -ext "SAN=dns:localhost,ip:127.0.0.1,dns:<server name>" -keystore "<keystore>"`
+5. Restart the Visionline web server (Tomcat) service. Check `https://localhost/api/v1` answers.
+6. Run **Access Monitoring Tool - Visionline certificate** on the server: the new certificate is trusted normally,
+   the expired acceptance ends and the portal warning closes. Other programs that check Visionline's certificate
+   (interfaces) may need the new one too.
+
+If anything goes wrong, put the two copied files back and restart the service.
+`connector.config.json` keeps it as `visionline.acceptExpiredSha256`; the probe takes `--accept-expired <sha256>`.
+
 ## Reading the result
 
 Each line is PASS, WARN, FAIL or INFO. The end shows the number of problems and the report path

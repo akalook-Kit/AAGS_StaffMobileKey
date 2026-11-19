@@ -38,6 +38,8 @@
                   Target="[INSTALLDIR]Open-StaffMobileKey.cmd" WorkingDirectory="INSTALLDIR" />
         <Shortcut Id="SetupCode" Name="Access Monitoring Tool - setup code" Description="Show the one-time code of the first-run setup page (administrators)"
                   Target="[INSTALLDIR]Show-SetupCode.cmd" WorkingDirectory="INSTALLDIR" />
+        <Shortcut Id="VlCert" Name="Access Monitoring Tool - Visionline certificate" Description="Trust Visionline's certificate again after it was renewed, or accept this exact expired certificate (administrators)"
+                  Target="[INSTALLDIR]Trust-Visionline-Certificate.cmd" WorkingDirectory="INSTALLDIR" />
         <RegistryValue Root="HKLM" Key="Software\StaffMobileKey\Server" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>

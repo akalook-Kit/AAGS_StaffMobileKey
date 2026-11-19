@@ -18,6 +18,9 @@ const Schema = z.object({
     caFile: z.string().optional(), // trust anchor for the Visionline certificate
     pinSha256: z.string().optional(), // optional certificate pin (rotate with the certificate)
     servername: z.string().optional(), // host name in the certificate, if it does not cover 127.0.0.1
+    /** 2.38.1 SHA-256 of the exact Visionline certificate the administrator accepted although it has expired
+     *  (Trust-Visionline-Certificate.cmd). Only that certificate, only the date check is waived. */
+    acceptExpiredSha256: z.string().regex(/^([0-9A-Fa-f]{2}:?){32}$/, 'A SHA-256 fingerprint').optional(),
     revokeStrategy: z.enum(['checkoutPerDoor', 'cancelCard']).default('checkoutPerDoor'),
     /** Watch Visionline for cancelled cards and refused doors [Web API §7.14]. */
     watch: z.boolean().default(true),
@@ -38,7 +41,7 @@ export function loadConfig(): ConnectorConfig {
   // Windows editors may save a byte-order mark; JSON.parse does not accept it.
   const fromFile = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) : {};
   // Empty strings in the file mean "not set".
-  for (const k of ['caFile', 'pinSha256', 'servername']) if (fromFile.visionline?.[k] === '') delete fromFile.visionline[k];
+  for (const k of ['caFile', 'pinSha256', 'servername', 'acceptExpiredSha256']) if (fromFile.visionline?.[k] === '') delete fromFile.visionline[k];
   for (const k of ['platformCaFile', 'platformPinSha256']) if (fromFile[k] === '') delete fromFile[k];
   const e = process.env;
   const merged = {
@@ -54,6 +57,7 @@ export function loadConfig(): ConnectorConfig {
       ...(e.VL_CA_FILE ? { caFile: e.VL_CA_FILE } : {}),
       ...(e.VL_PIN_SHA256 ? { pinSha256: e.VL_PIN_SHA256 } : {}),
       ...(e.VL_SERVERNAME ? { servername: e.VL_SERVERNAME } : {}),
+      ...(e.VL_ACCEPT_EXPIRED_SHA256 ? { acceptExpiredSha256: e.VL_ACCEPT_EXPIRED_SHA256 } : {}),
       ...(e.VL_REVOKE_STRATEGY ? { revokeStrategy: e.VL_REVOKE_STRATEGY } : {}),
       ...(e.VL_WATCH ? { watch: e.VL_WATCH !== 'false' } : {}),
       ...(e.VL_READ_ONLY ? { readOnly: e.VL_READ_ONLY === 'true' } : {}),

@@ -95,7 +95,7 @@ export function createState() {
     cards,
     /** Visionline alarms [Web API §5.1–5.4] and their types. */
     alarms,
-    alarmTypes: [{ id: '1', name: 'Battery alarm' }, { id: '2', name: 'Door left open' }, { id: '3', name: 'Tamper' }, { id: '4', name: 'Emergency open' }],
+    alarmTypes: [{ id: '1', name: 'Battery alarm' }, { id: '2', name: 'Door left open' }, { id: '3', name: 'Tamper' }, { id: '4', name: 'Emergency open' }, { id: '5', name: 'Excessive card usage' }],
     nextCredentialId: 1000170,
     nextCardId: 135790,
     endpoints: new Map<string, Endpoint>(),
